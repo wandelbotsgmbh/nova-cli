@@ -1,4 +1,4 @@
-# wabocli
+# Nova CLI
 
 The swiss army knife for interacting with [Wandelbots NOVA](https://www.wandelbots.com/).
 
@@ -16,4 +16,4 @@ echo 'source <(nova completion zsh)' >> ~/.zshrc
 
 ### Download Binaries
 
-Find the latest versions under https://github.com/wandelbotsgmbh/wabocli/releases
+Find the latest versions under https://github.com/wandelbotsgmbh/nova-cli/releases
