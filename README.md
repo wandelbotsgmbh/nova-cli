@@ -73,9 +73,6 @@ zivid-intel
 $ nova catalog info jupyter
 Jupyter is a free, open-source, ...
 
-$ nova catalog info jupyter
-Jupyter is a free, open-source, ...
-
 # install entry to your instance
 $ nova catalog install jupyter
 ```
