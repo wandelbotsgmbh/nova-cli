@@ -19,6 +19,15 @@ To fix this, go to `Settings` -> `Privacy & Security` and click `Open Anyway`
 
 ![](settings.jpeg)
 
+### Windows
+
+```cmd
+# adding a new source might require admin rights and has to be done only once
+winget source add --name wandelbots --arg https://wandelbotsgmbh.github.io/winget-pkgs
+
+winget install NovaCLI
+```
+
 ### Other Platforms
 
 Find the latest binaries under https://github.com/wandelbotsgmbh/nova-cli/releases
