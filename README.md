@@ -22,7 +22,7 @@ To fix this, go to `Settings` -> `Privacy & Security` and click `Open Anyway`
 ### Windows
 
 **Note** The certificate is currently self-signed and might need to be added manually to your computer.
-To do so, please download the [source.msix](https://wandelbotsgmbh.github.io/winget-pkgs/) and follow [these instructions](https://www.advancedinstaller.com/install-test-certificate-from-msix.html) to add the certificate.
+To do so, please download the [source.msix](https://wandelbotsgmbh.github.io/winget-pkgs/source.msix) and follow [these instructions](https://www.advancedinstaller.com/install-test-certificate-from-msix.html) to add the certificate.
 
 ```bat
 winget source add --name wandelbots --arg https://wandelbotsgmbh.github.io/winget-pkgs
