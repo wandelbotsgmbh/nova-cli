@@ -19,17 +19,6 @@ To fix this, go to `Settings` -> `Privacy & Security` and click `Open Anyway`
 
 ![](settings.jpeg)
 
-### Windows
-
-**Note** The certificate is currently self-signed and might need to be added manually to your computer.
-To do so, please download the [source.msix](https://wandelbotsgmbh.github.io/winget-pkgs/source.msix) and follow [these instructions](https://www.advancedinstaller.com/install-test-certificate-from-msix.html) to add the certificate.
-
-```bat
-winget source add --name wandelbots --arg https://wandelbotsgmbh.github.io/winget-pkgs
-
-winget install NovaCLI
-```
-
 ### Other Platforms
 
 Find the latest binaries under https://github.com/wandelbotsgmbh/nova-cli/releases
