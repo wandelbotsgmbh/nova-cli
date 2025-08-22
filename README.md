@@ -19,7 +19,6 @@ The CLI helps you build and deploy applications on the NOVA platform. You can al
   - [TypeScript Application](#typescript-application)
 - [Usage](#usage)
   - [Open Homescreen](#open-homescreen)
-  - [Use App Templates](#use-app-templates)
   - [Manage Your Cell](#manage-your-cell)
 
 ## Install
@@ -130,21 +129,6 @@ To see all possibilities, check the [docs](docs/nova.md) or run `nova -h`
 
 ```bash
 $ nova homescreen
-```
-
-### Use App Templates
-
-For a more complete guide on how to develop apps, you can follow our [documentation](https://docs.wandelbots.io/24.10/intro-development/).
-
-```bash
-# create a web application using Next.js 
-$ nova app create myapp
-
-# create a Python application using FastAPI
-$ nova app create -g python_app
-
-# deploy your application 
-$ nova app install <your-nova-app>
 ```
 
 ### Manage Your Cell
