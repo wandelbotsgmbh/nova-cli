@@ -11,11 +11,13 @@ The CLI helps you build and deploy applications on the NOVA platform. You can al
   - [Other Platforms](#other-platforms)
 - [Setup](#setup)
   - [Setup OCI Registry](#setup-oci-registry)
+    - [Making Your Docker Registry Private](#making-your-docker-registry-private)
   - [Configure Nova CLI](#configure-nova-cli)
   - [Login to Your Instance](#login-to-your-instance)
 - [App Store](#app-store)
 - [App Templates](#app-templates)
   - [NovaX Applications](#novax-applications)
+    - [Preconfigured Prompts](#preconfigured-prompts)
   - [TypeScript Application](#typescript-application)
 - [Usage](#usage)
   - [Open Homescreen](#open-homescreen)
@@ -62,6 +64,13 @@ To deploy applications, you need a container registry that NOVA can pull your ap
    ```bash
    nova config set image-registry registry-1.docker.io/MY-DOCKER-USERNAME
    ```
+
+#### Making Your Docker Registry Private
+
+If you are using Docker Hub and do not want to make your image available to the public, you can switch your Docker Hub repository to private:
+
+1. Go to your repository settings on Docker Hub
+2. Switch the repository to "Make private"
 
 ### Configure Nova CLI
 
@@ -111,6 +120,21 @@ The Nova CLI provides app templates so you can easily create new applications. C
 NovaX Applications is a Python project built with uv and FastAPI. It comes with default FastAPI routes but gives you full control over the FastAPI application. This is the fastest way to create custom applications with your robotics programs, powered by our Python SDK.
 
 The NovaX application comes with default GitHub Copilot prompts so you can develop a robotics application and deploy it to your Nova instance with the help of Copilot, without writing a single line of code. We hope this will lower the barrier to using our tools for people without a software background and motivate them to take advantage of Nova and Copilot.
+
+#### Preconfigured Prompts
+
+The NovaX application template includes several GitHub Copilot prompts to guide you through the development process:
+
+1. **local_setup** - Helps you do the local setup, making sure everything is installed and if not, guiding through the installation steps
+2. **new_program** - Helps you write a new robotics program following best practices described in the Python SDK
+3. **start_server** - Starts the local development server
+4. **test_program** - Runs a given robotics program
+5. **deploy_app** - Guides you through deploying your application to Nova
+6. **copilot-instructions.md** - Describes the project structure and gives general guidelines about how to work in this project
+
+> **⚠️ Warning:** While working with Copilot is great and speeds up development, it can sometimes create new problems. You might struggle to communicate your needs clearly to Copilot, or it might create overly complex solutions for simple problems. We strongly recommend learning Python basics - it will help you work with AI tools much more effectively and catch issues early.
+
+Once you create a NovaX application, you can find these prompts in the `.github` folder of your project. They are written in plain English and will help you understand how to work in this repository.
 
 Learn more about NovaX Applications: https://github.com/wandelbotsgmbh/wandelbots-nova?tab=readme-ov-file#novax
 
