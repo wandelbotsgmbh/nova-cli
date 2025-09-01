@@ -11,11 +11,11 @@ The CLI helps you build and deploy applications on the NOVA platform. You can al
   - [Other Platforms](#other-platforms)
 - [Setup](#setup)
   - [Setup OCI Registry](#setup-oci-registry)
-    - [Making Your Docker Registry Private](#making-your-docker-registry-private)
   - [Configure Nova CLI](#configure-nova-cli)
   - [Login to Your Instance](#login-to-your-instance)
 - [App Store](#app-store)
 - [App Templates](#app-templates)
+  - [Creating and Installing Apps](#creating-and-installing-apps)
   - [NovaX Applications](#novax-applications)
     - [Preconfigured Prompts](#preconfigured-prompts)
   - [TypeScript Application](#typescript-application)
@@ -65,12 +65,15 @@ To deploy applications, you need a container registry that NOVA can pull your ap
    nova config set image-registry registry-1.docker.io/MY-DOCKER-USERNAME
    ```
 
-#### Making Your Docker Registry Private
-
-If you are using Docker Hub and do not want to make your image available to the public, you can switch your Docker Hub repository to private:
-
-1. Go to your repository settings on Docker Hub
-2. Switch the repository to "Make private"
+> [!WARNING]
+> **Making Your Docker Registry Private**
+> 
+> If you are using Docker Hub and do not want to make your image available to the public, you can switch your Docker Hub repository to private:
+> 
+> 1. Go to your repository settings on Docker Hub
+> 2. Switch the repository to "Make private"
+> 
+> ![Private Docker Registry](private_docker.png)
 
 ### Configure Nova CLI
 
@@ -89,7 +92,11 @@ nova config set host 192.168.1.100
 Once you have configured your CLI, authenticate with your Nova instance:
 
 ```bash
+# Login to production environment (default)
 nova login
+
+# Login to a specific environment (e.g., dev)
+nova login -e dev
 ```
 
 ## App Store
@@ -113,11 +120,56 @@ $ nova catalog install jupyter
 
 ## App Templates
 
-The Nova CLI provides app templates so you can easily create new applications. Currently, there are three app templates available to help you get started quickly.
+Nova CLI provides several application templates to help you get started quickly with different types of applications.
+
+### Creating and Installing Apps
+
+**Creating Applications:**
+
+To create a new application, run:
+```bash
+nova app create my-app
+```
+
+> **💡 Tip:** If you're already logged in when you create an app, the `.env` file will automatically contain your authentication token and NOVA_API configuration, so you can start working with it immediately!
+
+**Available App Templates:**
+
+Nova CLI supports different application generators using the `-g` flag:
+
+- `novax_app` - NovaX application template (default)
+- `nextjs_app` - Next.js with TypeScript support
+
+**Example Usage:**
+
+```bash
+# Create a TypeScript/Next.js app
+nova app create 'my-typescript-app' -g "nextjs_app"
+
+# Create a NovaX app (default)
+nova app create 'my-novax-app' -g "novax_app"
+
+# or simply (uses novax_app as default)
+nova app create 'my-novax-app'
+```
+
+**Valid App Names:**
+Your app name must follow these rules:
+- Must start with a letter (a-z or A-Z)
+- Can contain letters, numbers, and hyphens (-)
+- Cannot be empty
+- Examples: `my-app`, `RobotController`, `sensor-data-processor`
+
+**Installing Your Application:**
+
+Once created and logged in, install your application with:
+```bash
+nova app install my-app
+```
 
 ### NovaX Applications
 
-NovaX Applications is a Python project built with uv and FastAPI. It comes with default FastAPI routes but gives you full control over the FastAPI application. This is the fastest way to create custom applications with your robotics programs, powered by our Python SDK.
+NovaX Applications are Python projects built with uv and FastAPI. It comes with default FastAPI routes but gives you full control over the FastAPI application. This is the fastest way to create custom applications with your robotics programs, powered by our Python SDK.
 
 The NovaX application comes with default GitHub Copilot prompts so you can develop a robotics application and deploy it to your Nova instance with the help of Copilot, without writing a single line of code. We hope this will lower the barrier to using our tools for people without a software background and motivate them to take advantage of Nova and Copilot.
 
@@ -141,6 +193,8 @@ Learn more about NovaX Applications: https://github.com/wandelbotsgmbh/wandelbot
 ### TypeScript Application
 
 The TypeScript Application is a Next.js application that comes with ready-to-use React components specifically designed for robotics applications. This template provides a solid foundation for building modern web interfaces for your Nova applications.
+
+The Next.js template (`nextjs_app`) includes TypeScript configuration (`tsconfig.json`) and provides a full TypeScript development environment with Next.js framework support.
 
 Learn more about the React components: https://github.com/wandelbotsgmbh/wandelbots-js-react-components
 
