@@ -1,19 +1,19 @@
-## nova catalog info
+## nova catalog hosts
 
-Info for specific catalog entry
+List all catalog hosts with their names
 
 ### Synopsis
 
-Info for specific catalog entry
+List all catalog hosts with their names
 
 ```
-nova catalog info <name> [flags]
+nova catalog hosts [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for info
+  -h, --help   help for hosts
 ```
 
 ### SEE ALSO
