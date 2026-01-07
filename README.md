@@ -4,25 +4,6 @@ The Swiss Army knife for interacting with [Wandelbots NOVA](https://www.wandelbo
 
 The CLI helps you build and deploy applications on the NOVA platform. You can also use it to download diagnostic logs and manage your applications. Your application is built as an OCI image, pushed to the specified registry, and then deployed on the specified instance.
 
-## Table of Contents
-
-- [Install](#install)
-  - [MacOS/Linux](#macoslinux)
-  - [Other Platforms](#other-platforms)
-- [Setup](#setup)
-  - [Setup OCI Registry](#setup-oci-registry)
-  - [Configure Nova CLI](#configure-nova-cli)
-  - [Login to Your Instance](#login-to-your-instance)
-- [App Store](#app-store)
-- [App Templates](#app-templates)
-  - [Creating and Installing Apps](#creating-and-installing-apps)
-  - [NovaX Applications](#novax-applications)
-    - [Preconfigured Prompts](#preconfigured-prompts)
-  - [TypeScript Application](#typescript-application)
-- [Usage](#usage)
-  - [Open Homescreen](#open-homescreen)
-  - [Manage Your Cell](#manage-your-cell)
-
 ## Install
 
 ### MacOS/Linux
@@ -75,17 +56,33 @@ To deploy applications, you need a container registry that NOVA can pull your ap
 > 
 > ![Private Docker Registry](private_docker.png)
 
-### Configure Nova CLI
+#### Obtaining Registry Credentials (building and installing projects with `nova app install`)
 
-Configure your Nova CLI host. For physical instances, use the IP address (e.g., `192.168.1.100`). For virtual/cloud instances, use the URL (e.g., `my.instance.wandelbots.io`). If you don't specify the host, the CLI will use `local` as the default.
+By default developing/installing apps with `nova app install path/to/project` will try to obtain registry credentials from your local docker config.
+This means, credentials might be leaked into a Nova instance/cell configuration.
+The credentials are needed by kubernetes in order to pull images from private registries. Even public registries might need some authentication in order to prevent being rate limited.
+
+In order to prevent your credentials from being leaked you have multiple options:
+
+* use specific scoped access tokens when calling `docker login`
+* specify pull only username and token in `.nova` file in your project
+* install kubernetes secrets manually and reference them in `.nova` or provide the name via flag `nova app install yourapp -r custom-secret-name`
+* omit your credentials and use Wandelbots defaults `nova app install yourapp -o`
+
+##### Azure ACR
+
+The Azure Container Registry normally has the following login flow:
 
 ```bash
-# For cloud instances
-nova config set host your_instance_id.instance.wandelbots.io
+# login to azure (only needed once)
+az login
 
-# For physical instances  
-nova config set host 192.168.1.100
+# login to acr (needed every 3 hours)
+az acr login -n registryname
 ```
+
+With that, docker configs will get an `IdentityToken` which is used by the Nova CLI to create a pull token,
+which is only valid for a specific registry/image for a limited period of time.
 
 ### Login to Your Instance
 
@@ -98,6 +95,35 @@ nova login
 # Login to a specific environment (e.g., dev)
 nova login -e dev
 ```
+
+### Configure Nova CLI
+
+Configure your Nova CLI host. For physical instances, use the IP address (e.g., `192.168.1.100`). For virtual/cloud instances, use the URL (e.g., `my.instance.wandelbots.io`).
+
+for cloud instances:
+```bash
+# create instance if not exists yet
+nova instance create --name my-instance
+
+# listing instances
+nova instance list
+
+# selecting an instance
+nova instance select instanceid
+```
+
+manually setting the instance:
+```bash
+# For cloud instances
+nova config set host your_instance_id.instance.wandelbots.io
+
+# For physical instances  
+nova config set host 192.168.1.100
+```
+
+## Usage
+
+For an overview and description of all available commands have a look at the [docs](docs/nova.md).
 
 ## App Store
 
@@ -197,11 +223,6 @@ The TypeScript Application is a Next.js application that comes with ready-to-use
 The Next.js template (`nextjs_app`) includes TypeScript configuration (`tsconfig.json`) and provides a full TypeScript development environment with Next.js framework support.
 
 Learn more about the React components: https://github.com/wandelbotsgmbh/wandelbots-js-react-components
-
-## Usage
-
-The following examples give you a rough overview of what's possible with the CLI.
-To see all possibilities, check the [docs](docs/nova.md) or run `nova -h`
 
 ### Open Homescreen
 
