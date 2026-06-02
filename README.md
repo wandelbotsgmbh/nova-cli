@@ -25,7 +25,29 @@ To fix this, go to `Settings` → `Privacy & Security` and click `Open Anyway`
 
 Find the latest binaries at https://github.com/wandelbotsgmbh/nova-cli/releases
 
-Download the binary, rename it to `nova`, and make it executable. Make sure to grant the file execute permissions, as the program is not signed. Add it to your PATH and you should be ready for lift-off 🚀
+## Linux binary install
+
+**Extract and install** the binary to `~/.local/bin`:
+
+   ```bash
+   mkdir -p ~/.local/bin
+   tar -xzf ~/Downloads/novacli_linux_amd64-*.tar.gz -C ~/.local/bin
+   mv ~/.local/bin/novacli ~/.local/bin/nova   # rename if the binary isn't already called `nova, this might not be necessary`
+   chmod +x ~/.local/bin/nova
+   ```
+
+**Add `~/.local/bin` to your PATH** (skip if it's already there):
+
+   ```bash
+   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+   source ~/.bashrc
+   ```
+
+**Verify the installation**:
+
+   ```bash
+   nova version
+   ```
 
 [Completions are available](docs/nova_completion.md) for the most common terminals.
 
