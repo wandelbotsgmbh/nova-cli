@@ -8,7 +8,7 @@ require (
 	github.com/docker/cli v29.0.3+incompatible
 	github.com/google/go-containerregistry v0.20.7
 	github.com/hashicorp/go-version v1.7.0
-	github.com/mark3labs/mcp-go v0.23.1
+	github.com/mark3labs/mcp-go v1.4.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/modelpack/modctl v0.2.1-0.20260506024328-1d480ded52ab
 	github.com/oapi-codegen/runtime v1.1.2
@@ -75,6 +75,7 @@ require (
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
+	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/s2a-go v0.1.8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
@@ -97,6 +98,7 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/sanity-io/litter v1.5.8 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/sosodev/duration v1.3.1 // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
