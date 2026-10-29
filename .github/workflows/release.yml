@@ -96,7 +96,7 @@ jobs:
           # real release: build exactly the tag semantic-release created
           ref: ${{ needs.version.outputs.dry_run == 'true' && github.sha || needs.version.outputs.version }}
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
