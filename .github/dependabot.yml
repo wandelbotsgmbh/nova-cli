@@ -21,3 +21,13 @@ updates:
       interval: weekly
     commit-message:
       prefix: "chore(docker)"
+  # template that `nova app create` copies into new NextJS apps
+  - package-ecosystem: npm
+    directory: /pkg/generator/NextJsApp
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "fix(deps)"
+    groups:
+      nextjs-template:
+        update-types: [minor, patch]
