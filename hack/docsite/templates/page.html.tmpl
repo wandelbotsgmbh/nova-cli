@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{if eq .Page .Root}}NOVA CLI reference{{else}}{{.Page.Name}} · NOVA CLI{{end}}</title>
+  <meta name="description" content="{{.Page.Short}}">
+  <meta name="color-scheme" content="dark">
+  <link rel="stylesheet" href="assets/vendor/design-tokens/variables.css">
+  <link rel="stylesheet" href="assets/vendor/fonts/inter.css">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body{{if eq .Page .Root}} class="is-index"{{end}}>
+  <header class="topbar">
+    <button class="nav-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle navigation">
+      <span></span><span></span><span></span>
+    </button>
+    <a class="brand" href="index.html">
+      <span class="brand-mark">NOVA</span>
+      <span class="brand-name">CLI reference</span>
+    </a>
+    <span class="version">{{.Version}}</span>
+    <a class="repo-link" href="{{.Repo}}">GitHub</a>
+  </header>
+
+  <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="Commands">
+      <label class="search">
+        <span class="visually-hidden">Filter commands</span>
+        <input id="nav-filter" type="search" placeholder="Filter commands" autocomplete="off">
+        <kbd>/</kbd>
+      </label>
+      <ul class="nav">
+        <li data-cmd="overview"><a href="{{.Root.File}}"{{if eq .Page .Root}} aria-current="page"{{end}}>Overview</a></li>
+        {{range .Root.Children}}{{template "nav" (dict . $.Page)}}{{end}}
+      </ul>
+      <p class="nav-empty" hidden>No matching command</p>
+    </nav>
+
+    <main class="content">
+      {{if .Crumbs}}
+      <ol class="crumbs">
+        {{range .Crumbs}}<li><a href="{{.File}}">{{.Name}}</a></li>{{end}}
+      </ol>
+      {{end}}
+      <h1><code>{{.Page.Name}}</code></h1>
+
+      {{if eq .Page .Root}}
+      <section class="cards" aria-label="Commands">
+        {{range .Page.Children}}
+        <a class="card" href="{{.File}}">
+          <span class="card-title">{{leaf .Name}}</span>
+          <span class="card-text">{{.Short}}</span>
+        </a>
+        {{end}}
+      </section>
+      {{end}}
+
+      <article class="markdown">
+        {{.Page.Content}}
+      </article>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      var toggle = document.querySelector(".nav-toggle");
+      toggle.addEventListener("click", function () {
+        var open = document.body.classList.toggle("nav-open");
+        toggle.setAttribute("aria-expanded", String(open));
+      });
+
+      var input = document.getElementById("nav-filter");
+      var empty = document.querySelector(".nav-empty");
+      var items = Array.prototype.slice.call(document.querySelectorAll(".nav li"));
+      var groups = Array.prototype.slice.call(document.querySelectorAll(".nav details"));
+      var initiallyOpen = groups.map(function (d) { return d.open; });
+
+      input.addEventListener("input", function () {
+        var q = input.value.trim().toLowerCase();
+        var any = false;
+        items.forEach(function (li) {
+          var match = !q || li.dataset.cmd.indexOf(q) !== -1;
+          li.hidden = !match;
+          any = any || match;
+        });
+        // keep a group visible when one of its subcommands matches
+        groups.forEach(function (d, i) {
+          var li = d.parentElement;
+          var childMatch = d.querySelector("li:not([hidden])") !== null;
+          if (q && childMatch) li.hidden = false;
+          d.open = q ? childMatch || !li.hidden : initiallyOpen[i];
+        });
+        empty.hidden = any;
+      });
+
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "/" && document.activeElement !== input) {
+          e.preventDefault();
+          input.focus();
+        } else if (e.key === "Escape" && document.activeElement === input) {
+          input.value = "";
+          input.dispatchEvent(new Event("input"));
+          input.blur();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
+{{define "nav"}}{{$p := index . "p"}}{{$cur := index . "cur"}}
+<li data-cmd="{{$p.Name}}">
+  {{if $p.Children}}
+  <details{{if isAncestor $p $cur}} open{{end}}>
+    <summary><a href="{{$p.File}}"{{if eq $p $cur}} aria-current="page"{{end}}>{{leaf $p.Name}}</a></summary>
+    <ul>
+      {{range $p.Children}}{{template "nav" (dict . $cur)}}{{end}}
+    </ul>
+  </details>
+  {{else}}
+  <a href="{{$p.File}}"{{if eq $p $cur}} aria-current="page"{{end}}>{{leaf $p.Name}}</a>
+  {{end}}
+</li>
+{{end}}

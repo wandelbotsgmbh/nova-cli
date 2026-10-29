@@ -12,6 +12,9 @@ name: Release
 #   WINGET_ENABLED       trigger the wandelbotsgmbh/winget-pkgs update
 #   DOCKER_PUSH_ENABLED  push ghcr.io/wandelbotsgmbh/nova-cli:{<ver>,latest}
 #                        (otherwise pushes only ghcr.io/wandelbotsgmbh/nova-cli:<ver>-snapshot)
+#   DOCS_ENABLED         deploy the CLI reference to GitHub Pages (needs Settings →
+#                        Pages → Source: "GitHub Actions"); otherwise the site is
+#                        only built and kept as workflow artifact
 
 on:
   push:
@@ -197,3 +200,43 @@ jobs:
             FLAGS=-X 'github.com/wandelbotsgmbh/nova-cli/pkg/version.cliVersion=${{ env.VERSION }}'
           tags: ${{ steps.tags.outputs.tags }}
           push: true
+
+  # CLI reference (cobra markdown rendered with the NOVA design system, see
+  # hack/docsite) for GitHub Pages.
+  docs:
+    needs: version
+    if: needs.version.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.dry_run == 'true' && github.sha || needs.version.outputs.version }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build site
+        run: hack/docsite/build.sh "$VERSION"
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  docs-deploy:
+    needs: [version, docs]
+    if: needs.version.outputs.dry_run != 'true' && vars.DOCS_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
