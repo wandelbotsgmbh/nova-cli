@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=$GOPATH \
     : "${FLAGS:?please provide --build-args FLAGS.}" && \
     GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="${FLAGS}" -o nova .
 
-FROM docker.io/library/alpine:3.22
+FROM docker.io/library/alpine:3.24
 
 # links the GHCR package to the repo (README, visibility, permissions)
 LABEL org.opencontainers.image.source="https://github.com/wandelbotsgmbh/nova-cli"
