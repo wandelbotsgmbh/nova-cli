@@ -54,20 +54,3 @@ func ConvertToValidSubdomainName(input string) (string, error) {
 // Normally GH provides the root folder in this scheme: `OWNER-REPO-COMMITHASH`
 // e.g. wandelbotsgmbh-wandelbots-js-robot-visualization-0a242ec
 //
-// This function makes it to wandelbots-js-robot-visualization
-func TrimGithubArchiveName(name string) string {
-	first := strings.Index(name, "-")
-	last := strings.LastIndex(name, "-")
-
-	if first == -1 || last == -1 {
-		return name
-	}
-
-	if first == last {
-		return name
-	}
-
-	out := name[first+1:]
-	last = strings.LastIndex(out, "-")
-	return out[:last]
-}

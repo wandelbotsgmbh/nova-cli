@@ -10,13 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v65/github"
 	apiv1 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova"
 	apiv2 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova/v2"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/credentials"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/docker"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/editor"
-	"github.com/wandelbotsgmbh/nova-cli/pkg/examples"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/generator"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
@@ -27,7 +25,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -449,57 +446,6 @@ var editAppCmd = &cobra.Command{
 	},
 }
 
-var exampleAppCmd = &cobra.Command{
-	Use:   "example",
-	Short: "DEPRECATED: List or get example apps",
-	Long:  exampleAppTxtLong,
-}
-
-var exampleListAppCmd = &cobra.Command{
-	Use:   "list",
-	Short: "DEPRECATED: Lists all example apps",
-	Long:  `DEPRECATED: Lists all example apps."`,
-	Run: func(cmd *cobra.Command, args []string) {
-		tmpl := examples.NewApp()
-		apps, err := tmpl.ListExampleApps()
-		if err != nil {
-			apps = []*github.Repository{}
-		}
-
-		table := tablewriter.NewWriter(cmd.OutOrStdout())
-		table.SetHeader([]string{"Name", "Description", "URL"})
-
-		for _, app := range apps {
-			table.Append([]string{*app.Name, *app.Description, *app.HTMLURL})
-		}
-		table.Render()
-	},
-}
-
-var exampleGetAppCmd = &cobra.Command{
-	Use:               "get <name>",
-	Short:             "DEPRECATED: Gets the selected example app",
-	Long:              `DEPRECATED: Gets the selected example app."`,
-	ValidArgsFunction: completeGetAppTemplate,
-	Args:              cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		tpl := examples.NewApp()
-		repos, err := tpl.ListExampleApps()
-		if err != nil {
-			return err
-		}
-
-		selectedApp := args[0]
-
-		for _, repo := range repos {
-			if *repo.Name == selectedApp {
-				return tpl.DownloadAppTemplate(repo)
-			}
-		}
-		return fmt.Errorf("app template not found: '%s'", selectedApp)
-	},
-}
-
 func init() {
 	rootCmd.AddCommand(appCmd)
 
@@ -508,12 +454,7 @@ func init() {
 	appCmd.AddCommand(installAppCmd)
 	appCmd.AddCommand(listAppsCmd)
 	appCmd.AddCommand(deleteAppCmd)
-	appCmd.AddCommand(exampleAppCmd)
 	appCmd.AddCommand(editAppCmd)
-
-	// subcommands for template
-	exampleAppCmd.AddCommand(exampleListAppCmd)
-	exampleAppCmd.AddCommand(exampleGetAppCmd)
 
 	// TODO generate this flag somehow, with the available generators?
 	// Otherwise possible apps needs to be put into the readme by hand.
@@ -853,26 +794,6 @@ func (app *DotNovaApp) verify() error {
 		return fmt.Errorf("app name is missing")
 	}
 	return nil
-}
-
-func completeGetAppTemplate(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	// TODO would be nice to cache this somehow
-	tmpl := examples.NewApp()
-	apps, err := tmpl.ListExampleApps()
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-
-	var comp []string
-
-	for _, app := range apps {
-		name := *app.Name
-		if toComplete == "" || strings.HasPrefix(name, toComplete) {
-			comp = append(comp, name)
-		}
-	}
-
-	return comp, cobra.ShellCompDirectiveNoFileComp
 }
 
 func completeApp(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
