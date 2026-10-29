@@ -24,7 +24,6 @@ Create and install apps on Wandelbots NOVA OS
 * [nova app create](nova_app_create.md)	 - Creates a new app for Wandelbots NOVA OS
 * [nova app delete](nova_app_delete.md)	 - Deletes an app from Wandelbots NOVA OS
 * [nova app edit](nova_app_edit.md)	 - edit an app configuration
-* [nova app example](nova_app_example.md)	 - DEPRECATED: List or get example apps
 * [nova app install](nova_app_install.md)	 - Installs an app to Wandelbots NOVA OS
 * [nova app list](nova_app_list.md)	 - Lists all installed apps
 

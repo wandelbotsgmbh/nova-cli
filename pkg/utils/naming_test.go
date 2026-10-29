@@ -72,27 +72,3 @@ func TestConvertToValidSubdomainName(t *testing.T) {
 		})
 	}
 }
-
-func TestTrimGithubArchiveName(t *testing.T) {
-	testCases := []struct {
-		input    string
-		expected string
-	}{
-		{"wandelbotsgmbh-repo-1234567", "repo"},
-		{"wandelbotsgmbh-repo-with-1234567", "repo-with"},
-		{"user-project-abcdefg", "project"},
-		{"organization-repo-9876543", "repo"},
-		{"example-repo-1234", "repo"},
-		// unexpected input thus we return the same string
-		{"repo-1234", "repo-1234"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.input, func(t *testing.T) {
-			result := TrimGithubArchiveName(tc.input)
-			if result != tc.expected {
-				t.Errorf("expected %s, got %s", tc.expected, result)
-			}
-		})
-	}
-}

@@ -7,7 +7,6 @@ require (
 	github.com/coder/websocket v1.8.14
 	github.com/docker/cli v29.0.3+incompatible
 	github.com/google/go-containerregistry v0.20.7
-	github.com/google/go-github/v65 v65.0.0
 	github.com/hashicorp/go-version v1.7.0
 	github.com/mark3labs/mcp-go v0.23.1
 	github.com/mitchellh/go-homedir v1.1.0

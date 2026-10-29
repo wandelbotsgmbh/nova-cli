@@ -27,6 +27,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // Client → Server message types.
@@ -85,12 +86,7 @@ func BuildRequest(requestID uint32, interfaceName, methodName string, params any
 	binary.LittleEndian.PutUint32(lenBuf, uint32(len(paramsJSON)))
 
 	// Assemble: header + method\0 + paramsLen + paramsJSON
-	msg := make([]byte, 0, len(header)+len(methodBytes)+4+len(paramsJSON))
-	msg = append(msg, header...)
-	msg = append(msg, methodBytes...)
-	msg = append(msg, lenBuf...)
-	msg = append(msg, paramsJSON...)
-	return msg, nil
+	return slices.Concat(header, methodBytes, lenBuf, paramsJSON), nil
 }
 
 // BuildResponse packs a SOWS type-1 (Response) message.
@@ -101,15 +97,14 @@ func BuildResponse(requestID uint32, last bool, params any) ([]byte, error) {
 		return nil, fmt.Errorf("marshal params: %w", err)
 	}
 
-	buf := make([]byte, 10+len(paramsJSON))
-	buf[0] = TypeResponse
-	binary.LittleEndian.PutUint32(buf[1:5], requestID)
+	header := make([]byte, 10)
+	header[0] = TypeResponse
+	binary.LittleEndian.PutUint32(header[1:5], requestID)
 	if last {
-		buf[5] = 1
+		header[5] = 1
 	}
-	binary.LittleEndian.PutUint32(buf[6:10], uint32(len(paramsJSON)))
-	copy(buf[10:], paramsJSON)
-	return buf, nil
+	binary.LittleEndian.PutUint32(header[6:10], uint32(len(paramsJSON)))
+	return slices.Concat(header, paramsJSON), nil
 }
 
 // ParseResponse parses a SOWS response message from raw bytes.
