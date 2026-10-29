@@ -130,14 +130,16 @@ func ParseResponse(data []byte) (*Response, error) {
 		if len(data) < 10 {
 			return nil, fmt.Errorf("sows response body too short")
 		}
-		resp.Last = data[5] != 0
-		paramsLen := binary.LittleEndian.Uint32(data[6:10])
-		if uint32(len(data)) < 10+paramsLen {
-			return nil, fmt.Errorf("sows params truncated: want %d, have %d", paramsLen, len(data)-10)
+		// Header: last(1) + paramsLen(4), followed by params JSON and optional binary.
+		hdr, body := data[5:10], data[10:]
+		resp.Last = hdr[0] != 0
+		paramsLen := uint64(binary.LittleEndian.Uint32(hdr[1:5]))
+		if paramsLen > uint64(len(body)) {
+			return nil, fmt.Errorf("sows params truncated: want %d, have %d", paramsLen, len(body))
 		}
-		resp.ParamsJSON = json.RawMessage(data[10 : 10+paramsLen])
-		if uint32(len(data)) > 10+paramsLen {
-			resp.Binary = data[10+paramsLen:]
+		resp.ParamsJSON = json.RawMessage(body[:paramsLen])
+		if rest := body[paramsLen:]; len(rest) > 0 {
+			resp.Binary = rest
 		}
 
 	case TypeContResp:

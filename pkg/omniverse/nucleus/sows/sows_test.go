@@ -122,3 +122,11 @@ func TestParseResponseTooShort(t *testing.T) {
 		t.Fatal("expected error for short data")
 	}
 }
+
+func TestParseResponseParamsLenOverflow(t *testing.T) {
+	// paramsLen = 0xFFFFFFFF would wrap 10+paramsLen to 9 in uint32 arithmetic.
+	data := []byte{TypeResponse, 1, 0, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, '{', '}'}
+	if _, err := ParseResponse(data); err == nil {
+		t.Fatal("expected error for oversized paramsLen")
+	}
+}

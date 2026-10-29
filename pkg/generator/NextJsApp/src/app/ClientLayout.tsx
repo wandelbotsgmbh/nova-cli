@@ -3,11 +3,8 @@
 import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeProvider } from "@mui/material/styles";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  createNovaMuiTheme,
-  LoadingCover,
-} from "@wandelbots/wandelbots-js-react-components/core";
-import { Suspense, useEffect, useState } from "react";
+import { createNovaMuiTheme } from "@wandelbots/wandelbots-js-react-components/core";
+import { useEffect, useState } from "react";
 import { env as runtimeEnv } from "@/runtimeEnv.ts";
 
 const queryClient = new QueryClient();
