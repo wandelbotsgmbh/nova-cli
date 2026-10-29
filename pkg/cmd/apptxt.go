@@ -85,6 +85,3 @@ const editAppTxtLong = `Edits the configuration of an app directly in your favor
 If the files content changed, the app configuration is updated after closing the editor.
 
 If you want to change the editor you can call 'nova config set editor "code --wait"' to use Visual Studio Code.`
-
-const exampleAppTxtLong = `Choose example apps for different specific use cases.
-You can either list or download them, to explore or modify the code in your favorite IDE.`

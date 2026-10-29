@@ -363,10 +363,7 @@ func (c *Client) writeFileConnlib(ctx context.Context, path string, content []by
 	}
 
 	// Connlib binary payload: json + \0 + binary
-	payload := make([]byte, 0, len(jsonData)+1+len(content))
-	payload = append(payload, jsonData...)
-	payload = append(payload, 0)
-	payload = append(payload, content...)
+	payload := bytes.Join([][]byte{jsonData, content}, []byte{0})
 
 	ch := c.conn.Register(id)
 	defer c.conn.Unregister(id)

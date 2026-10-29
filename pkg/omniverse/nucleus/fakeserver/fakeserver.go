@@ -337,10 +337,7 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 				"id":     id,
 				"size":   len(content),
 			})
-			frame := make([]byte, 0, len(respJSON)+1+len(content))
-			frame = append(frame, respJSON...)
-			frame = append(frame, 0)
-			frame = append(frame, content...)
+			frame := bytes.Join([][]byte{respJSON, content}, []byte{0})
 			conn.Write(ctx, websocket.MessageBinary, frame)
 
 		default:
