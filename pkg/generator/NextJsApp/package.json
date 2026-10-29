@@ -30,6 +30,6 @@
     "@types/node": "^24",
     "@types/react": "^19.2.7",
     "knip": "^5.75.1",
-    "typescript": "5.9.3"
+    "typescript": "6.0.3"
   }
 }
