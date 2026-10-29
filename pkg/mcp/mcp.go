@@ -44,13 +44,9 @@ func RunOpenAPIMCPServer(host string) error {
 	}
 
 	// Build the model
-	docModel, errs := document.BuildV3Model()
-	if len(errs) > 0 {
-		var errorMsgs []string
-		for _, e := range errs {
-			errorMsgs = append(errorMsgs, e.Error())
-		}
-		return fmt.Errorf("errors building OpenAPI model from %s: %s", host, strings.Join(errorMsgs, "; "))
+	docModel, err := document.BuildV3Model()
+	if err != nil {
+		return fmt.Errorf("errors building OpenAPI model from %s: %w", host, err)
 	}
 	if docModel == nil {
 		return fmt.Errorf("failed to build OpenAPI model from %s, but no errors reported", host)
@@ -302,14 +298,14 @@ func (h *operationHandler) handleToolCall(ctx context.Context, req mcp.CallToolR
 	// Context (method, path, baseURL) comes from the handler 'h'
 
 	// Build the full URL using arguments from the request
-	fullURL, err := buildURLFromRequest(h.BaseURL, h.Path, req.Params.Arguments)
+	fullURL, err := buildURLFromRequest(h.BaseURL, h.Path, req.GetArguments())
 	if err != nil {
 		return nil, fmt.Errorf("failed to build URL for %s %s: %w", h.Method, h.Path, err)
 	}
 
 	// Prepare request body if applicable
 	var requestBody io.Reader
-	bodyContent, hasBody := req.Params.Arguments["body"]
+	bodyContent, hasBody := req.GetArguments()["body"]
 	if hasBody && (h.Method == http.MethodPost || h.Method == http.MethodPut || h.Method == http.MethodPatch) {
 		// Assume body is JSON marshalable
 		bodyBytes, err := json.Marshal(bodyContent)
