@@ -20,7 +20,7 @@
     "@mui/material-nextjs": "^7.3.6",
     "@tanstack/react-query": "^5.90.12",
     "@wandelbots/nova-js": "3.5.4",
-    "@wandelbots/wandelbots-js-react-components": "^5.3.0",
+    "@wandelbots/wandelbots-js-react-components": "^6.3.0",
     "next": "^16.4.3",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
