@@ -1,0 +1,10 @@
+bin/
+.DS_Store
+kubeconfig
+*.cell
+.idea/
+__pycache__/
+/nova
+your-nova-app/
+dist/
+.next-version

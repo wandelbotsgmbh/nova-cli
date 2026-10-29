@@ -1,0 +1,194 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::files not formatted with gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - run: go vet ./...
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test -race -coverprofile=coverage.txt ./...
+      - name: Coverage summary
+        run: |
+          total=$(go tool cover -func=coverage.txt | tail -1 | awk '{print $NF}')
+          echo "Total coverage: $total"
+          echo "**Total coverage:** $total" >> "$GITHUB_STEP_SUMMARY"
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  # Integration tests for the podman container runtime (nova app install /
+  # nova model build support podman as an alternative to docker). Runs the
+  # build-tagged tests in pkg/docker against a local registry service.
+  test-podman:
+    runs-on: ubuntu-latest
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    env:
+      NOVA_TEST_REGISTRY: localhost:5000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Configure podman
+        run: |
+          podman --version
+          # the registry service is plain http; mark it insecure for podman push/inspect
+          sudo mkdir -p /etc/containers/registries.conf.d
+          printf '[[registry]]\nlocation = "localhost:5000"\ninsecure = true\n' \
+            | sudo tee /etc/containers/registries.conf.d/test-registry.conf
+      - run: go test -v -tags integration -run TestPodman ./pkg/docker/
+
+  # Validates the GoReleaser config and that all release archives build.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-archives
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          retention-days: 3
+
+  # Builds the docker image without pushing.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            FLAGS=-X 'github.com/wandelbotsgmbh/nova-cli/pkg/version.cliVersion=ci-${{ github.sha }}'
+          push: false
+
+  # End-to-end test against a temporary instance on the prod portal: install a
+  # cell, create an app and install it. The app image goes to a private GHCR
+  # package; `nova app install` hands the docker login to the instance as pull
+  # secret. Needs secrets, so it's skipped for fork and Dependabot PRs.
+  e2e:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository
+        && github.actor != 'dependabot[bot]')
+    needs: [build]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PORTAL_PROD_REFRESH_TOKEN: ${{ secrets.PORTAL_PROD_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build nova
+        run: |
+          CGO_ENABLED=0 go build -o bin/nova .
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create cloud instance
+        run: |
+          nova login --token "$PORTAL_PROD_REFRESH_TOKEN"
+          nova instance create --name "nova-cli-ci-${{ github.run_id }}-${{ github.run_attempt }}" --timeout 900
+          echo "INSTANCE_HOST=$(nova instance info --host)" >> "$GITHUB_ENV"
+      - name: Install cell
+        run: |
+          cat testdata/cell.yaml
+          nova cell install testdata/cell.yaml
+      - name: Create and install app
+        run: |
+          nova config set image-registry ghcr.io/wandelbotsgmbh/nova-cli-e2e
+          nova app create your-nova-app
+          nova app install your-nova-app
+      - name: Check app is reachable
+        run: |
+          INSTANCE_TOKEN=$(nova login token)
+          echo "::add-mask::$INSTANCE_TOKEN"
+          export INSTANCE_TOKEN
+          . testdata/app_health_check.sh
+          check_app_reachability "your-nova-app"
+      # every run moves :latest, the previous image stays untagged; keep the newest 10
+      - name: Prune old e2e images
+        continue-on-error: true
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: nova-cli-e2e/your-nova-app
+          package-type: container
+          min-versions-to-keep: 10
+      - name: Download diagnosis package
+        if: failure()
+        run: nova diagnosis download || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: diagnosis-${{ github.run_id }}
+          path: diagnosis.zip
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Delete cloud instance
+        if: always()
+        run: |
+          INSTANCE_ID=$(nova instance info --instanceId) || exit 0
+          nova instance delete "$INSTANCE_ID"

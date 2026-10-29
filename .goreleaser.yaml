@@ -1,0 +1,61 @@
+# Builds the release archives and attaches them to the GitHub release that
+# semantic-release created (see .github/workflows/release.yml).
+#
+# Archive names match the ones published from GitLab, so Homebrew, winget and
+# existing download links keep working:
+#   novacli_macos_arm64-<ver>.tar.gz, novacli_linux_amd64-<ver>.tar.gz, ...
+#   novacli_win64-<ver>.tar.gz + novacli_win64-<ver>.zip
+#
+# Local check: goreleaser check && goreleaser release --snapshot --clean
+version: 2
+
+project_name: novacli
+
+builds:
+  - id: nova
+    binary: nova
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -X 'github.com/wandelbotsgmbh/nova-cli/pkg/version.cliVersion={{ .Version }}'
+
+archives:
+  - id: nova
+    ids: [nova]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [tar.gz, zip]
+    name_template: >-
+      novacli_
+      {{- if eq .Os "darwin" }}macos_{{ .Arch }}
+      {{- else if eq .Os "windows" }}win64
+      {{- else }}{{ .Os }}_{{ .Arch }}{{ end }}
+      {{- "-" }}{{ .Version }}
+    # only the binary, no README/LICENSE (same as before)
+    files:
+      - none*
+
+# not published before; keep the asset list unchanged
+checksum:
+  disable: true
+
+changelog:
+  disable: true
+
+snapshot:
+  version_template: '{{ envOrDefault "NOVA_VERSION" "0.0.0" }}-snapshot'
+
+release:
+  github:
+    owner: wandelbotsgmbh
+    name: nova-cli
+  # semantic-release already created the release with notes
+  mode: keep-existing
+  replace_existing_artifacts: true
