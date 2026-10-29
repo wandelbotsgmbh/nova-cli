@@ -20,6 +20,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/wandelbotsgmbh/nova-api-client-go/v25 v25.8.0-dev.6
+	github.com/yuin/goldmark v1.8.6
 	github.com/zalando/go-keyring v0.2.4
 	golang.org/x/oauth2 v0.36.0
 	gopkg.in/yaml.v3 v3.0.1

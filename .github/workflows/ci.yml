@@ -102,6 +102,26 @@ jobs:
             dist/*.zip
           retention-days: 3
 
+  # Builds the CLI reference site (deployed on release); download the artifact
+  # to preview it.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: hack/docsite/build.sh "ci-${GITHUB_SHA::7}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: docs-site
+          path: _site
+          include-hidden-files: true
+          retention-days: 3
+
   # Builds the docker image without pushing.
   docker:
     runs-on: ubuntu-latest

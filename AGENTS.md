@@ -6,6 +6,7 @@
 * After building, use `nova` in terminal for testing
 * Use `nova config view` for getting configured values (host, nucleus-token, etc.)
 * Do not rebuild the docs - this is a manual process for the user
+* CLI reference site (GitHub Pages, deployed by the release workflow): `hack/docsite/build.sh [version]` → `_site/`. Regenerates markdown into a temp dir (never touches `docs/`) and renders it with `hack/docsite` (goldmark + template styled with `@wandelbots/design-tokens` / `@wandelbots/fonts`, vendored from npm at build time — bump the pinned versions in `build.sh`).
 
 ## App install: `--copy-image` (registry-less)
 
