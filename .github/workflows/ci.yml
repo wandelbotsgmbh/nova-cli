@@ -9,8 +9,11 @@ on:
 permissions:
   contents: read
 
+# PRs: a new push cancels the older run. main: one group per commit, because
+# GitHub keeps only one pending run per group and would cancel the queued one
+# when several PRs are merged in a row.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
