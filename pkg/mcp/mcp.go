@@ -44,13 +44,9 @@ func RunOpenAPIMCPServer(host string) error {
 	}
 
 	// Build the model
-	docModel, errs := document.BuildV3Model()
-	if len(errs) > 0 {
-		var errorMsgs []string
-		for _, e := range errs {
-			errorMsgs = append(errorMsgs, e.Error())
-		}
-		return fmt.Errorf("errors building OpenAPI model from %s: %s", host, strings.Join(errorMsgs, "; "))
+	docModel, err := document.BuildV3Model()
+	if err != nil {
+		return fmt.Errorf("errors building OpenAPI model from %s: %w", host, err)
 	}
 	if docModel == nil {
 		return fmt.Errorf("failed to build OpenAPI model from %s, but no errors reported", host)

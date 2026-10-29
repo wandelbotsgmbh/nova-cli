@@ -96,13 +96,13 @@ jobs:
           # real release: build exactly the tag semantic-release created
           ref: ${{ needs.version.outputs.dry_run == 'true' && github.sha || needs.version.outputs.version }}
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
       - name: GoReleaser (snapshot)
         if: env.DRY_RUN == 'true'
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --snapshot --clean
@@ -110,7 +110,7 @@ jobs:
           NOVA_VERSION: ${{ env.VERSION }}
       - name: GoReleaser
         if: env.DRY_RUN != 'true'
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --clean
@@ -129,7 +129,7 @@ jobs:
           else
             echo "ARCHIVE_VERSION=$VERSION" >> "$GITHUB_ENV"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-archives-${{ env.ARCHIVE_VERSION }}
           path: bin/
@@ -184,12 +184,12 @@ jobs:
             echo "tags=$image:$VERSION-snapshot" >> "$GITHUB_OUTPUT"
           fi
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
