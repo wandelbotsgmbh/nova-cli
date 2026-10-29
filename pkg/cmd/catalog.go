@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
+	"github.com/olekukonko/tablewriter/tw"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	apiv1 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova"
@@ -223,14 +225,17 @@ var catalogHostsCmd = &cobra.Command{
 			return err
 		}
 
-		table := tablewriter.NewWriter(cmd.OutOrStdout())
-		table.SetHeader([]string{"Name", "URL"})
+		// keep the ASCII borders of tablewriter v0
+		table := tablewriter.NewTable(cmd.OutOrStdout(),
+			tablewriter.WithRenderer(renderer.NewBlueprint(tw.Rendition{Symbols: tw.NewSymbols(tw.StyleASCII)})))
+		table.Header([]string{"Name", "URL"})
 
 		for _, entry := range c.Entries {
-			table.Append([]string{entry.Name, entry.Url})
+			if err := table.Append([]string{entry.Name, entry.Url}); err != nil {
+				return err
+			}
 		}
-		table.Render()
-		return nil
+		return table.Render()
 	},
 }
 
