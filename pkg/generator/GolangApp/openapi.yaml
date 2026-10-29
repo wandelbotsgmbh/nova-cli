@@ -1,0 +1,84 @@
+openapi: 3.0.0
+info:
+  title: Nova App
+  description: Nova App
+  version: 0.0.1
+servers:
+  - url: http://127.0.0.1:8080
+    description: local test environment
+paths:
+  /:
+    get:
+      summary: Gets the stoplight ui.
+      responses:
+        "200":
+          description: The stoplight ui.
+          content:
+            text/html:
+              schema:
+                type: string
+  /openapi.json:
+    get:
+      summary: Gets the openapi spec.
+      responses:
+        "200":
+          description: The openapi spec.
+          content:
+            application/json:
+              schema:
+                type: string
+  /app_icon.png:
+    get:
+      summary: Gets the app icon for the Nova Homescreen.
+      responses:
+        "200":
+          description: The app icon for the Nova Homescreen.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+  /position:
+    get:
+      summary: Gets the position of the first motion group which was found.
+      responses:
+        "200":
+          description: The current position.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  position:
+                    $ref: "#/components/schemas/position"
+
+components:
+  schemas:
+    vector3:
+      type: array
+      items:
+        type: number
+        format: double
+      minItems: 3
+      maxItems: 3
+    vector6:
+      type: array
+      items:
+        type: number
+        format: double
+      minItems: 6
+      maxItems: 6
+    pose:
+      type: object
+      properties:
+        position:
+          $ref: "#/components/schemas/vector3"
+        orientation:
+          $ref: "#/components/schemas/vector3"
+    position:
+      type: object
+      properties:
+        pose:
+          $ref: "#/components/schemas/pose"
+        joints:
+          $ref: "#/components/schemas/vector6"

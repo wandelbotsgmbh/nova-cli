@@ -1,5 +1,7 @@
 # Nova CLI
 
+[![CI](https://github.com/wandelbotsgmbh/nova-cli/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wandelbotsgmbh/nova-cli/actions/workflows/ci.yml)
+
 The Swiss Army knife for interacting with [Wandelbots NOVA](https://www.wandelbots.com/).
 
 The CLI helps you build and deploy applications on the NOVA platform. You can also use it to download diagnostic logs and manage your applications. Your application is built as an OCI image, pushed to the specified registry, and then deployed on the specified instance.
@@ -28,6 +30,15 @@ Find the latest binaries at https://github.com/wandelbotsgmbh/nova-cli/releases
 Download the binary, rename it to `nova`, and make it executable. Make sure to grant the file execute permissions, as the program is not signed. Add it to your PATH and you should be ready for lift-off 🚀
 
 [Completions are available](docs/nova_completion.md) for the most common terminals.
+
+Or use the install script (macOS/Linux, installs to `/usr/local/bin`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wandelbotsgmbh/nova-cli/main/install_nova.sh | bash
+
+# pin a version / change the target directory
+curl -fsSL https://raw.githubusercontent.com/wandelbotsgmbh/nova-cli/main/install_nova.sh | NOVA_VERSION=0.0.246 INSTALL_DIR=~/.local/bin bash
+```
 
 ## Setup
 
@@ -125,6 +136,16 @@ nova config set host 192.168.1.100
 
 For an overview and description of all available commands have a look at the [docs](docs/nova.md).
 
+### Autocompletion on macOS zsh
+
+We observed some strange behavior on mac using zsh, that autocompletion will not work out of the box. 
+One needs to call the following and autocompletion will start to work.
+```bash
+# could be placed into ~/.zshrc
+source <(nova completion zsh)
+```
+[kubectl](https://github.com/kubernetes/kubernetes/blob/bf8c918e0be340637e63520eb3b58df493a230f9/staging/src/k8s.io/kubectl/pkg/cmd/completion/completion.go#L174-L175) seems to have a hack to solve this
+
 ## App Store
 
 We have a catalog of applications ready for you to install! We publish pre-built applications in our [catalog](https://github.com/wandelbotsgmbh/catalog), which you can install directly to your Nova instance.
@@ -197,22 +218,7 @@ nova app install my-app
 
 NovaX Applications are Python projects built with uv and FastAPI. It comes with default FastAPI routes but gives you full control over the FastAPI application. This is the fastest way to create custom applications with your robotics programs, powered by our Python SDK.
 
-The NovaX application comes with default GitHub Copilot prompts so you can develop a robotics application and deploy it to your Nova instance with the help of Copilot, without writing a single line of code. We hope this will lower the barrier to using our tools for people without a software background and motivate them to take advantage of Nova and Copilot.
-
-#### Preconfigured Prompts
-
-The NovaX application template includes several GitHub Copilot prompts to guide you through the development process:
-
-1. **local_setup** - Helps you do the local setup, making sure everything is installed and if not, guiding through the installation steps
-2. **new_program** - Helps you write a new robotics program following best practices described in the Python SDK
-3. **start_server** - Starts the local development server
-4. **test_program** - Runs a given robotics program
-5. **deploy_app** - Guides you through deploying your application to Nova
-6. **copilot-instructions.md** - Describes the project structure and gives general guidelines about how to work in this project
-
-> **⚠️ Warning:** While working with Copilot is great and speeds up development, it can sometimes create new problems. You might struggle to communicate your needs clearly to Copilot, or it might create overly complex solutions for simple problems. We strongly recommend learning Python basics - it will help you work with AI tools much more effectively and catch issues early.
-
-Once you create a NovaX application, you can find these prompts in the `.github` folder of your project. They are written in plain English and will help you understand how to work in this repository.
+The NovaX application comes with default GitHub Copilot prompts so you can develop a robotics application and deploy it to your Nova instance with the help of Copilot, without writing a single line of code.
 
 Learn more about NovaX Applications: https://github.com/wandelbotsgmbh/wandelbots-nova?tab=readme-ov-file#novax
 
@@ -242,3 +248,29 @@ $ nova cell edit
 # install a cell from a file
 $ nova cell install path/to/your/cell.yaml
 ```
+
+## Installing without a registry (`--copy-image`)
+
+For instances that can't pull from your registry (air-gapped, shop-floor networks), `--copy-image` skips the registry entirely: it builds the image, copies it to the instance over ssh/scp, and imports it straight into k3s' containerd.
+
+```bash
+nova app install path/to/app --copy-image --ssh-user <user>
+```
+
+* Uses the configured `host` as the ssh target; works with both docker and podman.
+* Only the image layers the instance is missing are transferred, so repeated installs are fast.
+* First time per instance, add `--setup-ssh-key` to install your ssh key and a passwordless-sudo rule for k3s on the target. It prompts once for the ssh and sudo password (the sudo prompt is unavoidable — sudo is needed once to grant passwordless sudo); every install after that runs prompt-free:
+
+```bash
+nova app install path/to/app --copy-image --ssh-user <user> --setup-ssh-key
+```
+
+Other flags: `--ssh-port`, `--no-sudo` (root login, skips sudo entirely), `--import-command` (default `k3s ctr images import`), `--remote-dir` (default `/tmp`).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see [SECURITY.md](SECURITY.md).
+
+## License
+
+[Apache-2.0](LICENSE)

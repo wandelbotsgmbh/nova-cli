@@ -1,0 +1,8 @@
+controllers:
+    - configuration:
+        kind: VirtualController
+        manufacturer: universalrobots
+        position: '[1.17, -1.57, 1.36, 1.03, 1.29, 1.28, 0]'
+        type: universalrobots-ur5e
+      name: virtual-robot
+name: cell

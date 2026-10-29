@@ -1,0 +1,199 @@
+name: Release
+
+# semantic-release decides the version (from Conventional Commits) and creates
+# the tag + GitHub release; GoReleaser attaches the archives; Homebrew, winget
+# and docker follow.
+#
+# Publishing is gated by repo variables (Settings → Secrets and variables →
+# Actions → Variables). While a variable isn't "true", that step runs as a
+# dry run:
+#   RELEASE_ENABLED      create tag + GitHub release + upload archives
+#   HOMEBREW_ENABLED     push the formula to wandelbotsgmbh/homebrew-wandelbots
+#   WINGET_ENABLED       trigger the wandelbotsgmbh/winget-pkgs update
+#   DOCKER_PUSH_ENABLED  push ghcr.io/wandelbotsgmbh/nova-cli:{<ver>,latest}
+#                        (otherwise pushes only ghcr.io/wandelbotsgmbh/nova-cli:<ver>-snapshot)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (no tag, release or publishing)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  SEMANTIC_RELEASE_PACKAGES: >-
+    -p semantic-release@25.0.9
+    -p @semantic-release/exec@7.1.0
+    -p conventional-changelog-conventionalcommits@8.0.0
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      dry_run: ${{ steps.mode.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: mode
+        name: Decide release mode
+        run: |
+          dry_run=true
+          if [ "${{ vars.RELEASE_ENABLED }}" = "true" ] \
+            && [ "$GITHUB_REF" = "refs/heads/main" ] \
+            && { [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.dry_run }}" = "false" ]; }; then
+            dry_run=false
+          fi
+          echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+          echo "**Dry run:** $dry_run" >> "$GITHUB_STEP_SUMMARY"
+      - name: semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # shellcheck disable=SC2086 # SEMANTIC_RELEASE_PACKAGES is a list of args
+          if [ "${{ steps.mode.outputs.dry_run }}" = "true" ]; then
+            npx --yes $SEMANTIC_RELEASE_PACKAGES semantic-release --dry-run --no-ci --branches "$GITHUB_REF_NAME"
+          else
+            npx --yes $SEMANTIC_RELEASE_PACKAGES semantic-release
+          fi
+      - id: version
+        name: Read next version
+        run: |
+          version=$(cat .next-version 2>/dev/null || true)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "**Next version:** ${version:-none (no release-worthy commits)}" >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: version
+    if: needs.version.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # real release: build exactly the tag semantic-release created
+          ref: ${{ needs.version.outputs.dry_run == 'true' && github.sha || needs.version.outputs.version }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: GoReleaser (snapshot)
+        if: env.DRY_RUN == 'true'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+        env:
+          NOVA_VERSION: ${{ env.VERSION }}
+      - name: GoReleaser
+        if: env.DRY_RUN != 'true'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ env.VERSION }}
+
+      # hack/homebrew and hack/winget expect the archives in bin/
+      - name: Collect archives
+        run: |
+          mkdir -p bin
+          cp dist/*.tar.gz dist/*.zip bin/
+          if [ "$DRY_RUN" = "true" ]; then
+            # snapshot archives carry a -snapshot suffix
+            echo "ARCHIVE_VERSION=$VERSION-snapshot" >> "$GITHUB_ENV"
+          else
+            echo "ARCHIVE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-archives-${{ env.ARCHIVE_VERSION }}
+          path: bin/
+          retention-days: 7
+
+      - name: Generate Homebrew formula
+        working-directory: hack/homebrew
+        run: |
+          go run homebrew.go "$ARCHIVE_VERSION" novacli novacli
+          cat ../../bin/homebrew/Formula/n/nova.rb
+      - name: Push Homebrew formula
+        if: env.DRY_RUN != 'true' && vars.HOMEBREW_ENABLED == 'true'
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/wandelbotsgmbh/homebrew-wandelbots.git" tap
+          cp -rf bin/homebrew/* tap/
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit --allow-empty -m "nova ${VERSION}" -m "from wandelbotsgmbh/nova-cli@${GITHUB_SHA}"
+          git push origin main
+
+      - name: Trigger winget update
+        if: env.DRY_RUN != 'true' && vars.WINGET_ENABLED == 'true'
+        working-directory: hack/winget
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: go run winget.go "$VERSION" novacli "$WINGET_TOKEN"
+
+  docker:
+    needs: version
+    if: needs.version.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.dry_run == 'true' && github.sha || needs.version.outputs.version }}
+      - id: tags
+        name: Decide image tags
+        run: |
+          image=ghcr.io/wandelbotsgmbh/nova-cli
+          if [ "${{ needs.version.outputs.dry_run }}" != "true" ] && [ "${{ vars.DOCKER_PUSH_ENABLED }}" = "true" ]; then
+            echo "tags=$image:$VERSION,$image:latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=$image:$VERSION-snapshot" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            FLAGS=-X 'github.com/wandelbotsgmbh/nova-cli/pkg/version.cliVersion=${{ env.VERSION }}'
+          tags: ${{ steps.tags.outputs.tags }}
+          push: true

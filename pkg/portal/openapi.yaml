@@ -1,0 +1,912 @@
+openapi: 3.0.3
+info:
+  title: Wandelbots Portal API
+  contact:
+    name: Copyright (c) 2025 Wandelbots GmbH
+    url: https://www.wandelbots.com
+  version: '1.0'
+servers:
+  - url: /
+    description: Portal API
+security:
+  - BearerAuth: []
+paths:
+  /v1/version/{channel}:
+    get:
+      summary: Get latest Nova version
+      description: Get the latest version for a given release channel
+      operationId: getLatestVersion
+      parameters:
+        - name: channel
+          in: path
+          required: true
+          description: The release channel
+          schema:
+            $ref: '#/components/schemas/ReleaseChannel'
+        - name: current_version
+          in: query
+          description: The current version
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Latest version
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Bad Request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Channel not found
+          content:
+            text/plain:
+              schema:
+                type: string
+  /v1/me/image-registry-credentials:
+    get:
+      tags:
+        - Me
+      summary: Get image registry credentials
+      description: |
+        Get my credentials of the Nova conainer image registry.
+
+        This credentials are important to download all Nova components when installing on an IPC or in a virtual machine.
+      operationId: listMyRegistryCredentials
+      responses:
+        '200':
+          description: Successful response returning the credentials.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryCredentialsList'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/me/licenses:
+    get:
+      tags:
+        - Me
+      summary: Get licenses
+      description: Get my license information.
+      operationId: getMyLicenses
+      responses:
+        '200':
+          description: Successful response returning the license.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LicenseList'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No license found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/instances:
+    get:
+      operationId: getUserInstances
+      summary: Get user instances
+      tags:
+        - Instances
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInstances'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      summary: Create an instance
+      operationId: createInstance
+      tags:
+        - Instances
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceResponse'
+        '400':
+          description: Maximum number of instances reached or sandbox/instance name is already in use.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: An instance creation request is already in progress. Wait for it to finish and then try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/instances/limit:
+    get:
+      description: Returns the number of available cloud instances.
+      operationId: instancesLimit
+      summary: Instances limit
+      tags:
+        - Instances
+      responses:
+        '200':
+          description: Successful Response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstancesLimit'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Cannot get license information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/instances/{instance}:
+    delete:
+      operationId: deleteInstance
+      summary: Delete an instance
+      tags:
+        - Instances
+      parameters:
+        - name: instance
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Instance ID
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Instance not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Cannot delete an instance.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/instances/{instance}/state:
+    put:
+      operationId: updateInstanceState
+      summary: Update instance state
+      tags:
+        - Instances
+      parameters:
+        - name: instance
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Instance ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StateUpdate'
+      responses:
+        '200':
+          description: Successful Response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '400':
+          description: Instance not found, already running or is in the starting state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/instances/{instance}/lifetime:
+    get:
+      tags:
+        - Instances
+      summary: Get an instance's lifetime
+      operationId: getInstanceLifetime
+      parameters:
+        - name: instance
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Instance ID
+      responses:
+        '201':
+          description: Successful Response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lifetime'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Instance not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+        - Instances
+      summary: Extend an instance's lifetime
+      operationId: extendInstance
+      parameters:
+        - name: instance
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Instance ID
+      responses:
+        '201':
+          description: Successful Response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Instance not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /dev/v1/instances:
+    post:
+      summary: Create Customized Instance
+      operationId: createCustomInstance
+      tags:
+        - Development
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomInstanceRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceResponse'
+        '400':
+          description: Maximum number of instances reached or sandbox/instance name is already in use.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: An instance creation request is already in progress. Wait for it to finish and then try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/version/{channel}:
+    get:
+      deprecated: true
+      summary: Get latest Nova version
+      description: Get the latest version for a given release channel
+      tags:
+        - DEPRECATED
+      parameters:
+        - name: channel
+          in: path
+          required: true
+          description: The release channel
+          schema:
+            $ref: '#/components/schemas/ReleaseChannel'
+        - name: current_version
+          in: query
+          description: The current version
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Latest version
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Bad Request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Channel not found
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/me/imageRegistryCredentials:
+    get:
+      deprecated: true
+      tags:
+        - DEPRECATED
+      summary: Get image registry credentials
+      description: |
+        Get my credentials of the Nova conainer image registry.
+        This credentials are important to download all Nova components when installing on an IPC or in a virtual machine.
+      responses:
+        '200':
+          description: Successful response returning the credentials.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryCredentialsList'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/me/licenses:
+    get:
+      tags:
+        - DEPRECATED
+      deprecated: true
+      summary: Get licenses
+      description: Get my license information.
+      responses:
+        '200':
+          description: Successful response returning the license.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeprecatedLicenseList'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No license found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/instances_limit:
+    get:
+      deprecated: true
+      description: Returns the number of available cloud instances.
+      summary: Instances Limit
+      tags:
+        - DEPRECATED
+      responses:
+        '200':
+          description: Successful Response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstancesLimit'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Cannot get license information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Msg'
+  /api/instance:
+    post:
+      summary: Create Instance
+      deprecated: true
+      tags:
+        - DEPRECATED
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceResponse'
+        '400':
+          description: Maximum number of instances reached or sandbox/instance name is already in use.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Msg'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: An instance creation request is already in progress. Wait for it to finish and then try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/instance/{instance_id}/start:
+    patch:
+      deprecated: true
+      summary: Start Instance
+      tags:
+        - DEPRECATED
+      parameters:
+        - name: instance_id
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Instance Id
+      responses:
+        '200':
+          description: Successful Response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Msg'
+        '400':
+          description: Instance not found, already running or is in the starting state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Msg'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/instance/{instance_id}/stop:
+    patch:
+      deprecated: true
+      summary: Stop Instance
+      tags:
+        - DEPRECATED
+      parameters:
+        - name: instance_id
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Instance Id
+      responses:
+        '200':
+          description: Successful Response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Msg'
+        '400':
+          description: Instance not found, already stopped or is still being created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Msg'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/instance/{instance_id}/extend:
+    patch:
+      deprecated: true
+      summary: Extend Instance
+      tags:
+        - DEPRECATED
+      parameters:
+        - name: instance_id
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Instance Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '400':
+          description: Instance not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/instance/{instance_id}:
+    delete:
+      deprecated: true
+      summary: Delete Instance
+      tags:
+        - DEPRECATED
+      parameters:
+        - name: instance_id
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Instance Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Msg'
+        '400':
+          description: Instance not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Msg'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/instances:
+    get:
+      deprecated: true
+      summary: Get user instances
+      tags:
+        - DEPRECATED
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInstances'
+        '401':
+          description: Authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ReleaseChannel:
+      type: string
+      enum:
+        - stable
+        - next
+      description: |
+        The channel defines which new Wandelbots Nova version to pick for an update:
+
+        * `next` the overall latest version
+        * `stable` newest patch of the current minor version
+    RegistryCredentialsList:
+      description: The a list of image registry credentials
+      type: array
+      items:
+        type: object
+        required:
+          - url
+          - user
+          - token
+        properties:
+          url:
+            description: The url of the image registry
+            type: string
+          user:
+            description: The user for the registry
+            type: string
+          token:
+            description: The authentication token for the user
+            type: string
+    Error:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+    License:
+      type: object
+      required:
+        - product_name
+        - license_key
+        - suspended
+      properties:
+        product_name:
+          description: The product name of the license.
+          type: string
+        license_key:
+          description: The key to identify the license.
+          type: string
+        suspended:
+          description: If true the license cannot be used to activate an instance.
+          type: boolean
+        feature_flags:
+          description: Features enabled by a license.
+          type: array
+          items:
+            type: string
+        feature_limitations:
+          description: Feature limitations of the license.
+          type: object
+          additionalProperties:
+            type: integer
+    LicenseList:
+      type: array
+      items:
+        $ref: '#/components/schemas/License'
+    UserInstance:
+      title: Details of a single user instance
+      type: object
+      properties:
+        expires_at:
+          description: Unix timestamp indicating when the instance will expire.
+          type: integer
+        host:
+          format: uri
+          type: string
+        instance_id:
+          description: Intance identifier.
+          type: string
+        obsolete_at:
+          description: Unix timestamp indicating when the instance becomes obsolete.
+          type: integer
+        sandbox_name:
+          type: string
+        status:
+          type: string
+          enum:
+            - creating
+            - running
+            - starting
+            - stopped
+      required:
+        - expires_at
+        - host
+        - instance_id
+        - obsolete_at
+        - sandbox_name
+        - status
+    UserInstances:
+      title: All instances of the user.
+      type: object
+      properties:
+        instances:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserInstance'
+      required:
+        - instances
+    InstanceRequest:
+      title: Instance Request
+      type: object
+      properties:
+        sandbox_name:
+          type: string
+          maxLength: 24
+          pattern: ^[A-Za-z0-9-]*$
+          title: Sandbox Name
+      required:
+        - sandbox_name
+    InstanceResponse:
+      title: Instance Response
+      type: object
+      properties:
+        host:
+          description: URL of the newly created instance.
+          format: uri
+          type: string
+        instance_id:
+          description: The ID of the new instance.
+          type: string
+        msg:
+          description: A short message.
+          type: string
+      required:
+        - host
+        - instance_id
+        - msg
+    InstancesLimit:
+      title: Instance Limit
+      type: object
+      properties:
+        instances_limit:
+          description: The remaining number of instances user can create.
+          maximum: 2147483647
+          minimum: 0
+          type: integer
+      required:
+        - instances_limit
+    StateUpdate:
+      type: object
+      properties:
+        state:
+          type: string
+          description: Desired new state of the instance.
+          enum:
+            - running
+            - stopped
+      required:
+        - state
+    Lifetime:
+      title: Instance lifetime
+      type: object
+      properties:
+        expires_at:
+          description: Unix timestamp indicating when the instance will expire.
+          type: integer
+        obsolete_at:
+          description: Unix timestamp indicating when the instance becomes obsolete.
+          type: integer
+      required:
+        - expires_at
+        - obsolete_at
+    CustomInstanceRequest:
+      title: Instance Request
+      type: object
+      properties:
+        sandbox_name:
+          type: string
+          maxLength: 24
+          pattern: ^[A-Za-z0-9-]*$
+          title: Sandbox Name
+        version:
+          type: string
+          description: |
+            If specified will override the default service manager version for the instance.
+            If not specified, default from applications will be used.
+        chart:
+          type: string
+          description: |
+            If specified will override the default service manager chart for the instance.
+            If not specified, default from applications will be used.
+          enum:
+            - development
+            - production
+        ttl_minutes:
+          description: |
+            Max instance lifetime in minutes after which instance will be deleted. If
+            not specified default value from configuration will be used instead.
+          type: integer
+          minimum: 1
+      required:
+        - sandbox_name
+    DeprecatedLicense:
+      type: object
+      required:
+        - productName
+        - licenseKey
+        - suspended
+      properties:
+        productName:
+          description: The product name of the license.
+          type: string
+        licenseKey:
+          description: The key to identify the license.
+          type: string
+        suspended:
+          description: If true the license cannot be used to activate an instance.
+          type: boolean
+        featureFlags:
+          description: Features enabled by a license.
+          type: array
+          items:
+            type: string
+        featureLimitations:
+          description: Feature limitations of the license.
+          type: object
+          additionalProperties:
+            type: integer
+    DeprecatedLicenseList:
+      type: array
+      items:
+        $ref: '#/components/schemas/DeprecatedLicense'
+    Msg:
+      type: object
+      description: A response with a short message. Imported from the Instance Orchestrator.
+      properties:
+        msg:
+          type: string
+      required:
+        - msg

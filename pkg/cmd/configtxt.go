@@ -1,0 +1,35 @@
+package cmd
+
+const configSetTxtLong = `Sets a configuration value in the Wandelbots NOVA CLI configuration.
+
+Most common configurations values are:
+- host: the host of the Wandelbots NOVA OS instance
+- cellname: name of the default cell to be used
+- editor: when editing cell or app definitions one can specify the default editor.
+	- use e.g. "code --wait" to edit files with VS Code
+- container-runtime: force docker or podman for building and pushing images
+	- auto-detected when unset (docker preferred, podman fallback)`
+
+const configSetTxtExample = `
+# Setting the host for interacting via the nova CLI (defaults to any instance created or selected via 'nova instance' command)
+nova config set host instanceid.instance.wandelbots.io
+
+# Setting the default image registry to be used for pushing images via 'nova app install' command
+# Example shows different providers:
+nova config set image-registry company.azurecr.io/repo-name
+nova config set image-registry ghcr.io/your-github-username
+nova config set image-registry registry-1.docker.io/your-dockerhub-username
+nova config set image-registry registry.code.wabo.run/group/project
+
+# Setting the default editor to be used when editing app or cell definitions
+nova config set editor "code --wait"
+
+# Automatically creating a new cell when running commands that require a cell and no cell is present (defaults to true)
+nova config set createcell true
+
+# Setting the default cell name to be used for commands that require a cell (defaults to "cell")
+nova config set cellname my-cell
+
+# Forcing a container runtime for building and pushing images (auto-detected when unset)
+nova config set container-runtime podman
+`

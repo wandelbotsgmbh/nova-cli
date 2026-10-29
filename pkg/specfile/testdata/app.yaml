@@ -1,0 +1,12 @@
+appIcon: app_icon.png
+containerImage:
+    credentials:
+        password: ""
+        registry: ""
+        user: ""
+    image: docker.io/andiikaa/doom:0.0.8
+    secrets:
+        - name: pull-secret-registry-1-docker-io
+environment: []
+name: doom
+port: 8080
