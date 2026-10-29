@@ -298,14 +298,14 @@ func (h *operationHandler) handleToolCall(ctx context.Context, req mcp.CallToolR
 	// Context (method, path, baseURL) comes from the handler 'h'
 
 	// Build the full URL using arguments from the request
-	fullURL, err := buildURLFromRequest(h.BaseURL, h.Path, req.Params.Arguments)
+	fullURL, err := buildURLFromRequest(h.BaseURL, h.Path, req.GetArguments())
 	if err != nil {
 		return nil, fmt.Errorf("failed to build URL for %s %s: %w", h.Method, h.Path, err)
 	}
 
 	// Prepare request body if applicable
 	var requestBody io.Reader
-	bodyContent, hasBody := req.Params.Arguments["body"]
+	bodyContent, hasBody := req.GetArguments()["body"]
 	if hasBody && (h.Method == http.MethodPost || h.Method == http.MethodPut || h.Method == http.MethodPatch) {
 		// Assume body is JSON marshalable
 		bodyBytes, err := json.Marshal(bodyContent)
