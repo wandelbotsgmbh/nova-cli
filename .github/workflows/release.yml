@@ -129,7 +129,7 @@ jobs:
           else
             echo "ARCHIVE_VERSION=$VERSION" >> "$GITHUB_ENV"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-archives-${{ env.ARCHIVE_VERSION }}
           path: bin/
