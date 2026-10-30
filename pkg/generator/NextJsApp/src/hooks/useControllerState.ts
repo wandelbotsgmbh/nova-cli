@@ -1,7 +1,7 @@
 import { tryParseJson } from "@wandelbots/nova-js";
 import type { RobotControllerState } from "@wandelbots/nova-js/v2";
 import { useEffect, useState } from "react";
-import { useNovaClient } from "./useNovaClient.ts";
+import { getCellId, useNovaClient } from "./useNovaClient.ts";
 
 /**
  * Returns the current controller state for a given controller.
@@ -25,7 +25,7 @@ export function useControllerState(controller: string) {
     // If you are doing animations which require higher update rates, you may
     // want to structure this a bit differently.
     const socket = nova.openReconnectingWebsocket(
-      `/controllers/${controller}/state-stream?response_rate=200`,
+      `/cells/${getCellId()}/controllers/${controller}/state-stream?response_rate=200`,
     );
 
     socket.addEventListener("message", (event) => {
