@@ -1,7 +1,17 @@
 name: Release
 
+# Two channels:
+#   main     every merge → x.y.z-rc.N GitHub *prerelease* (archives + docker
+#            :x.y.z-rc.N). No Homebrew, winget, docker :latest or docs.
+#   release  stable x.y.z, the full chain. The branch is only ever fast-forwarded
+#            to a verified commit on main, via the Promote workflow
+#            (promote.yml) or `git push origin <sha>:release`.
+# `releases/latest` ignores prereleases, so consumers of it (install_nova.sh,
+# CI pipelines downloading the latest release) only ever get stable versions.
+#
 # semantic-release decides the version (from Conventional Commits) and creates
-# the tag + GitHub release; GoReleaser attaches the archives; Homebrew, winget
+# the tag + a draft GitHub release; GoReleaser attaches the archives and
+# publishes the release (so it is never public without assets); Homebrew, winget
 # and docker follow.
 #
 # Publishing is gated by repo variables (Settings → Secrets and variables →
@@ -18,7 +28,7 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, release]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -48,6 +58,7 @@ jobs:
       pull-requests: write
     outputs:
       version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
       dry_run: ${{ steps.mode.outputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +72,7 @@ jobs:
         run: |
           dry_run=true
           if [ "${{ vars.RELEASE_ENABLED }}" = "true" ] \
-            && [ "$GITHUB_REF" = "refs/heads/main" ] \
+            && { [ "$GITHUB_REF" = "refs/heads/main" ] || [ "$GITHUB_REF" = "refs/heads/release" ]; } \
             && { [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.dry_run }}" = "false" ]; }; then
             dry_run=false
           fi
@@ -73,7 +84,10 @@ jobs:
         run: |
           # shellcheck disable=SC2086 # SEMANTIC_RELEASE_PACKAGES is a list of args
           if [ "${{ steps.mode.outputs.dry_run }}" = "true" ]; then
-            npx --yes $SEMANTIC_RELEASE_PACKAGES semantic-release --dry-run --no-ci --branches "$GITHUB_REF_NAME"
+            # other branches (manual dry run) aren't configured in .releaserc.json
+            branches=()
+            case "$GITHUB_REF_NAME" in main|release) ;; *) branches=(--branches "$GITHUB_REF_NAME") ;; esac
+            npx --yes $SEMANTIC_RELEASE_PACKAGES semantic-release --dry-run --no-ci "${branches[@]}"
           else
             npx --yes $SEMANTIC_RELEASE_PACKAGES semantic-release
           fi
@@ -81,8 +95,10 @@ jobs:
         name: Read next version
         run: |
           version=$(cat .next-version 2>/dev/null || true)
+          case "$version" in *-*) prerelease=true ;; *) prerelease=false ;; esac
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "**Next version:** ${version:-none (no release-worthy commits)}" >> "$GITHUB_STEP_SUMMARY"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "**Next version:** ${version:-none (no release-worthy commits)} (prerelease: $prerelease)" >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     needs: version
@@ -93,6 +109,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
       DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -144,7 +161,7 @@ jobs:
           go run homebrew.go "$ARCHIVE_VERSION" novacli novacli
           cat ../../bin/homebrew/Formula/n/nova.rb
       - name: Push Homebrew formula
-        if: env.DRY_RUN != 'true' && vars.HOMEBREW_ENABLED == 'true'
+        if: env.DRY_RUN != 'true' && env.PRERELEASE != 'true' && vars.HOMEBREW_ENABLED == 'true'
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
@@ -158,7 +175,7 @@ jobs:
           git push origin main
 
       - name: Trigger winget update
-        if: env.DRY_RUN != 'true' && vars.WINGET_ENABLED == 'true'
+        if: env.DRY_RUN != 'true' && env.PRERELEASE != 'true' && vars.WINGET_ENABLED == 'true'
         working-directory: hack/winget
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
@@ -182,7 +199,11 @@ jobs:
         run: |
           image=ghcr.io/wandelbotsgmbh/nova-cli
           if [ "${{ needs.version.outputs.dry_run }}" != "true" ] && [ "${{ vars.DOCKER_PUSH_ENABLED }}" = "true" ]; then
-            echo "tags=$image:$VERSION,$image:latest" >> "$GITHUB_OUTPUT"
+            if [ "${{ needs.version.outputs.prerelease }}" = "true" ]; then
+              echo "tags=$image:$VERSION" >> "$GITHUB_OUTPUT"
+            else
+              echo "tags=$image:$VERSION,$image:latest" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "tags=$image:$VERSION-snapshot" >> "$GITHUB_OUTPUT"
           fi
@@ -229,7 +250,7 @@ jobs:
 
   docs-deploy:
     needs: [version, docs]
-    if: needs.version.outputs.dry_run != 'true' && vars.DOCS_ENABLED == 'true'
+    if: needs.version.outputs.dry_run != 'true' && needs.version.outputs.prerelease != 'true' && vars.DOCS_ENABLED == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

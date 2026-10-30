@@ -26,6 +26,7 @@ To fix this, go to `Settings` → `Privacy & Security` and click `Open Anyway`
 ### Other Platforms
 
 Find the latest binaries at https://github.com/wandelbotsgmbh/nova-cli/releases
+(`x.y.z-rc.N` prereleases are release candidates for testing, see [RELEASING.md](RELEASING.md))
 
 Download the binary, rename it to `nova`, and make it executable. Make sure to grant the file execute permissions, as the program is not signed. Add it to your PATH and you should be ready for lift-off 🚀
 
