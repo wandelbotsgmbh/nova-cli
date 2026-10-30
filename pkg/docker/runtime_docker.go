@@ -24,7 +24,9 @@ func (dockerRuntime) Name() string {
 
 func (dockerRuntime) BuildImage(pathToDockerFile string, image string) error {
 	// TODO for now we assume our nova platform is linux/amd64
-	cmd := exec.Command("docker", "buildx", "build", "-t", image, "--platform", "linux/amd64", pathToDockerFile)
+	// --load is needed for non-default builders (e.g. docker-container driver),
+	// otherwise the image only stays in the build cache and the push fails
+	cmd := exec.Command("docker", "buildx", "build", "--load", "-t", image, "--platform", "linux/amd64", pathToDockerFile)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
