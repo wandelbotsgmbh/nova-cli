@@ -17,7 +17,7 @@ go test -tags integration -run TestPodman ./pkg/docker/
 
 ## Commit messages & releases
 
-Releases are fully automatic on merge to `main`, using
+Versions are created by
 [semantic-release](https://semantic-release.gitbook.io/). The version is derived
 from [Conventional Commits](https://www.conventionalcommits.org/) in the PR title
 (PRs are squash-merged):
@@ -29,8 +29,9 @@ from [Conventional Commits](https://www.conventionalcommits.org/) in the PR titl
 | `feat!: …` / `BREAKING CHANGE:` | major |
 | `docs:`, `ci:`, `chore:`, `refactor:`, `test:` | none |
 
-Binaries are published to [GitHub releases](https://github.com/wandelbotsgmbh/nova-cli/releases),
-the Homebrew tap and winget.
+Merges to `main` publish release candidates (`x.y.z-rc.N`, GitHub prereleases).
+Stable versions (Homebrew, winget, docker `latest`) are cut by promoting a
+verified rc. See [RELEASING.md](RELEASING.md).
 
 ## Generate Docs
 

@@ -1,5 +1,5 @@
-# Builds the release archives and attaches them to the GitHub release that
-# semantic-release created (see .github/workflows/release.yml).
+# Builds the release archives, attaches them to the draft GitHub release that
+# semantic-release created and publishes it (see .github/workflows/release.yml).
 #
 # Archive names match the ones published from GitLab, so Homebrew, winget and
 # existing download links keep working:
@@ -56,6 +56,14 @@ release:
   github:
     owner: wandelbotsgmbh
     name: nova-cli
-  # semantic-release already created the release with notes
+  # semantic-release already created the release with notes, as a draft so
+  # `releases/latest` never points at a release without archives (consumers
+  # like install_nova.sh and CI pipelines download from it). GoReleaser picks the
+  # draft up by name (== tag), uploads, then publishes it.
+  use_existing_draft: true
+  draft: false
+  # x.y.z-rc.N (from main) stay GitHub prereleases, so `releases/latest` (and
+  # install_nova.sh) only ever resolve to stable versions
+  prerelease: auto
   mode: keep-existing
   replace_existing_artifacts: true

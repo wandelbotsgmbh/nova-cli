@@ -1,0 +1,48 @@
+name: Promote
+
+# Releases a verified rc as stable: fast-forwards the `release` branch to the
+# given commit on main and runs the Release workflow there, which cuts x.y.z
+# and publishes Homebrew, winget, docker :latest and the docs.
+# Equivalent by hand: git push origin <sha>:release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Verified rc tag or commit on main (e.g. 0.2.0-rc.3)
+        required: true
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Fast-forward release branch
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          sha=$(git rev-parse --verify --end-of-options "$REF^{commit}")
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$REF is not on main"; exit 1
+          fi
+          if git rev-parse --verify -q origin/release >/dev/null \
+            && ! git merge-base --is-ancestor origin/release "$sha"; then
+            echo "::error::release is not an ancestor of $REF (no fast-forward possible)"; exit 1
+          fi
+          git push origin "$sha:refs/heads/release"
+          echo "Promoted \`$REF\` ($sha) to \`release\`" >> "$GITHUB_STEP_SUMMARY"
+      # pushes made with GITHUB_TOKEN don't trigger workflows, dispatches do
+      - name: Run release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref release -f dry_run=false
