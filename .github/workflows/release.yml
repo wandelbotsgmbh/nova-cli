@@ -61,10 +61,10 @@ jobs:
       prerelease: ${{ steps.version.outputs.prerelease }}
       dry_run: ${{ steps.mode.outputs.dry_run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - id: mode
@@ -111,7 +111,7 @@ jobs:
       DRY_RUN: ${{ needs.version.outputs.dry_run }}
       PRERELEASE: ${{ needs.version.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # real release: build exactly the tag semantic-release created
           ref: ${{ needs.version.outputs.dry_run == 'true' && github.sha || needs.version.outputs.version }}
@@ -191,7 +191,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.dry_run == 'true' && github.sha || needs.version.outputs.version }}
       - id: tags
@@ -207,7 +207,7 @@ jobs:
           else
             echo "tags=$image:$VERSION-snapshot" >> "$GITHUB_OUTPUT"
           fi
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -233,18 +233,18 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.dry_run == 'true' && github.sha || needs.version.outputs.version }}
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Build site
         run: hack/docsite/build.sh "$VERSION"
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
@@ -260,4 +260,4 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
