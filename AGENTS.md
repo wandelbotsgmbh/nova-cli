@@ -28,3 +28,7 @@
 
 * Go module: `github.com/wandelbotsgmbh/nova-cli` (public repo)
 * Merges to `main` publish `x.y.z-rc.N` prereleases (semantic-release); stable versions (Homebrew, winget, docker `latest`, docs) come from fast-forwarding the `release` branch via the Promote workflow. Use Conventional Commit messages / PR titles (`fix:`, `feat:`, `docs:`, `ci:`, …) — they decide the version bump. See `RELEASING.md`.
+
+## Agentic tooling
+
+* Design decisions for agent support (MCP, skills, `nova-agent-kit`, CLI contract, robot motion): ADRs in `docs/decisions/` (index in its README). Add a new ADR from `0000-template.md` when changing `nova mcp` or agent-facing CLI behaviour.
