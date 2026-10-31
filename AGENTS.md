@@ -31,4 +31,4 @@
 
 ## Agentic tooling
 
-* Design decisions for agent support (MCP, skills, `nova-agent-kit`, CLI contract): `AGENTIC-TOOLING.md`. Update it when changing `nova mcp` or agent-facing CLI behaviour.
+* Design decisions for agent support (MCP, skills, `nova-agent-kit`, CLI contract, robot motion): ADRs in `docs/decisions/` (index in its README). Add a new ADR from `0000-template.md` when changing `nova mcp` or agent-facing CLI behaviour.
