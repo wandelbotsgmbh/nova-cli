@@ -8,14 +8,14 @@ The CLI helps you build and deploy applications on the NOVA platform. You can al
 
 ## Install
 
-### MacOS/Linux
+All options install a single `nova` binary. Check with `nova version` afterwards.
 
-Installation with [homebrew](https://brew.sh/):
+### macOS / Linux: Homebrew
+
+The recommended way on both macOS and Linux ([Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux)); the formula ships `amd64` and `arm64` builds for either OS:
+
 ```bash
 brew install wandelbotsgmbh/wandelbots/nova
-
-# enable autocompletion for zsh (has to be done only once)
-echo 'source <(nova completion zsh)' >> ~/.zshrc
 ```
 
 **Note:** Our binaries are not signed yet, so macOS will block the first execution.
@@ -23,23 +23,72 @@ To fix this, go to `Settings` → `Privacy & Security` and click `Open Anyway`
 
 ![](settings.jpeg)
 
-### Other Platforms
+### macOS / Linux: install script
 
-Find the latest binaries at https://github.com/wandelbotsgmbh/nova-cli/releases
-(`x.y.z-rc.N` prereleases are release candidates for testing, see [RELEASING.md](RELEASING.md))
-
-Download the binary, rename it to `nova`, and make it executable. Make sure to grant the file execute permissions, as the program is not signed. Add it to your PATH and you should be ready for lift-off 🚀
-
-[Completions are available](https://wandelbotsgmbh.github.io/nova-cli/nova_completion.html) for the most common terminals.
-
-Or use the install script (macOS/Linux, installs to `/usr/local/bin`):
+Installs the latest stable release to `/usr/local/bin` (uses `sudo` only if that directory is not writable):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/wandelbotsgmbh/nova-cli/main/install_nova.sh | bash
-
-# pin a version / change the target directory
-curl -fsSL https://raw.githubusercontent.com/wandelbotsgmbh/nova-cli/main/install_nova.sh | NOVA_VERSION=0.0.246 INSTALL_DIR=~/.local/bin bash
 ```
+
+Pin a version or install into a user directory without `sudo`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wandelbotsgmbh/nova-cli/main/install_nova.sh | NOVA_VERSION=0.2.0 INSTALL_DIR=~/.local/bin bash
+```
+
+### Windows
+
+Download `novacli_win64-<version>.zip` from the [releases page](https://github.com/wandelbotsgmbh/nova-cli/releases), extract `nova.exe` and put it on your `PATH`, e.g. in PowerShell:
+
+```powershell
+$v = "0.2.1"
+Invoke-WebRequest -Uri "https://github.com/wandelbotsgmbh/nova-cli/releases/download/$v/novacli_win64-$v.zip" -OutFile "$env:TEMP\nova.zip"
+Expand-Archive "$env:TEMP\nova.zip" -DestinationPath "$env:LOCALAPPDATA\nova"
+[Environment]::SetEnvironmentVariable("Path", "$env:LOCALAPPDATA\nova;" + [Environment]::GetEnvironmentVariable("Path", "User"), "User")
+```
+
+Open a new terminal afterwards so the updated `PATH` is picked up.
+
+### Manual download (all platforms)
+
+Every [release](https://github.com/wandelbotsgmbh/nova-cli/releases) ships archives for `linux_amd64`, `linux_arm64`, `macos_amd64`, `macos_arm64` and `win64`, each containing just the `nova` binary.
+`x.y.z-rc.N` prereleases are release candidates for testing, see [RELEASING.md](RELEASING.md).
+
+Linux example (adjust version and architecture):
+
+```bash
+VERSION=0.2.0 ARCH=amd64   # or arm64
+curl -fLO https://github.com/wandelbotsgmbh/nova-cli/releases/download/$VERSION/novacli_linux_$ARCH-$VERSION.tar.gz
+mkdir -p ~/.local/bin
+tar -xzf novacli_linux_$ARCH-$VERSION.tar.gz -C ~/.local/bin nova
+
+# add ~/.local/bin to your PATH if it isn't already (bash; use ~/.zshrc for zsh)
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+nova version
+```
+
+The binary in the archive is already executable; on macOS, allow it once under `Settings` → `Privacy & Security` as described above.
+
+### Docker
+
+```bash
+docker run --rm ghcr.io/wandelbotsgmbh/nova-cli:latest version
+```
+
+Images are published for `linux/amd64` and `linux/arm64`, tagged `latest` (stable) and `<version>` (including `x.y.z-rc.N` prereleases).
+Mount a config to keep the host/token between runs, e.g. `-v ~/.nova:/root/.nova`.
+
+### Shell completion
+
+```bash
+# zsh (has to be done only once)
+echo 'source <(nova completion zsh)' >> ~/.zshrc
+# bash, fish, powershell
+nova completion --help
+```
+
+See the [completion reference](https://wandelbotsgmbh.github.io/nova-cli/nova_completion.html) for details.
 
 ## Setup
 
