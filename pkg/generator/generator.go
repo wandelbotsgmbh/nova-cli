@@ -57,6 +57,8 @@ type GeneratorSettings struct {
 	ProjectFs embed.FS
 	RootDir   string
 	OutPath   string
+	// optional, runs after all files are written to OutPath
+	PostProcess func(outPath string, project PluginSpec) error
 }
 
 type PluginGenerator interface {
@@ -161,6 +163,10 @@ func createProject(project PluginSpec, settings GeneratorSettings) error {
 
 	if err != nil {
 		return fmt.Errorf("error walking the filesystem: %w", err)
+	}
+
+	if settings.PostProcess != nil {
+		return settings.PostProcess(settings.OutPath, project)
 	}
 	return nil
 }
