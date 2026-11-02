@@ -458,7 +458,7 @@ func init() {
 
 	// TODO generate this flag somehow, with the available generators?
 	// Otherwise possible apps needs to be put into the readme by hand.
-	createAppCmd.Flags().StringVarP(&appGenerator, "generator", "g", "python_app", "The generator to use for the app project. Supported: nextjs_app, python_app, golang_app")
+	createAppCmd.Flags().StringVarP(&appGenerator, "generator", "g", "python_app", "The generator to use for the app project. Supported: nextjs_app, python_app, golang_app, rust_app")
 
 	installAppCmd.Flags().StringVarP(&appSecretName, "registry-secret", "r", "",
 		"Provide a custom secret name for instead of optaining credentials from your local docker config. Make sure the secret exists in the cell namespace.")
@@ -821,6 +821,9 @@ func getGenerator() generator.PluginGenerator {
 	}
 	if appGenerator == "golang_app" {
 		return generator.NewGolangAppGenerator()
+	}
+	if appGenerator == "rust_app" {
+		return generator.NewRustAppGenerator()
 	}
 	return generator.NewPythonGenerator()
 }

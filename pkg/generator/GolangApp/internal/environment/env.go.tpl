@@ -35,14 +35,15 @@ func GetLogLevel() slog.Level {
 
 func GetNovaApiPath() string {
 	novaApi := strings.TrimSpace(os.Getenv("NOVA_API"))
-	if len(novaApi) > 0 && !strings.HasSuffix(novaApi, "/") {
-		novaApi += "/"
+	if novaApi == "" {
+		return ""
 	}
-	if !strings.HasSuffix(novaApi, "http") {
+	novaApi = strings.TrimSuffix(novaApi, "/")
+	if !strings.Contains(novaApi, "://") {
 		novaApi = "http://" + novaApi
 	}
 
-	return novaApi + "api/v1/"
+	return novaApi + "/api/v2/"
 }
 
 func GetNovaCellName() string {

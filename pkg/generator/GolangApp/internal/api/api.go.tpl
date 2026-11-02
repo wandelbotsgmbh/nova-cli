@@ -8,7 +8,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/labstack/echo/v4"
-	nova "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova"
+	nova "github.com/wandelbotsgmbh/nova-api-client-go/v26/pkg/nova/v2"
 )
 
 type AppApi struct {
@@ -29,7 +29,7 @@ type AppApi struct {
 //
 // novaApi:
 //
-//	The URL to the nova api gateway (e.g. https://xdxqzvpu.instance.wandelbots.io)
+//	The URL to the nova api gateway (e.g. https://xdxqzvpu.instance.wandelbots.io/api/v2/)
 func NewAppApi(basePath string, novaApi string, cell string) (*AppApi, error) {
 	accessToken := environment.GetAccessToken()
 
@@ -88,46 +88,44 @@ func (a *AppApi) GetOpenapiJson(ctx echo.Context) error {
 // Gets the position of the first motion group which was found.
 // (GET /position)
 func (a *AppApi) GetPosition(ctx echo.Context) error {
-	controllerResp, err := a.client.ListControllersWithResponse(context.Background(), a.Cell)
+	reqCtx := ctx.Request().Context()
+
+	controllersResp, err := a.client.ListRobotControllersWithResponse(reqCtx, a.Cell)
 	if err != nil {
 		return err
 	}
-	if controllerResp.JSON200 == nil || len(controllerResp.JSON200.Instances) == 0 {
-		return ctx.String(http.StatusNotFound, "No controller found")
-	}
-	// get the first controller
-	controller := controllerResp.JSON200.Instances[0]
-
-	// get the first motion group
-	if len(controller.PhysicalMotionGroups) == 0 {
-		return ctx.String(http.StatusNotFound, "No motion groups found for controller")
+	if controllersResp.JSON200 == nil {
+		return fmt.Errorf("listing controllers failed: %s", controllersResp.Status())
 	}
 
-	mg := controller.PhysicalMotionGroups[0].MotionGroup
+	// the first motion group of the first controller that has one
+	for _, controller := range *controllersResp.JSON200 {
+		stateResp, err := a.client.GetCurrentRobotControllerStateWithResponse(reqCtx, a.Cell, controller)
+		if err != nil {
+			return err
+		}
+		if stateResp.JSON200 == nil {
+			return fmt.Errorf("getting state of controller %s failed: %s", controller, stateResp.Status())
+		}
+		if len(stateResp.JSON200.MotionGroups) == 0 {
+			continue
+		}
+		mg := stateResp.JSON200.MotionGroups[0]
 
-	// get the tcp position in world coordinates
-	stateResp, err := a.client.GetCurrentMotionGroupStateWithResponse(context.Background(), a.Cell, mg, nil)
-	if err != nil {
-		return err
+		// the tcp pose in world coordinates
+		if mg.TcpPose == nil || mg.TcpPose.Position == nil || mg.TcpPose.Orientation == nil {
+			return ctx.String(http.StatusNotFound, "No tcp pose found for motion group")
+		}
+
+		payload := Position{
+			Pose: &Pose{
+				Orientation: mg.TcpPose.Orientation,
+				Position:    mg.TcpPose.Position,
+			},
+			Joints: &mg.JointPosition,
+		}
+		return ctx.JSON(http.StatusOK, payload)
 	}
 
-	if stateResp.JSON200 == nil {
-		return ctx.String(http.StatusNotFound, "No position found for motion group")
-	}
-
-	posResp := stateResp.JSON200.State.TcpPose
-
-	// map the target response
-	ori := []float64{posResp.Orientation.X, posResp.Orientation.Y, posResp.Orientation.Z}
-	pos := []float64{posResp.Position.X, posResp.Position.Y, posResp.Position.Z}
-
-	payload := Position{
-		Pose: &Pose{
-			Orientation: &ori,
-			Position:    &pos,
-		},
-		Joints: &stateResp.JSON200.State.JointPosition.Joints,
-	}
-
-	return ctx.JSON(http.StatusOK, payload)
+	return ctx.String(http.StatusNotFound, "No controller with a motion group found")
 }
