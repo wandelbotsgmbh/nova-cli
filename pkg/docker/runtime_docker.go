@@ -22,7 +22,23 @@ func (dockerRuntime) Name() string {
 	return RuntimeNameDocker
 }
 
+// errBuildxMissing is returned when the docker buildx plugin is not installed.
+var errBuildxMissing = errors.New("the docker buildx plugin is not installed (install docker-buildx-plugin or Docker Desktop; check with 'docker buildx version')")
+
+// requireBuildx fails early if the docker buildx plugin is missing. Otherwise
+// "docker buildx build -t ..." fails with the misleading
+// "unknown shorthand flag: 't' in -t" from the docker root command (issue #46).
+func requireBuildx() error {
+	if err := exec.Command("docker", "buildx", "version").Run(); err != nil {
+		return errBuildxMissing
+	}
+	return nil
+}
+
 func (dockerRuntime) BuildImage(pathToDockerFile string, image string) error {
+	if err := requireBuildx(); err != nil {
+		return err
+	}
 	// TODO for now we assume our nova platform is linux/amd64
 	// --load is needed for non-default builders (e.g. docker-container driver),
 	// otherwise the image only stays in the build cache and the push fails
@@ -35,6 +51,9 @@ func (dockerRuntime) BuildImage(pathToDockerFile string, image string) error {
 func (dockerRuntime) BuildImageOCI(pathToDockerFile string, image string, ociDir string) error {
 	// buildx writes a canonical OCI layout to ociDir and does not load the image
 	// into the local image store (not needed for copy-image)
+	if err := requireBuildx(); err != nil {
+		return err
+	}
 	output := fmt.Sprintf("type=oci,dest=%s,tar=false,name=%s", ociDir, image)
 	cmd := exec.Command("docker", "buildx", "build", "--platform", "linux/amd64", "--output", output, pathToDockerFile)
 	cmd.Stdout = os.Stdout
@@ -64,6 +83,10 @@ func (r dockerRuntime) GetRegistryCredentials(imageName string) (ImageRegistryCr
 }
 
 func (dockerRuntime) BuildAndPushMultiPlatform(dockerfilePath, contextPath, imageTag string) error {
+	if err := requireBuildx(); err != nil {
+		return err
+	}
+
 	// Ensure a buildx builder exists that supports multi-platform builds
 	if err := ensureBuildxBuilder(); err != nil {
 		return err
