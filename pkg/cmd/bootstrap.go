@@ -212,6 +212,7 @@ func init() {
 		"Restrict CA injection to Pods whose app.kubernetes.io/name is in this list (default: service-manager only)")
 	bootstrapCACertsCmd.Flags().BoolVar(&bootstrapCfg.CAAllApps, "all-apps", false,
 		"Inject the proxy CA into every Pod in the namespace (overrides the default service-manager-only scope)")
+	bootstrapCACertsCmd.MarkFlagsMutuallyExclusive("target-apps", "all-apps")
 	bootstrapAllCmd.Flags().StringSliceVar(&bootstrapCfg.CACertPaths, "ca-certificates", nil,
 		"Proxy CA PEM file(s) to trust cluster-wide; comma-separated or repeat the flag")
 	bootstrapAllCmd.Flags().StringVar(&bootstrapCfg.CAInitImage, "ca-init-image", bootstrap.DefaultCAInitImage,
@@ -220,6 +221,7 @@ func init() {
 		"Restrict CA injection to Pods whose app.kubernetes.io/name is in this list (default: service-manager only)")
 	bootstrapAllCmd.Flags().BoolVar(&bootstrapCfg.CAAllApps, "ca-all-apps", false,
 		"Inject the proxy CA into every Pod in the namespace (overrides the default service-manager-only scope)")
+	bootstrapAllCmd.MarkFlagsMutuallyExclusive("ca-target-apps", "ca-all-apps")
 
 	bootstrapCmd.AddCommand(bootstrapNamespaceCmd)
 	bootstrapCmd.AddCommand(bootstrapReflectorCmd)
