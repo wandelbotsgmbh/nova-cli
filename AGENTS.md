@@ -11,11 +11,11 @@
 
 ## Instances (ADR `docs/decisions/0016-named-instances.md`)
 
-* `~/.nova/config.yaml` holds a list `instances` (name, `kind`: `cloud` | `host` | `cluster`, host, cellname, id, nucleus-host, nucleus-token, kubeconfig) plus `current-instance`. Global settings (editor, image-registry, container-runtime, catalogs, portal login `token`) stay top-level.
+* `~/.nova/config.yaml` holds a list `instances` (name, `kind`: `cloud` | `host` | `k8srun`, host, cellname, id, nucleus-host, nucleus-token, kubeconfig) plus `current-instance`. Global settings (editor, image-registry, container-runtime, catalogs, portal login `token`) stay top-level.
 * Target resolution: `--instance <name>` → `NOVA_INSTANCE` → `current-instance`. An unknown name is an error, never a fallback. Resolving never writes the config. Use `--instance` instead of `nova instance select` when working in parallel with other sessions.
 * Code reads the target via `currentHost()` / `currentCell()` / `currentTarget()` (`pkg/cmd/target.go`), never `viper.GetString("host")`. Registry logic: `pkg/instances`. Commands that manage the registry themselves carry the `annotationNoTarget` annotation.
 * Legacy configs (bare top-level `host`) are migrated in memory into an entry `default` and persisted on the next write; legacy keys are kept and `host`/`cellname`/`virtualid` are mirrored from the selected entry for older CLI versions.
-* `nova instance add/remove` manage local entries; `create/delete/start/stop` are cloud-only. `nova cluster` (Wandelbots internal, formerly `nova virtual`) creates named clusters.
+* `nova instance add/remove` manage local entries; `create/delete/start/stop` are cloud-only. `nova k8srun` (Wandelbots internal, formerly `nova virtual`) creates named Kubernetes clusters with a kubeconfig.
 
 ## App install: `--copy-image` (registry-less)
 

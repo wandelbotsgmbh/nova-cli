@@ -60,7 +60,7 @@ var instanceCmd = &cobra.Command{
 The CLI keeps a local list of named instances. Each has a kind:
   cloud    an instance on portal.wandelbots.io (create, start, stop, delete via this command)
   host     any reachable NOVA host, e.g. an on-prem IPC (register with 'nova instance add')
-  cluster  a Wandelbots-internal Kubernetes cluster (see 'nova cluster')
+  k8srun   a Wandelbots-internal Kubernetes cluster with a kubeconfig (see 'nova k8srun')
 
 Commands work against the selected instance ('nova instance select'). Override it for a
 single invocation with the global --instance <name> flag or the NOVA_INSTANCE environment
@@ -126,7 +126,7 @@ var removeInstanceCmd = &cobra.Command{
 	Short:             "Removes an instance from the local list (does not delete it)",
 	Long: `Removes an instance of any kind from the local list. The instance itself is not
 touched: a cloud instance keeps running (use 'nova instance delete' to delete it), and so
-does a cluster (use 'nova cluster destroy'). If it was selected, no instance is selected
+does a cluster (use 'nova k8srun destroy'). If it was selected, no instance is selected
 afterwards.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := loadRegistry()
@@ -144,7 +144,7 @@ afterwards.`,
 		switch {
 		case ok && inst.Kind == instances.KindCloud:
 			fmt.Fprintf(cmd.ErrOrStderr(), "removed %q from the local list; the cloud instance still exists ('nova instance delete %s' deletes it)\n", name, inst.ID)
-		case ok && inst.Kind == instances.KindCluster:
+		case ok && inst.Kind == instances.KindK8sRun:
 			fmt.Fprintf(cmd.ErrOrStderr(), "removed %q from the local list; the cluster still exists until it expires\n", name)
 		default:
 			fmt.Fprintf(cmd.ErrOrStderr(), "removed %q\n", name)
@@ -161,7 +161,7 @@ var deleteInstanceCmd = &cobra.Command{
 	Short:             "Deletes a cloud instance",
 	Long: `Deletes a cloud instance on portal.wandelbots.io and removes it from the local list.
 Only works for cloud instances; use 'nova instance remove' to forget a host entry and
-'nova cluster destroy' for clusters.`,
+'nova k8srun destroy' for k8srun instances.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := strings.TrimSpace(args[0])
 		if name == "" {
@@ -683,8 +683,8 @@ func requireKind(inst instances.Instance, kind instances.Kind, verb string) erro
 	switch inst.Kind {
 	case instances.KindHost:
 		hint = "; use 'nova instance remove " + inst.Name + "' to forget it"
-	case instances.KindCluster:
-		hint = "; use 'nova cluster destroy " + inst.Name + "' for clusters"
+	case instances.KindK8sRun:
+		hint = "; use 'nova k8srun destroy " + inst.Name + "' for k8srun instances"
 	case instances.KindCloud:
 		hint = "; use 'nova instance delete " + inst.Name + "' for cloud instances"
 	}

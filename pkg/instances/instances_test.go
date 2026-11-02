@@ -41,7 +41,7 @@ func TestLoadMigratesLegacyHost(t *testing.T) {
 		want   Kind
 	}{
 		{"cloud host", "host: abc.instance.wandelbots.io\nvirtualid: abc\n", KindCloud},
-		{"cluster id", "host: 10.0.0.5\nvirtualid: xyz\n", KindCluster},
+		{"k8srun id", "host: 10.0.0.5\nvirtualid: xyz\n", KindK8sRun},
 		{"plain host", "host: 192.168.1.10\ncellname: line1\nnucleus-token: secret\n", KindHost},
 	}
 	for _, tt := range tests {
@@ -161,7 +161,7 @@ func TestResolve(t *testing.T) {
 	r := &Registry{Current: "a", Instances: []Instance{
 		{Name: "a", Kind: KindHost, Host: "h-a"},
 		{Name: "b", Kind: KindCloud, Host: "h-b"},
-		{Name: "c", Kind: KindCluster, Host: "h-c"},
+		{Name: "c", Kind: KindK8sRun, Host: "h-c"},
 	}}
 	tests := []struct {
 		name, flag, env string

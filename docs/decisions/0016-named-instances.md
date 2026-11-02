@@ -37,11 +37,11 @@ pointed at one entry for a single invocation.
   |---|---|---|
   | `cloud` | portal.wandelbots.io instance | `nova instance create`, `nova instance select <cloud-id>` |
   | `host` | any reachable NOVA host (on-prem IPC, own server) | `nova instance add <name> --host <url>` |
-  | `cluster` | Wandelbots-internal Kubernetes cluster with NOVA, comes with a kubeconfig | `nova cluster create` |
+  | `k8srun` | Wandelbots-internal Kubernetes cluster with NOVA, comes with a kubeconfig | `nova k8srun create` |
 
   The kind says **where the instance runs**, never whether its robots are real; that
   stays a per-controller lookup (ADR-0009).
-- **Per-entry settings:** `host`, `cellname`, `id` (cloud/cluster ID), `nucleus-host`,
+- **Per-entry settings:** `host`, `cellname`, `id` (cloud/k8srun ID), `nucleus-host`,
   `nucleus-token`, `kubeconfig`. Global settings (editor, image registry, container
   runtime, catalogs, portal login) stay top-level. The portal login is a
   portal-account credential (one per environment), not an instance credential.
@@ -49,7 +49,7 @@ pointed at one entry for a single invocation.
   `current-instance` from the config. An unknown name is an error (`NOT_FOUND`); it
   never falls back to another entry. Resolving an override **never writes the config**,
   so concurrent sessions don't interfere. Only explicit writes (`config set`,
-  `instance` and `cluster` commands) touch the config.
+  `instance` and `k8srun` commands) touch the config.
 - **No raw `--host` override.** A named entry keeps credentials bound to the host they
   were configured for; an ad-hoc host has no credentials to pick, and guessing would
   send the wrong ones.
@@ -61,16 +61,17 @@ pointed at one entry for a single invocation.
     portal listing stays available with `--cloud`.
   - `instance create/delete/start/stop` are cloud-only and return a typed error with a
     hint for other kinds.
-  - `nova virtual` is renamed `nova cluster`, labelled "(Wandelbots internal)" in its
-    help; `virtual` stays as a hidden, deprecated copy of the group. `cluster create --name <n>` registers a named cluster;
-    `cluster create` without `--name` means `--name cluster --replace`, which keeps the
-    old "replace the previous one" behaviour but only for that unnamed entry. An
-    existing name without `--replace` is an error. `cluster destroy [name]` and
-    `cluster list` are added. No prompts (ADR-0010).
+  - `nova virtual` is renamed `nova k8srun` (after the internal service; "(Wandelbots
+    internal)" in its help); `virtual` stays as a hidden, deprecated copy of the group.
+    `k8srun create --name <n>` registers a named cluster; `k8srun create` without
+    `--name` means `--name k8srun --replace`, which keeps the old "replace the previous
+    one" behaviour but only for that unnamed entry. An existing name without
+    `--replace` is an error. `k8srun destroy [name]` and `k8srun list` are added. No
+    prompts (ADR-0010).
 - **Secrets:** `config view` and `instance info` redact tokens unless `--show-secrets`
   (ADR-0006).
 - **Migration:** on first run with a bare top-level `host`, the CLI adds an entry
-  `default` (kind guessed: `wandelbots.io` host → `cloud`, `virtualid` set → `cluster`,
+  `default` (kind guessed: `wandelbots.io` host → `cloud`, `virtualid` set → `k8srun`,
   else `host`) and copies `cellname` and the Nucleus keys into it. Legacy keys are
   kept, and `select` mirrors `host`, `cellname` and `virtualid` back, so an older binary
   still works against the same config. `nova config set host` writes to the targeted
@@ -86,6 +87,8 @@ pointed at one entry for a single invocation.
   for the same question ("which instance am I working against").
 - **Kinds `portal` / `physical` / `virtual`:** `physical` and `virtual` collide with the
   controller terms of ADR-0009; `portal` names the website, not the product.
+- **Kind `cluster` for the internal clusters:** too generic; a host can run Kubernetes
+  too. `k8srun` is the name the service is known by internally.
 
 ## Consequences
 

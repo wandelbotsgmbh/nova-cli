@@ -43,7 +43,7 @@ func runNova(t *testing.T, args ...string) (string, string, error) {
 	showSecretsInstanceInfoCmd = false
 	printHostInstanceInfoCmd, printInstanceIdInstanceInfoCmd = false, false
 	listCloudInstances, listVerboseInstances = false, false
-	clusterName, clusterReplace = "", false
+	k8srunName, k8srunReplace = "", false
 	hostAddInstanceCmd, cellAddInstanceCmd, selectAddInstanceCmd = "", "", false
 
 	var stdout, stderr bytes.Buffer

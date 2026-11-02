@@ -19,12 +19,12 @@ const (
 	KindCloud Kind = "cloud"
 	// KindHost is any reachable NOVA host, e.g. an on-prem IPC.
 	KindHost Kind = "host"
-	// KindCluster is a Wandelbots-internal Kubernetes cluster with NOVA installed.
-	KindCluster Kind = "cluster"
+	// KindK8sRun is a Wandelbots-internal Kubernetes cluster with NOVA (k8srun), with a kubeconfig.
+	KindK8sRun Kind = "k8srun"
 )
 
 // Kinds lists all kinds in display order.
-var Kinds = []Kind{KindCloud, KindHost, KindCluster}
+var Kinds = []Kind{KindCloud, KindHost, KindK8sRun}
 
 const (
 	// EnvVar overrides the target instance for one invocation.
@@ -119,7 +119,7 @@ func GuessKind(host, id string) Kind {
 	case strings.Contains(host, cloudHostSuffix):
 		return KindCloud
 	case id != "":
-		return KindCluster
+		return KindK8sRun
 	default:
 		return KindHost
 	}

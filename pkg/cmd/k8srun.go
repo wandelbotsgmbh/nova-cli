@@ -18,16 +18,16 @@ import (
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
 )
 
-// name used by 'nova cluster create' without --name
-const defaultClusterName = "cluster"
+// name used by 'nova k8srun create' without --name
+const defaultK8sRunName = "k8srun"
 
 // clusterServiceURL is a variable so tests can point it to a fake service.
 var clusterServiceURL = "http://k8s.wabo.run/instance"
 
 var (
 	virtualNovaVersion string
-	clusterName        string
-	clusterReplace     bool
+	k8srunName         string
+	k8srunReplace      bool
 )
 
 type virtualInstance struct {
@@ -37,15 +37,15 @@ type virtualInstance struct {
 	Ip         string `json:"ip"`
 }
 
-// newClusterCmd builds the command group; it is registered as 'cluster' and, deprecated
+// newK8sRunCmd builds the command group; it is registered as 'k8srun' and, deprecated
 // and hidden, as 'virtual'.
-func newClusterCmd(use, deprecated string) *cobra.Command {
+func newK8sRunCmd(use, deprecated string) *cobra.Command {
 	group := &cobra.Command{
 		Use:   use,
 		Short: "(Wandelbots internal) Create or destroy Kubernetes clusters with Wandelbots NOVA OS",
 		Long: `(Wandelbots internal) Create or destroy Kubernetes clusters with Wandelbots NOVA OS.
 
-Each cluster is added to the local instance list as kind "cluster" (see 'nova instance').
+Each cluster is added to the local instance list as kind "k8srun" (see 'nova instance').
 Its kubeconfig is stored in ~/.nova/instances/<name>/kubeconfig.
 
 'nova virtual' is a deprecated alias of this command.`,
@@ -62,20 +62,20 @@ and select it.
 With --name, the cluster is added under that name; if the name is taken, the command
 fails unless --replace is given, which destroys the existing cluster of that name first.
 
-Without --name, the cluster is named "cluster" and replaces the previous unnamed cluster
+Without --name, the cluster is named "k8srun" and replaces the previous unnamed cluster
 (previous behaviour; named clusters are never touched). The kubeconfig is then also
 written to ./kubeconfig.`,
 		Example: `# several clusters side by side
-$ nova cluster create --name sim-a
-$ nova cluster create --name sim-b
+$ nova k8srun create --name sim-a
+$ nova k8srun create --name sim-b
 $ nova --instance sim-a app list
 
 # replace the unnamed cluster
-$ nova cluster create`,
+$ nova k8srun create`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name, replace := clusterName, clusterReplace
+			name, replace := k8srunName, k8srunReplace
 			if name == "" {
-				name, replace = defaultClusterName, true
+				name, replace = defaultK8sRunName, true
 			}
 			if err := instances.ValidateName(name); err != nil {
 				return err
@@ -86,7 +86,7 @@ $ nova cluster create`,
 				return err
 			}
 			if existing, ok := r.Get(name); ok {
-				if existing.Kind != instances.KindCluster {
+				if existing.Kind != instances.KindK8sRun {
 					return fmt.Errorf("%w: %q is a %s instance, choose another --name", instances.ErrExists, name, existing.Kind)
 				}
 				if !replace {
@@ -115,7 +115,7 @@ $ nova cluster create`,
 
 			if err := r.Put(instances.Instance{
 				Name:       name,
-				Kind:       instances.KindCluster,
+				Kind:       instances.KindK8sRun,
 				Host:       instance.Ip,
 				ID:         instance.Id,
 				Kubeconfig: kubeconfig,
@@ -127,7 +127,7 @@ $ nova cluster create`,
 				return err
 			}
 
-			if clusterName == "" {
+			if k8srunName == "" {
 				if err := os.WriteFile("kubeconfig", kubeBytes, 0o600); err != nil {
 					return err
 				}
@@ -154,7 +154,7 @@ Without a name, the targeted instance is destroyed; it must be a cluster.`,
 				}
 				var ok bool
 				if inst, ok = r.Get(args[0]); !ok {
-					return fmt.Errorf("%w: %q (see 'nova cluster list')", instances.ErrNotFound, args[0])
+					return fmt.Errorf("%w: %q (see 'nova k8srun list')", instances.ErrNotFound, args[0])
 				}
 			} else {
 				t, err := ensureTarget()
@@ -166,7 +166,7 @@ Without a name, the targeted instance is destroyed; it must be a cluster.`,
 				}
 				inst = t
 			}
-			if err := requireKind(inst, instances.KindCluster, "destroy"); err != nil {
+			if err := requireKind(inst, instances.KindK8sRun, "destroy"); err != nil {
 				return err
 			}
 			if inst.ID == "" {
@@ -206,7 +206,7 @@ Without a name, the targeted instance is destroyed; it must be a cluster.`,
 			}
 			clusters := &instances.Registry{Current: r.Current}
 			for _, i := range r.Instances {
-				if i.Kind == instances.KindCluster {
+				if i.Kind == instances.KindK8sRun {
 					clusters.Instances = append(clusters.Instances, i)
 				}
 			}
@@ -216,8 +216,8 @@ Without a name, the targeted instance is destroyed; it must be a cluster.`,
 	}
 
 	create.Flags().StringVarP(&virtualNovaVersion, "version", "v", "x.x.x", "Version of the service manager to install.")
-	create.Flags().StringVarP(&clusterName, "name", "n", "", "Name of the cluster in the local instance list (default \"cluster\", replacing the previous unnamed one)")
-	create.Flags().BoolVar(&clusterReplace, "replace", false, "Destroy an existing cluster with the same name first")
+	create.Flags().StringVarP(&k8srunName, "name", "n", "", "Name of the cluster in the local instance list (default \"k8srun\", replacing the previous unnamed one)")
+	create.Flags().BoolVar(&k8srunReplace, "replace", false, "Destroy an existing cluster with the same name first")
 
 	for _, c := range []*cobra.Command{create, destroy, list} {
 		c.Deprecated = deprecated
@@ -325,6 +325,6 @@ func destroyVirtual(instanceId string) error {
 }
 
 func init() {
-	rootCmd.AddCommand(newClusterCmd("cluster", ""))
-	rootCmd.AddCommand(newClusterCmd("virtual", "use 'nova cluster' instead"))
+	rootCmd.AddCommand(newK8sRunCmd("k8srun", ""))
+	rootCmd.AddCommand(newK8sRunCmd("virtual", "use 'nova k8srun' instead"))
 }
