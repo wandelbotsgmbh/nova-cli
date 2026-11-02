@@ -46,7 +46,7 @@ func runNova(t *testing.T, args ...string) (string, string, error) {
 	k8srunName, k8srunReplace = "", false
 	hostAddInstanceCmd, cellAddInstanceCmd, selectAddInstanceCmd, sshUserAddInstanceCmd = "", "", false, ""
 	kubeconfigSSHUser, kubeconfigSSHPort, kubeconfigNoSudo, kubeconfigRefresh, kubeconfigSetupSSH = "", 0, false, false, false
-	envShell, envUnset = "", false
+	envShell, envUnset, kubeconfigFrom = "", false, ""
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)

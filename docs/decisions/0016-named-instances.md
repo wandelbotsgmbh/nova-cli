@@ -37,7 +37,7 @@ pointed at one entry for a single invocation.
   |---|---|---|
   | `cloud` | portal.wandelbots.io instance | `nova instance create`, `nova instance select <cloud-id>` |
   | `host` | any reachable NOVA host (on-prem IPC, own server) | `nova instance add <name> --host <url>` |
-  | `k8srun` | Wandelbots-internal Kubernetes cluster with NOVA, comes with a kubeconfig | `nova k8srun create` |
+  | `k8srun` | Kubernetes cluster with NOVA from a Wandelbots-internal service (Wandelbots network only), comes with a kubeconfig: for workflows that need the Kubernetes API (skaffold, helm, kubectl) when no device is at hand | `nova k8srun create` |
 
   The kind says **where the instance runs**, never whether its robots are real; that
   stays a per-controller lookup (ADR-0009).
@@ -72,7 +72,9 @@ pointed at one entry for a single invocation.
   the instance's kubeconfig: stored on `k8srun create`, fetched once over ssh for `host`
   entries (`sudo -n <k3s> kubectl config view --raw`, server rewritten from 127.0.0.1 to
   the host, stored with mode 0600 next to the entry; `--refresh` fetches again;
-  `--setup-ssh-key` reuses the k3s-scoped sudo rule of `app install --copy-image`), not
+  `--setup-ssh-key` reuses the k3s-scoped sudo rule of `app install --copy-image`; or
+  imported from a file with `--kubeconfig <file|->` on `instance add` / `instance kubeconfig`,
+  without ssh), not
   available for `cloud`. `nova instance env [name]` prints `NOVA_INSTANCE` and
   `KUBECONFIG` exports for `eval` in the syntax of the calling shell (sh, fish, PowerShell; detected from the parent process), so a shell can be pinned to an
   instance without changing the selection. Only paths are printed, never the content; it

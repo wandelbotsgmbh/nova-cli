@@ -29,6 +29,7 @@ var (
 	kubeconfigSetupSSH bool
 	envShell           string
 	envUnset           bool
+	kubeconfigFrom     string
 )
 
 // k3s keeps the admin kubeconfig root-readable at /etc/rancher/k3s/k3s.yaml;
@@ -47,6 +48,9 @@ var kubeconfigInstanceCmd = &cobra.Command{
   needs sudo), with the server address changed from 127.0.0.1 to the instance's host,
   and stored in ~/.nova/instances/<name>/kubeconfig (mode 0600). Use --refresh to fetch
   it again. The ssh user is remembered for the instance.
+  If you already have the kubeconfig (e.g. a copy of /etc/rancher/k3s/k3s.yaml from the
+  device), pass it with --kubeconfig <file> (or '-' for stdin) instead: no ssh is needed;
+  a copy is stored the same way, with a 127.0.0.1 server pointed to the host.
 - cloud: not available.
 
 Only the path is printed, never the content. The kubeconfig grants admin access to the
@@ -56,7 +60,12 @@ instance that drives real robots.
 Without a TTY, sudo can't prompt for a password. Run once with --setup-ssh-key to install
 your ssh key and a k3s-only passwordless sudo rule (the same as
 'nova app install --setup-ssh-key'), or use --no-sudo when logging in as root.`,
-	Example: `$ nova instance kubeconfig lab --ssh-user admin --setup-ssh-key
+	Example: `# fetch it over ssh
+$ nova instance kubeconfig lab --ssh-user admin --setup-ssh-key
+
+# or use a kubeconfig you already have
+$ nova instance kubeconfig lab --kubeconfig ./k3s.yaml
+
 $ kubectl --kubeconfig "$(nova instance kubeconfig lab)" get pods -A
 
 # or set KUBECONFIG and NOVA_INSTANCE for this shell
@@ -140,6 +149,7 @@ func init() {
 		c.Flags().IntVar(&kubeconfigSSHPort, "ssh-port", 0, "SSH port. If 0, your ssh config or the default applies.")
 		c.Flags().BoolVar(&kubeconfigNoSudo, "no-sudo", false, "Read the kubeconfig without sudo (e.g. when connecting as root).")
 		c.Flags().BoolVar(&kubeconfigRefresh, "refresh", false, "Fetch the kubeconfig of a host instance again.")
+		c.Flags().StringVar(&kubeconfigFrom, "kubeconfig", "", "Use this kubeconfig file ('-' for stdin) instead of fetching it over ssh; a copy is stored for the instance.")
 		c.Flags().BoolVar(&kubeconfigSetupSSH, "setup-ssh-key", false, "Before fetching, install your SSH public key and (unless --no-sudo) a passwordless sudo rule for k3s on the host. Needs the SSH and one sudo password once.")
 	}
 	envInstanceCmd.Flags().StringVar(&envShell, "shell", "", "Shell syntax: sh (bash, zsh), fish or powershell. Detected from the calling shell if empty.")
@@ -177,10 +187,19 @@ func instanceKubeconfig(cmd *cobra.Command, args []string) (string, error) {
 		return "", err
 	}
 
+	if inst.Kind == instances.KindCloud {
+		return "", fmt.Errorf("cloud instance %q has no kubeconfig", inst.Name)
+	}
+	if kubeconfigFrom != "" {
+		content, err := readKubeconfigSource(cmd.InOrStdin(), kubeconfigFrom)
+		if err != nil {
+			return "", err
+		}
+		return storeKubeconfig(inst, content, "")
+	}
+
 	stored := inst.Kubeconfig != "" && fileExists(inst.Kubeconfig)
 	switch inst.Kind {
-	case instances.KindCloud:
-		return "", fmt.Errorf("cloud instance %q has no kubeconfig", inst.Name)
 	case instances.KindK8sRun:
 		if !stored {
 			return "", fmt.Errorf("kubeconfig of %q is missing; recreate it with 'nova k8srun create --name %s --replace'", inst.Name, inst.Name)
@@ -220,7 +239,26 @@ func instanceKubeconfig(cmd *cobra.Command, args []string) (string, error) {
 		return "", fmt.Errorf("fetching the kubeconfig from %s failed: %w%s", target.Host, err, hint)
 	}
 
-	rewritten, err := rewriteKubeconfigServer([]byte(content), target.Host)
+	return storeKubeconfig(inst, []byte(content), kubeconfigSSHUser)
+}
+
+// readKubeconfigSource reads a kubeconfig from a file, or from in for "-".
+func readKubeconfigSource(in io.Reader, src string) ([]byte, error) {
+	if src == "-" {
+		return io.ReadAll(in)
+	}
+	return os.ReadFile(src)
+}
+
+// storeKubeconfig validates content, points a loopback server (as k3s writes it) to the
+// instance's host, stores it with mode 0600 next to the entry and records its path
+// (and sshUser, if given) in the entry.
+func storeKubeconfig(inst instances.Instance, content []byte, sshUser string) (string, error) {
+	host := ""
+	if inst.Host != "" {
+		host = hostname(inst.Host)
+	}
+	rewritten, err := rewriteKubeconfigServer(content, host)
 	if err != nil {
 		return "", err
 	}
@@ -233,12 +271,12 @@ func instanceKubeconfig(cmd *cobra.Command, args []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if stored, ok := r.Get(inst.Name); ok {
-		stored.Kubeconfig = path
-		if kubeconfigSSHUser != "" {
-			stored.SSHUser = kubeconfigSSHUser
+	if entry, ok := r.Get(inst.Name); ok {
+		entry.Kubeconfig = path
+		if sshUser != "" {
+			entry.SSHUser = sshUser
 		}
-		if err := r.Put(stored); err != nil {
+		if err := r.Put(entry); err != nil {
 			return "", err
 		}
 		if err := saveRegistry(r); err != nil {
@@ -266,22 +304,22 @@ func k3sKubeconfigRemoteCommand(target remote.Target, useSudo bool) string {
 }
 
 // rewriteKubeconfigServer points clusters that use a loopback address (as k3s writes
-// it) to host, keeping scheme and port.
+// it) to host, keeping scheme and port. An empty host only validates.
 func rewriteKubeconfigServer(content []byte, host string) ([]byte, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(content, &doc); err != nil {
-		return nil, fmt.Errorf("the host returned no valid kubeconfig: %w", err)
+		return nil, fmt.Errorf("not a valid kubeconfig: %w", err)
 	}
 	clusters, _ := doc["clusters"].([]any)
 	if len(clusters) == 0 {
-		return nil, errors.New("the host returned a kubeconfig without clusters")
+		return nil, errors.New("not a valid kubeconfig: no clusters")
 	}
 	for _, c := range clusters {
 		entry, _ := c.(map[string]any)
 		cluster, _ := entry["cluster"].(map[string]any)
 		server, _ := cluster["server"].(string)
 		u, err := url.Parse(server)
-		if err != nil || u.Host == "" {
+		if host == "" || err != nil || u.Host == "" {
 			continue
 		}
 		switch u.Hostname() {

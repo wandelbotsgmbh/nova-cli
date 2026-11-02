@@ -223,3 +223,44 @@ func TestShellFromName(t *testing.T) {
 		}
 	}
 }
+
+func TestKubeconfigImport(t *testing.T) {
+	withConfig(t, "")
+	src := filepath.Join(t.TempDir(), "k3s.yaml")
+	if err := os.WriteFile(src, []byte(k3sKubeconfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// via add: no ssh involved (no fake ssh on PATH)
+	mustRun(t, "instance", "add", "lab", "--host", "https://192.168.1.10", "--kubeconfig", src)
+	r, _ := instances.Load(viper.GetViper())
+	lab, _ := r.Get("lab")
+	content, err := os.ReadFile(lab.Kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "server: https://192.168.1.10:6443") {
+		t.Errorf("loopback server not pointed to the host:\n%s", content)
+	}
+	if fi, _ := os.Stat(lab.Kubeconfig); fi.Mode().Perm() != 0o600 {
+		t.Errorf("stored copy mode = %v", fi.Mode().Perm())
+	}
+	if out := strings.TrimSpace(mustRun(t, "instance", "kubeconfig", "lab")); out != lab.Kubeconfig {
+		t.Errorf("kubeconfig path = %q, want the stored copy %q", out, lab.Kubeconfig)
+	}
+
+	// replace it from stdin; a non-loopback server is kept as is
+	other := strings.Replace(k3sKubeconfig, "https://127.0.0.1:6443", "https://k8s.example.com:6443", 1)
+	rootCmd.SetIn(strings.NewReader(other))
+	t.Cleanup(func() { rootCmd.SetIn(nil) })
+	mustRun(t, "instance", "kubeconfig", "lab", "--kubeconfig", "-")
+	if content, _ := os.ReadFile(lab.Kubeconfig); !strings.Contains(string(content), "server: https://k8s.example.com:6443") {
+		t.Errorf("stdin import:\n%s", content)
+	}
+
+	bad := filepath.Join(t.TempDir(), "bad.yaml")
+	_ = os.WriteFile(bad, []byte("hello: world\n"), 0o644)
+	if _, _, err := runNova(t, "instance", "kubeconfig", "lab", "--kubeconfig", bad); err == nil || !strings.Contains(err.Error(), "not a valid kubeconfig") {
+		t.Errorf("invalid file: err = %v", err)
+	}
+}

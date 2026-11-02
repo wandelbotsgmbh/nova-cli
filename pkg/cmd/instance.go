@@ -90,7 +90,7 @@ instance of kind "host". Nothing is changed on the host itself.
 
 If no instance is selected yet, the new one is selected. Fails if the name is taken;
 use 'nova --instance <name> config set host <url>' to change an existing entry.`,
-	Example: `$ nova instance add lab --host 192.168.1.10
+	Example: `$ nova instance add lab --host 192.168.1.10 --kubeconfig ./k3s.yaml
 $ nova instance add line2 --host https://ipc-line2.example.com --cell line2 --select`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if hostAddInstanceCmd == "" {
@@ -117,6 +117,15 @@ $ nova instance add line2 --host https://ipc-line2.example.com --cell line2 --se
 			return err
 		}
 		fmt.Fprintf(cmd.ErrOrStderr(), "added instance %q (%s)\n", inst.Name, inst.Host)
+		if kubeconfigFrom != "" {
+			content, err := readKubeconfigSource(cmd.InOrStdin(), kubeconfigFrom)
+			if err == nil {
+				_, err = storeKubeconfig(inst, content, "")
+			}
+			if err != nil {
+				return fmt.Errorf("instance %q was added, but its kubeconfig wasn't stored: %w", inst.Name, err)
+			}
+		}
 		return nil
 	},
 }
@@ -583,6 +592,7 @@ func init() {
 	addInstanceCmd.Flags().StringVar(&hostAddInstanceCmd, "host", "", "Host of the NOVA instance, e.g. 192.168.1.10 or https://ipc.example.com (required)")
 	addInstanceCmd.Flags().StringVar(&cellAddInstanceCmd, "cell", "", "Cell to work with on this instance (default \"cell\")")
 	addInstanceCmd.Flags().StringVar(&sshUserAddInstanceCmd, "ssh-user", "", "SSH user for 'nova instance kubeconfig' on this host")
+	addInstanceCmd.Flags().StringVar(&kubeconfigFrom, "kubeconfig", "", "Kubeconfig file of the host ('-' for stdin); a copy is stored for 'nova instance kubeconfig/env'")
 	addInstanceCmd.Flags().BoolVar(&selectAddInstanceCmd, "select", false, "Select the new instance (it is always selected if no instance is selected yet)")
 
 	infoInstanceCmd.Flags().BoolVar(&printHostInstanceInfoCmd, "host", false, "Only return the host of the instance instead of the full information.")

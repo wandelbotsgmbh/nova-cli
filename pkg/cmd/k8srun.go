@@ -40,13 +40,26 @@ type virtualInstance struct {
 func newK8sRunCmd(use, deprecated string) *cobra.Command {
 	group := &cobra.Command{
 		Use:   use,
-		Short: "(Wandelbots internal) Create or destroy Kubernetes clusters with Wandelbots NOVA OS",
+		Short: "(Wandelbots internal) Create or destroy Kubernetes clusters with Wandelbots NOVA OS and a kubeconfig",
 		Long: `(Wandelbots internal) Create or destroy Kubernetes clusters with Wandelbots NOVA OS.
 
+These clusters are provided by a Wandelbots-internal service and only work from the
+Wandelbots network; outside Wandelbots, use a cloud instance ('nova instance create') or
+your own device ('nova instance add').
+
+Unlike a cloud instance, a k8srun cluster comes with a kubeconfig, i.e. access to the
+Kubernetes API. That makes it the choice when a workflow needs Kubernetes (e.g. skaffold,
+helm or kubectl during app development) and no physical device is at hand. A cluster
+expires after 12 hours.
+
 Each cluster is added to the local instance list as kind "k8srun" (see 'nova instance').
-Its kubeconfig is stored in ~/.nova/instances/<name>/kubeconfig.
+Its kubeconfig is stored in ~/.nova/instances/<name>/kubeconfig; point your shell to it
+with 'eval "$(nova instance env <name>)"'.
 
 'nova virtual' is a deprecated alias of this command.`,
+		Example: `$ nova k8srun create --name dev
+$ eval "$(nova instance env dev)"
+$ skaffold dev`,
 	}
 
 	create := &cobra.Command{
