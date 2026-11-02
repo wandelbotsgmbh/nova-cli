@@ -14,7 +14,7 @@
                 "BASE_PATH": "/{{ .InstanceInformation.CellName }}/{{ .PluginName }}",
                 "LOG_LEVEL": "debug",
                 "NOVA_API": "{{ .InstanceInformation.NovaApiHost }}",
-                "CELL": "{{ .InstanceInformation.CellName }}",
+                "CELL_NAME": "{{ .InstanceInformation.CellName }}",
                 "ACCESS_TOKEN": "{{ .InstanceInformation.AccessToken }}",
             }
         },

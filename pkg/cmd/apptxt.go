@@ -3,8 +3,8 @@ package cmd
 const createAppTxtLong = `This will create a new app project for NOVA OS to get you started quickly.
 It contains a basic structure to build and deploy your app.
 
-Different programming languages are supported. Use with --generator to choose between python (python_app) and
-typescript (nextjs_app).`
+Different programming languages are supported. Use with --generator to choose between python (python_app),
+typescript (nextjs_app), go (golang_app) and rust (rust_app).`
 
 const installAppTxtLong = `Installs an app to Wandelbots NOVA OS
 This command will install the app depending on the provided source.

@@ -1,0 +1,28 @@
+[package]
+name = "{{ .PluginName }}"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# the binary is always called "app", so the Dockerfile does not depend on the project name
+[[bin]]
+name = "app"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "rustls-no-provider"] }
+# ring instead of the default aws-lc-rs: it cross-compiles with a plain C compiler (see Dockerfile)
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tower = "0.5"
+tower-http = { version = "0.7", features = ["cors", "normalize-path", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+utoipa = "6"
+
+[profile.release]
+strip = true
+lto = "thin"

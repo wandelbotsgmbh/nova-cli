@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"{{ .PluginName }}/internal/api"
@@ -57,7 +58,7 @@ func main() {
 		})
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	// Start server
 	go func() {
@@ -83,9 +84,9 @@ func logging() echo.MiddlewareFunc {
 		HandleError: true, // forwards error to the global error handler, so it can decide appropriate status code
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
 			if v.Error == nil {
-				slog.Debug("http request", slog.String("uri", v.URI), slog.Int("uri", v.Status))
+				slog.Debug("http request", slog.String("uri", v.URI), slog.Int("status", v.Status))
 			} else {
-				slog.Error("http error", slog.String("uri", v.URI), slog.Int("uri", v.Status), slog.Any("error", v.Error))
+				slog.Error("http error", slog.String("uri", v.URI), slog.Int("status", v.Status), slog.Any("error", v.Error))
 			}
 			return nil
 		},
