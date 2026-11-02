@@ -139,18 +139,52 @@ jobs:
             FLAGS=-X 'github.com/wandelbotsgmbh/nova-cli/pkg/version.cliVersion=ci-${{ github.sha }}'
           push: false
 
+  # Decides whether a PR needs the e2e test. It is skipped only if every changed
+  # file is on the skip list (markdown outside pkg/, the docs site, other
+  # workflows), so new directories run e2e by default. A skipped required check
+  # counts as passed.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      e2e: ${{ steps.filter.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # the PR merge commit and its first parent (the base branch)
+          fetch-depth: 2
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "e2e=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only HEAD^1 HEAD > changed.txt
+          cat changed.txt
+          skip='(^|/)[^/]*\.md$|^hack/docsite/|^LICENSE$|^\.github/'
+          run='^pkg/|^\.github/workflows/ci\.yml$'
+          if grep -Ev "$skip" changed.txt | grep -q . || grep -Eq "$run" changed.txt; then
+            echo "e2e=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "e2e=false" >> "$GITHUB_OUTPUT"
+            echo "Only docs or unrelated workflows changed, skipping e2e." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # End-to-end test against a temporary instance on the prod portal: install a
   # cell, create an app and install it. The app image goes to a private GHCR
   # package; `nova app install` hands the docker login to the instance as pull
-  # secret. Needs secrets, so it's skipped for fork and Dependabot PRs.
+  # secret. Needs secrets, so it's skipped for fork and Dependabot PRs, and for
+  # PRs that only change docs (see changes).
   e2e:
     runs-on: ubuntu-latest
     if: >-
-      github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'pull_request'
-        && github.event.pull_request.head.repo.full_name == github.repository
-        && github.actor != 'dependabot[bot]')
-    needs: [build]
+      needs.changes.outputs.e2e == 'true'
+      && (github.event_name == 'workflow_dispatch'
+        || (github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && github.actor != 'dependabot[bot]'))
+    needs: [build, changes]
     timeout-minutes: 45
     permissions:
       contents: read
