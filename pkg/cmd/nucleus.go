@@ -226,7 +226,7 @@ Supported directions:
 		case srcIsNucleus && !dstIsNucleus:
 			// Nucleus -> Local (download, supports files and directories)
 			nSrc := stripNucleusPrefix(src)
-			if err := downloadRecursive(ctx, client, nSrc, dst); err != nil {
+			if err := downloadRecursive(ctx, client, nSrc, dst, cmd.ErrOrStderr()); err != nil {
 				return err
 			}
 		}
@@ -469,7 +469,12 @@ func completeNucleusRemotePath(cmd *cobra.Command, toComplete string) ([]string,
 }
 
 // downloadRecursive downloads a file or directory from Nucleus to the local filesystem.
-func downloadRecursive(ctx context.Context, client *nucleus.Client, remotePath, localPath string) error {
+//
+// Files that still fail after the client's retries are skipped (nothing is
+// written for them), reported on errOut as they happen, and summarized in the
+// returned error so the command exits non-zero. Errors that aren't per-file
+// (cancellation, listing failures, local filesystem errors) abort immediately.
+func downloadRecursive(ctx context.Context, client *nucleus.Client, remotePath, localPath string, errOut io.Writer) error {
 	// Try as a file first.
 	data, err := client.ReadFile(ctx, remotePath)
 	if err == nil {
@@ -477,6 +482,14 @@ func downloadRecursive(ctx context.Context, client *nucleus.Client, remotePath, 
 			return fmt.Errorf("creating local directory: %w", err)
 		}
 		return os.WriteFile(localPath, data, 0644)
+	}
+	if ctx.Err() != nil {
+		return err
+	}
+	if nucleus.IsTransient(err) {
+		// The server identified the path as a file but could not deliver it;
+		// don't mask that by trying to treat it as a directory.
+		return fmt.Errorf("downloading %s: %w", remotePath, err)
 	}
 
 	// If ReadFile failed, treat as directory.
@@ -491,6 +504,20 @@ func downloadRecursive(ctx context.Context, client *nucleus.Client, remotePath, 
 		return fmt.Errorf("downloading %s: %w", remotePath, err)
 	}
 
+	var failed []string
+	if err := downloadDir(ctx, client, entries, localPath, errOut, &failed); err != nil {
+		return err
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d file(s) failed to download and were skipped:\n  %s",
+			len(failed), strings.Join(failed, "\n  "))
+	}
+	return nil
+}
+
+// downloadDir downloads the given directory entries into localPath,
+// recursing into subdirectories and appending skipped files to failed.
+func downloadDir(ctx context.Context, client *nucleus.Client, entries []nucleus.Entry, localPath string, errOut io.Writer, failed *[]string) error {
 	if err := os.MkdirAll(localPath, 0755); err != nil {
 		return fmt.Errorf("creating local directory %s: %w", localPath, err)
 	}
@@ -503,17 +530,27 @@ func downloadRecursive(ctx context.Context, client *nucleus.Client, remotePath, 
 			if !strings.HasSuffix(childRemote, "/") {
 				childRemote += "/"
 			}
-			if err := downloadRecursive(ctx, client, childRemote, childLocal); err != nil {
+			children, err := client.List(ctx, childRemote)
+			if err != nil {
+				return fmt.Errorf("listing %s: %w", childRemote, err)
+			}
+			if err := downloadDir(ctx, client, children, childLocal, errOut, failed); err != nil {
 				return err
 			}
-		} else {
-			data, err := client.ReadFile(ctx, e.Path)
-			if err != nil {
-				return fmt.Errorf("downloading %s: %w", e.Path, err)
+			continue
+		}
+
+		data, err := client.ReadFile(ctx, e.Path)
+		if err != nil {
+			if ctx.Err() != nil {
+				return err
 			}
-			if err := os.WriteFile(childLocal, data, 0644); err != nil {
-				return fmt.Errorf("writing %s: %w", childLocal, err)
-			}
+			fmt.Fprintf(errOut, "warning: skipping %s: %v\n", e.Path, err)
+			*failed = append(*failed, e.Path)
+			continue
+		}
+		if err := os.WriteFile(childLocal, data, 0644); err != nil {
+			return fmt.Errorf("writing %s: %w", childLocal, err)
 		}
 	}
 	return nil

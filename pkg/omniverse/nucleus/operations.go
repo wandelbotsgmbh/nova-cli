@@ -3,8 +3,11 @@ package nucleus
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -389,10 +392,117 @@ func (c *Client) writeFileConnlib(ctx context.Context, path string, content []by
 	}
 }
 
+// Default retry policy for transient read failures (LFT 5xx, ingress error
+// pages, network errors, content that fails verification). Backoff doubles
+// per attempt: 0.5s, 1s, 2s, 4s. Override via [ClientConfig].
+const (
+	defaultReadMaxAttempts  = 5
+	defaultReadRetryBackoff = 500 * time.Millisecond
+)
+
+// transientError marks a failure that is worth retrying with a fresh read
+// request (and therefore a fresh LFT ticket).
+type transientError struct{ err error }
+
+func (e *transientError) Error() string { return e.err.Error() }
+func (e *transientError) Unwrap() error { return e.err }
+
+// IsTransient reports whether err is a transient download failure that was
+// retried and still failed (e.g. the LFT service kept returning 5xx).
+func IsTransient(err error) bool {
+	var t *transientError
+	return errors.As(err, &t)
+}
+
+// expectedContent is what the read response promises about the file so the
+// downloaded bytes can be verified before they are handed to the caller.
+type expectedContent struct {
+	Size      int64  // -1 when unknown
+	HashType  string // e.g. "sha-256-flat"
+	HashValue string // hex digest
+	BlockSize int    // hash_bsize; 0 when unknown
+}
+
+// FlatHash computes a Nucleus "sha-256-flat" digest: the SHA-256 over the
+// concatenated raw SHA-256 digests of each blockSize-byte block of data
+// (the last block may be shorter). A file that fits in one block therefore
+// hashes to sha256(sha256(data)), not sha256(data). The block size is the
+// hash_bsize field of the read response (1 MiB on current servers).
+func FlatHash(data []byte, blockSize int) string {
+	if blockSize <= 0 {
+		blockSize = len(data)
+	}
+	var digests []byte
+	for start := 0; start < len(data); start += blockSize {
+		end := min(start+blockSize, len(data))
+		sum := sha256.Sum256(data[start:end])
+		digests = append(digests, sum[:]...)
+	}
+	sum := sha256.Sum256(digests)
+	return hex.EncodeToString(sum[:])
+}
+
+// verify checks data against the size and (when the type is known) hash
+// reported by the server. A mismatch means we got something other than the
+// file, most commonly an ingress error page served with HTTP 200.
+//
+// The hash is only checked for "sha-256-flat" with a known block size and
+// non-empty content; anything else is left to the size check.
+func (e expectedContent) verify(data []byte) error {
+	if e.Size >= 0 && int64(len(data)) != e.Size {
+		return fmt.Errorf("size mismatch: got %d bytes, server reported %d", len(data), e.Size)
+	}
+	if e.HashType == "sha-256-flat" && e.HashValue != "" && e.BlockSize > 0 && len(data) > 0 {
+		got := FlatHash(data, e.BlockSize)
+		if !strings.EqualFold(got, e.HashValue) {
+			return fmt.Errorf("sha-256-flat mismatch: got %s, server reported %s", got, e.HashValue)
+		}
+	}
+	return nil
+}
+
 // ReadFile downloads the content of a file.
 // The server may return the content inline (binary after \0) or redirect
 // to the LFT HTTP service via a uri_redirection field.
+//
+// The content is verified against the size and hash reported by the server.
+// Transient failures (LFT 5xx, error pages, network errors, verification
+// mismatches) are retried with exponential backoff; the returned error
+// satisfies [IsTransient] if every attempt failed that way.
 func (c *Client) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	maxAttempts, backoff := c.cfg.ReadMaxAttempts, c.cfg.ReadRetryBackoff
+	if maxAttempts <= 0 {
+		maxAttempts = defaultReadMaxAttempts
+	}
+	if backoff <= 0 {
+		backoff = defaultReadRetryBackoff
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		data, err := c.readFileOnce(ctx, path)
+		if err == nil {
+			return data, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil || !IsTransient(err) {
+			return nil, err
+		}
+		if attempt == maxAttempts {
+			break
+		}
+		delay := backoff << (attempt - 1)
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, &transientError{fmt.Errorf("read %s: giving up after %d attempts: %w", path, maxAttempts, lastErr)}
+}
+
+// readFileOnce performs a single read request without retries.
+func (c *Client) readFileOnce(ctx context.Context, path string) ([]byte, error) {
 	id := c.conn.NextID()
 
 	msg := map[string]any{
@@ -421,7 +531,10 @@ func (c *Client) ReadFile(ctx context.Context, path string) ([]byte, error) {
 		var r struct {
 			Status         string `json:"status"`
 			URIRedirection string `json:"uri_redirection"`
-			Size           int64  `json:"size"`
+			Size           *int64 `json:"size"`
+			HashType       string `json:"hash_type"`
+			HashValue      string `json:"hash_value"`
+			HashBlockSize  int    `json:"hash_bsize"`
 		}
 		if err := json.Unmarshal(frame.JSON, &r); err != nil {
 			return nil, fmt.Errorf("parse read response: %w", err)
@@ -429,40 +542,101 @@ func (c *Client) ReadFile(ctx context.Context, path string) ([]byte, error) {
 		if r.Status != "OK" && r.Status != "LATEST" {
 			return nil, fmt.Errorf("read %s: %s", path, r.Status)
 		}
+		want := expectedContent{Size: -1, HashType: r.HashType, HashValue: r.HashValue, BlockSize: r.HashBlockSize}
+		if r.Size != nil {
+			want.Size = *r.Size
+		}
 		// If the server redirects to LFT, download via HTTP.
 		if r.URIRedirection != "" {
-			return c.downloadLFT(ctx, r.URIRedirection)
+			return c.downloadLFT(ctx, r.URIRedirection, want)
 		}
 		// Otherwise content is inline.
+		if err := want.verify(frame.Binary); err != nil {
+			return nil, &transientError{fmt.Errorf("read %s: inline content: %w", path, err)}
+		}
 		return frame.Binary, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 }
 
-// downloadLFT fetches file content from the LFT HTTP service.
-func (c *Client) downloadLFT(ctx context.Context, url string) ([]byte, error) {
+// lftHTTPClient has dial/TLS/response-header timeouts but no overall
+// timeout, so large downloads aren't killed mid-stream.
+var lftHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		ResponseHeaderTimeout: 60 * time.Second,
+	},
+}
+
+// downloadLFT fetches file content from the LFT HTTP service and verifies it
+// against want.
+//
+// Beware: the ingress in front of LFT may replace a 5xx from the service with
+// its own plain-text error page served as HTTP 200, so a 200 status alone
+// does not mean we got the file. Size/hash verification is what catches that.
+func (c *Client) downloadLFT(ctx context.Context, url string, want expectedContent) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("lft request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := lftHTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("lft download: %w", err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, &transientError{fmt.Errorf("lft download: %w", err)}
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("lft download: HTTP %d", resp.StatusCode)
-	}
-
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("lft read body: %w", err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, &transientError{fmt.Errorf("lft read body: %w", err)}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		err := fmt.Errorf("lft download: HTTP %d: %s", resp.StatusCode, errorPageSummary(data))
+		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests ||
+			resp.StatusCode == http.StatusRequestTimeout {
+			return nil, &transientError{err}
+		}
+		return nil, err
+	}
+
+	if err := want.verify(data); err != nil {
+		if page := errorPageSummary(data); isTextContent(resp.Header.Get("Content-Type")) && page != "" {
+			// The classic failure: ingress error page with a 200 status.
+			return nil, &transientError{fmt.Errorf("lft download: server returned an error page instead of the file: %s", page)}
+		}
+		return nil, &transientError{fmt.Errorf("lft download: %w", err)}
 	}
 
 	return data, nil
+}
+
+// isTextContent reports whether a Content-Type denotes text (plain or HTML),
+// which the LFT service never uses for file content.
+func isTextContent(contentType string) bool {
+	return strings.HasPrefix(contentType, "text/")
+}
+
+// errorPageSummary returns the first non-empty line of an error body (e.g.
+// "Error 503: Service Unavailable"), truncated, or "" if the body is empty.
+func errorPageSummary(body []byte) string {
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if r := []rune(line); len(r) > 120 {
+			line = string(r[:120]) + "…"
+		}
+		return line
+	}
+	return ""
 }
 
 // uploadLFT streams size bytes from body to the LFT HTTP service.

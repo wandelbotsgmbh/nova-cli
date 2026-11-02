@@ -19,7 +19,9 @@ package fakeserver
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,19 +40,87 @@ type Server struct {
 	mu      sync.Mutex
 	entries map[string][]nucleus.Entry // dir path -> entries
 	files   map[string][]byte          // file path -> content
+
+	useLFT      bool           // redirect reads to the fake LFT endpoint
+	lftFailures map[string]int // file path -> error pages still to serve
+	lftRequests map[string]int // file path -> LFT GETs received
 }
 
 // New creates and starts a fake Nucleus server.
 func New() *Server {
 	s := &Server{
-		entries: make(map[string][]nucleus.Entry),
-		files:   make(map[string][]byte),
+		entries:     make(map[string][]nucleus.Entry),
+		files:       make(map[string][]byte),
+		lftFailures: make(map[string]int),
+		lftRequests: make(map[string]int),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/omni/auth", s.handleAuth)
 	mux.HandleFunc("/omni/api", s.handleAPI)
+	mux.HandleFunc("/omni/lft/content/", s.handleLFTContent)
 	s.httpServer = httptest.NewServer(mux)
 	return s
+}
+
+// lftHashBlockSize is the hash_bsize real servers report (1 MiB); kept small
+// here so tests exercise multi-block hashing with tiny files.
+const lftHashBlockSize = 4
+
+// UseLFT makes read responses redirect to the fake LFT HTTP endpoint (with
+// size and sha-256-flat hash) instead of inlining the content, mirroring
+// what real servers do for most files.
+func (s *Server) UseLFT(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.useLFT = on
+}
+
+// FailLFT makes the next n LFT downloads of path return what the real
+// ingress serves when the LFT service is down: a plain-text error page
+// with HTTP 200. Later requests serve the real content.
+func (s *Server) FailLFT(path string, n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lftFailures[path] = n
+}
+
+// LFTRequests returns how many LFT downloads were attempted for path.
+func (s *Server) LFTRequests(path string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lftRequests[path]
+}
+
+// handleLFTContent serves GET /omni/lft/content/?ticket=<base64 path>.
+func (s *Server) handleLFTContent(w http.ResponseWriter, r *http.Request) {
+	pathBytes, err := base64.StdEncoding.DecodeString(r.URL.Query().Get("ticket"))
+	if err != nil {
+		http.Error(w, `{"code": 6, "message": "Invalid ticket."}`, http.StatusBadRequest)
+		return
+	}
+	path := string(pathBytes)
+
+	s.mu.Lock()
+	s.lftRequests[path]++
+	content, ok := s.files[path]
+	fail := s.lftFailures[path] > 0
+	if fail {
+		s.lftFailures[path]--
+	}
+	s.mu.Unlock()
+
+	if !ok {
+		http.Error(w, `{"code": 6, "message": "Invalid ticket."}`, http.StatusBadRequest)
+		return
+	}
+	if fail {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "Error 503: Service Unavailable\nThe server is temporarily overloading or down\n\nHost: fake\nOriginal URI: %s\nIngress Name: nucleus-lft\n", r.URL.RequestURI())
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Write(content)
 }
 
 // Close shuts down the fake server.
@@ -329,6 +399,21 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 			if !ok {
 				s.reply(ctx, conn, id, map[string]any{"status": "INVALID_URI"})
+				continue
+			}
+			s.mu.Lock()
+			useLFT := s.useLFT
+			s.mu.Unlock()
+			if useLFT {
+				ticket := base64.StdEncoding.EncodeToString([]byte(uri))
+				s.reply(ctx, conn, id, map[string]any{
+					"status":          "OK",
+					"uri_redirection": s.httpServer.URL + "/omni/lft/content/?ticket=" + ticket,
+					"size":            len(content),
+					"hash_type":       "sha-256-flat",
+					"hash_value":      nucleus.FlatHash(content, lftHashBlockSize),
+					"hash_bsize":      lftHashBlockSize,
+				})
 				continue
 			}
 			// Send response with binary data.

@@ -71,4 +71,13 @@ type ClientConfig struct {
 
 	// UserAgent identifies this client to the server.
 	UserAgent string
+
+	// ReadMaxAttempts is how many times a file read is attempted when it
+	// fails transiently (LFT 5xx, ingress error pages, network errors,
+	// content that fails size/hash verification). Zero means the default (5).
+	ReadMaxAttempts int
+
+	// ReadRetryBackoff is the delay before the second read attempt; it
+	// doubles on every further attempt. Zero means the default (500ms).
+	ReadRetryBackoff time.Duration
 }

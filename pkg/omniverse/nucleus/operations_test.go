@@ -2,6 +2,8 @@ package nucleus_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -344,4 +346,147 @@ func TestEnsureParentDirs(t *testing.T) {
 		t.Fatalf("List created dir: %v", err)
 	}
 	_ = entries
+}
+
+// dialFakeFastRetry dials the fake server with a retry policy that keeps
+// tests quick: 3 attempts, 10ms base backoff.
+func dialFakeFastRetry(t *testing.T, fake *fakeserver.Server) *nucleus.Client {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err := nucleus.Dial(ctx, nucleus.ClientConfig{
+		Host:             fake.Host(),
+		APIToken:         "fake-token",
+		TLS:              false,
+		ReadMaxAttempts:  3,
+		ReadRetryBackoff: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	return client
+}
+
+func TestReadFileLFT(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("binary-image-data"))
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	ctx := context.Background()
+	data, err := client.ReadFile(ctx, "/Projects/tex.png")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "binary-image-data" {
+		t.Errorf("content = %q, want %q", data, "binary-image-data")
+	}
+	if n := fake.LFTRequests("/Projects/tex.png"); n != 1 {
+		t.Errorf("LFT requests = %d, want 1", n)
+	}
+}
+
+// The ingress in front of LFT serves its own error page with HTTP 200 when
+// the service is overloaded (issue #41). ReadFile must not return that page
+// as file content; it retries with a fresh ticket and succeeds.
+func TestReadFileLFTRetriesErrorPage(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("binary-image-data"))
+	fake.FailLFT("/Projects/tex.png", 2)
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	data, err := client.ReadFile(context.Background(), "/Projects/tex.png")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "binary-image-data" {
+		t.Errorf("content = %q, want %q", data, "binary-image-data")
+	}
+	if n := fake.LFTRequests("/Projects/tex.png"); n != 3 {
+		t.Errorf("LFT requests = %d, want 3 (2 error pages + 1 success)", n)
+	}
+}
+
+func TestReadFileLFTGivesUp(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("binary-image-data"))
+	fake.FailLFT("/Projects/tex.png", 100)
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	data, err := client.ReadFile(context.Background(), "/Projects/tex.png")
+	if err == nil {
+		t.Fatalf("ReadFile succeeded with content %q, want error", data)
+	}
+	if data != nil {
+		t.Errorf("ReadFile returned data %q alongside error", data)
+	}
+	if !nucleus.IsTransient(err) {
+		t.Errorf("error is not transient: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Error 503: Service Unavailable") {
+		t.Errorf("error should name the server's error page, got: %v", err)
+	}
+	if n := fake.LFTRequests("/Projects/tex.png"); n != 3 {
+		t.Errorf("LFT requests = %d, want 3 (max attempts)", n)
+	}
+}
+
+func TestReadFileLFTNotFoundIsNotRetried(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("x"))
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	// Server-side "not a file" errors come back immediately.
+	_, err := client.ReadFile(context.Background(), "/Projects/missing.png")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if nucleus.IsTransient(err) {
+		t.Errorf("INVALID_URI must not be transient: %v", err)
+	}
+}
+
+func TestReadFileRetryHonoursContext(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("x"))
+	fake.FailLFT("/Projects/tex.png", 100)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err := nucleus.Dial(ctx, nucleus.ClientConfig{
+		Host: fake.Host(), APIToken: "fake-token", TLS: false,
+		ReadMaxAttempts: 10, ReadRetryBackoff: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer client.Close()
+
+	readCtx, readCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer readCancel()
+	start := time.Now()
+	_, err = client.ReadFile(readCtx, "/Projects/tex.png")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want context deadline exceeded", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("ReadFile did not stop waiting on context cancel")
+	}
 }
