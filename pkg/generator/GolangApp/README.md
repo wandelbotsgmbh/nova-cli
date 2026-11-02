@@ -3,7 +3,7 @@
 ## Development
 
 - (re-)generate api stubs with `go generate ./...`
-- `nova app env` writes the settings for your configured instance (`nova config view`) into the gitignored `.env.local`:
+- `nova app update-env` writes the settings for your configured instance (`nova config view`) into the gitignored `.env.local`:
   `NOVA_API`, `CELL_NAME`, `BASE_PATH` and, for portal instances, a fresh `ACCESS_TOKEN`.
   Run it again when the token expired (the instance answers `Error 401: Unauthorized`) or after switching the instance.
 - run locally with `go run .` (served on `http://localhost:8080` + `BASE_PATH`), or press `F5` in vscode to run/debug

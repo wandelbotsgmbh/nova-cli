@@ -40,7 +40,7 @@ func TestUpdateCreatesPrivateFile(t *testing.T) {
 		t.Errorf("mode = %v, want 0600", info.Mode().Perm())
 	}
 	got, _ := os.ReadFile(path)
-	if want := "# Local development settings, updated by `nova app env`.\n# Contains an access token: keep this file out of git.\nACCESS_TOKEN=\"secret\"\nLOG_LEVEL=\"debug\"\n"; string(got) != want {
+	if want := "# Local development settings, updated by `nova app update-env`.\n# Contains an access token: keep this file out of git.\nACCESS_TOKEN=\"secret\"\nLOG_LEVEL=\"debug\"\n"; string(got) != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }

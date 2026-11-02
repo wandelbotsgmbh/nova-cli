@@ -18,7 +18,7 @@ use crate::nova::NovaClient;
 
 #[tokio::main]
 async fn main() {
-    // local development settings, written by `nova app env`. Variables already set in the
+    // local development settings, written by `nova app update-env`. Variables already set in the
     // environment take precedence; in the container the platform sets them and there is no file.
     let env_file = dotenvy::from_filename(".env.local").ok();
 

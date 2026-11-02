@@ -101,7 +101,7 @@ Existing lines in the file are kept, only the managed variables are replaced:
 'nova app create' runs this once for a new project.`
 
 const envAppTxtExample = `# update the env file of the app project in the current directory
-nova app env
+nova app update-env
 
 # update the env file of another app project
-nova app env path/to/your-nova-app`
+nova app update-env path/to/your-nova-app`

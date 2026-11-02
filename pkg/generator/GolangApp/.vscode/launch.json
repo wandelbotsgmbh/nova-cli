@@ -1,5 +1,5 @@
 {
-    // The app reads its settings from .env.local, run `nova app env` to create or refresh it.
+    // The app reads its settings from .env.local, run `nova app update-env` to create or refresh it.
     "version": "0.2.0",
     "configurations": [
         {

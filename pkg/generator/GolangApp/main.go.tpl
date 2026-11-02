@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	// local development settings, written by `nova app env`. Variables already set in the
+	// local development settings, written by `nova app update-env`. Variables already set in the
 	// environment take precedence; in the container the platform sets them and there is no file.
 	envFileErr := godotenv.Load(".env.local")
 

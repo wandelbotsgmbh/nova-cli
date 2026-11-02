@@ -107,7 +107,7 @@ func Update(path string, values, defaults []KV) error {
 	if len(content) > 0 {
 		lines = strings.Split(strings.TrimRight(string(content), "\n"), "\n")
 	} else {
-		lines = []string{"# Local development settings, updated by `nova app env`.", "# Contains an access token: keep this file out of git."}
+		lines = []string{"# Local development settings, updated by `nova app update-env`.", "# Contains an access token: keep this file out of git."}
 	}
 
 	set := func(kv KV, overwrite bool) {

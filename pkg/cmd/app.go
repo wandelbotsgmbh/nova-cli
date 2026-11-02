@@ -116,8 +116,8 @@ var createAppCmd = &cobra.Command{
 	},
 }
 
-var envAppCmd = &cobra.Command{
-	Use:     "env [path]",
+var updateEnvAppCmd = &cobra.Command{
+	Use:     "update-env [path]",
 	Short:   "Writes the local development settings of an app project",
 	Long:    envAppTxtLong,
 	Example: envAppTxtExample,
@@ -471,7 +471,7 @@ func init() {
 	appCmd.AddCommand(listAppsCmd)
 	appCmd.AddCommand(deleteAppCmd)
 	appCmd.AddCommand(editAppCmd)
-	appCmd.AddCommand(envAppCmd)
+	appCmd.AddCommand(updateEnvAppCmd)
 
 	// TODO generate this flag somehow, with the available generators?
 	// Otherwise possible apps needs to be put into the readme by hand.
@@ -549,7 +549,7 @@ func createAppProject(appName string) error {
 	}
 
 	if err := writeAppEnv(rootCmd, outpath); err != nil {
-		fmt.Printf("Could not write the local development settings: %v\nRun 'nova app env' in %s once that is fixed.\n", err, outpath)
+		fmt.Printf("Could not write the local development settings: %v\nRun 'nova app update-env' in %s once that is fixed.\n", err, outpath)
 	}
 	return nil
 }
