@@ -15,11 +15,11 @@ import (
 
 // Client is a Nucleus API client. Use [Dial] to create one.
 //
-// The API WebSocket can be dropped by the server (observed after ~30 minutes
-// of sustained downloads). Read-only operations (List, Stat, ReadFile)
-// transparently re-dial and re-authenticate when that happens; mutating
-// operations return an error wrapping [connlib.ErrClosed] instead, so the
-// caller decides whether to repeat them.
+// The API WebSocket can die mid-session (laptop sleep, network change,
+// proxy idle timeout, server restart). Read-only operations (List, Stat,
+// ReadFile) transparently re-dial and re-authenticate when that happens;
+// mutating operations return an error wrapping [connlib.ErrClosed] instead,
+// so the caller decides whether to repeat them.
 type Client struct {
 	cfg ClientConfig
 

@@ -492,9 +492,9 @@ func TestReadFileRetryHonoursContext(t *testing.T) {
 	}
 }
 
-// The server (or a proxy) can drop the API WebSocket mid-session — seen
-// after ~30 minutes of sustained downloads. Read-only operations must
-// re-dial and carry on instead of failing every remaining file.
+// The API WebSocket can die mid-session (laptop sleep, network change,
+// proxy idle timeout). Read-only operations must re-dial and carry on
+// instead of failing every remaining file.
 func TestReadFileReconnectsAfterConnectionDrop(t *testing.T) {
 	fake := fakeserver.New()
 	defer fake.Close()
