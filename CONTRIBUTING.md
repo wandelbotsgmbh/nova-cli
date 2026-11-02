@@ -33,12 +33,18 @@ Merges to `main` publish release candidates (`x.y.z-rc.N`, GitHub prereleases).
 Stable versions (Homebrew, winget, docker `latest`) are cut by promoting a
 verified rc. See [RELEASING.md](RELEASING.md).
 
-## Generate Docs
+## CLI Reference
+
+The [CLI reference](https://wandelbotsgmbh.github.io/nova-cli/) is generated from the cobra
+commands and deployed with every stable release; nothing is committed to the repository.
+To preview it locally (needs go and npm):
 
 ```bash
-go build -o nova
-./nova gendoc
+hack/docsite/build.sh   # renders the site into _site/
 ```
+
+`go run . gendoc` writes the plain markdown to `_docs/` (gitignored). The CI job `docs`
+also uploads the rendered site as the `docs-site` artifact of every PR.
 
 ## CLI Command Description
 

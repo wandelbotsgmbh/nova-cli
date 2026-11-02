@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the CLI reference site (GitHub Pages) into ./_site:
-#   1. generates fresh markdown from the cobra commands (into a temp dir, docs/ stays untouched)
+#   1. generates fresh markdown from the cobra commands (into a temp dir)
 #   2. renders it with the NOVA design system template (hack/docsite)
 #   3. vendors design tokens + fonts from npm, so the site loads nothing from third-party CDNs
 #

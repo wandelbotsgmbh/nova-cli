@@ -9,3 +9,4 @@ your-nova-app/
 dist/
 .next-version
 _site/
+_docs/
