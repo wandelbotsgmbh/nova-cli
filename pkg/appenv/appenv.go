@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -30,45 +31,51 @@ type KV struct {
 type Layout struct {
 	// File relative to the project root
 	File string
-	// Variables which are always written
-	Values func(s Settings) []KV
-	// Variables which are only written if not present yet
+	// Variable holding the access token, refreshed on every write
+	TokenKey string
+	// Instance settings (url, cell, base path): only written if missing, unless reset
+	Instance func(s Settings) []KV
+	// Preferences: only written if missing, also on reset
 	Defaults []KV
 }
 
+func basePath(s Settings) string {
+	return "/" + s.Cell + "/" + s.AppName
+}
+
 var serverLayout = Layout{
-	File: ".env.local",
-	Values: func(s Settings) []KV {
+	File:     ".env.local",
+	TokenKey: "ACCESS_TOKEN",
+	Instance: func(s Settings) []KV {
 		return []KV{
 			{"NOVA_API", s.NovaApi},
 			{"CELL_NAME", s.Cell},
-			{"BASE_PATH", "/" + s.Cell + "/" + s.AppName},
-			{"ACCESS_TOKEN", s.AccessToken},
+			{"BASE_PATH", basePath(s)},
 		}
 	},
 	Defaults: []KV{{"LOG_LEVEL", "debug"}},
 }
 
 var nextJsLayout = Layout{
-	File: ".env.local",
-	Values: func(s Settings) []KV {
+	File:     ".env.local",
+	TokenKey: "NOVA_DEV_ACCESS_TOKEN",
+	Instance: func(s Settings) []KV {
 		return []KV{
 			{"NOVA_DEV_INSTANCE_URL", s.NovaApi},
-			{"NOVA_DEV_ACCESS_TOKEN", s.AccessToken},
 			{"CELL_ID", s.Cell},
 		}
 	},
 }
 
 var pythonLayout = Layout{
-	File: ".env",
-	Values: func(s Settings) []KV {
+	File:     ".env",
+	TokenKey: "NOVA_ACCESS_TOKEN",
+	Instance: func(s Settings) []KV {
 		return []KV{
 			{"NOVA_API", s.NovaApi},
 			{"CELL_NAME", s.Cell},
 			// novax registers the programs in the cell's program store under the app name from BASE_PATH
-			{"BASE_PATH", "/" + s.Cell + "/" + s.AppName},
-			{"NOVA_ACCESS_TOKEN", s.AccessToken},
+			{"BASE_PATH", basePath(s)},
 		}
 	},
 }
@@ -91,10 +98,18 @@ func DetectLayout(dir string) (Layout, error) {
 }
 
 // Write updates the env file of the project in dir and returns its path.
-// Existing lines (comments, other variables) are kept, the managed variables are replaced in place.
-func Write(dir string, layout Layout, s Settings) (string, error) {
+// The access token is always replaced. The instance settings are only added if missing,
+// so values edited by hand survive; reset replaces them with the ones from s.
+// Everything else in the file (comments, other variables) is kept.
+func Write(dir string, layout Layout, s Settings, reset bool) (string, error) {
 	path := filepath.Join(dir, layout.File)
-	return path, Update(path, layout.Values(s), layout.Defaults)
+	values := []KV{{layout.TokenKey, s.AccessToken}}
+	defaults := layout.Instance(s)
+	if reset {
+		values = append(defaults, values...)
+		defaults = nil
+	}
+	return path, Update(path, values, append(defaults, layout.Defaults...))
 }
 
 // Update sets values in the env file at path, adds defaults which are not set yet
@@ -131,6 +146,30 @@ func Update(path string, values, defaults []KV) error {
 	}
 
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600)
+}
+
+// Read returns the variables set in the env file at path.
+func Read(path string) (map[string]string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	values := map[string]string{}
+	for _, line := range strings.Split(string(content), "\n") {
+		key := lineKey(line)
+		if key == "" {
+			continue
+		}
+		_, value, _ := strings.Cut(line, "=")
+		value = strings.TrimSpace(value)
+		if unquoted, err := strconv.Unquote(value); err == nil {
+			value = unquoted
+		} else {
+			value = strings.Trim(value, `"'`)
+		}
+		values[key] = value
+	}
+	return values, nil
 }
 
 func lineKey(line string) string {

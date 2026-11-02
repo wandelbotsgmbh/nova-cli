@@ -116,18 +116,21 @@ var createAppCmd = &cobra.Command{
 	},
 }
 
+// --reset for 'nova app update-env'
+var appEnvReset bool
+
 var updateEnvAppCmd = &cobra.Command{
 	Use:     "update-env [path]",
 	Short:   "Writes the local development settings of an app project",
-	Long:    envAppTxtLong,
-	Example: envAppTxtExample,
+	Long:    updateEnvAppTxtLong,
+	Example: updateEnvAppTxtExample,
 	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir := "."
 		if len(args) > 0 {
 			dir = args[0]
 		}
-		return writeAppEnv(cmd, dir)
+		return writeAppEnv(cmd, dir, appEnvReset)
 	},
 }
 
@@ -472,6 +475,7 @@ func init() {
 	appCmd.AddCommand(deleteAppCmd)
 	appCmd.AddCommand(editAppCmd)
 	appCmd.AddCommand(updateEnvAppCmd)
+	updateEnvAppCmd.Flags().BoolVar(&appEnvReset, "reset", false, "Also replace NOVA_API, CELL_NAME and BASE_PATH (or the project type's equivalents) with the values of the configured instance, e.g. after 'nova config set host'.")
 
 	// TODO generate this flag somehow, with the available generators?
 	// Otherwise possible apps needs to be put into the readme by hand.
@@ -548,7 +552,8 @@ func createAppProject(appName string) error {
 		return err
 	}
 
-	if err := writeAppEnv(rootCmd, outpath); err != nil {
+	// reset: the env files of the templates contain placeholders for the instance settings
+	if err := writeAppEnv(rootCmd, outpath, true); err != nil {
 		fmt.Printf("Could not write the local development settings: %v\nRun 'nova app update-env' in %s once that is fixed.\n", err, outpath)
 	}
 	return nil
@@ -556,7 +561,7 @@ func createAppProject(appName string) error {
 
 // Writes the instance url, cell and a fresh access token into the gitignored env file of the
 // app project in dir, using the file and variable names of its project type.
-func writeAppEnv(cmd *cobra.Command, dir string) error {
+func writeAppEnv(cmd *cobra.Command, dir string, reset bool) error {
 	layout, err := appenv.DetectLayout(dir)
 	if err != nil {
 		return err
@@ -594,21 +599,40 @@ func writeAppEnv(cmd *cobra.Command, dir string) error {
 	}
 
 	novaApi := nova.HostWithProtocol(host)
-	path, err := appenv.Write(dir, layout, appenv.Settings{
+	settings := appenv.Settings{
 		NovaApi:     novaApi,
 		Cell:        cell,
 		AppName:     app.Name,
 		AccessToken: accessToken,
-	})
+	}
+	path, err := appenv.Write(dir, layout, settings, reset)
 	if err != nil {
 		return err
 	}
 
-	tokenInfo := "not needed for this host"
 	if accessToken != "" {
-		tokenInfo = "refreshed"
+		cmd.Printf("Updated %s: access token refreshed\n", path)
+	} else {
+		cmd.Printf("Updated %s: no access token needed for %s\n", path, novaApi)
 	}
-	cmd.Printf("Updated %s (instance %s, cell %s, access token %s)\n", path, novaApi, cell, tokenInfo)
+
+	// show the instance settings in effect, they are kept unless --reset
+	current, err := appenv.Read(path)
+	if err != nil {
+		return err
+	}
+	differs := false
+	for _, kv := range layout.Instance(settings) {
+		note := ""
+		if current[kv.Key] != kv.Value {
+			note = fmt.Sprintf("  (configured: %s)", kv.Value)
+			differs = true
+		}
+		cmd.Printf("  %s=%s%s\n", kv.Key, current[kv.Key], note)
+	}
+	if differs {
+		cmd.Println("Some settings differ from the configured instance. Run 'nova app update-env --reset' to replace them.")
+	}
 	return nil
 }
 
