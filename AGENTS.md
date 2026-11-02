@@ -4,9 +4,18 @@
 
 * On mac, build with `./build.sh` — produces `./bin/nova`
 * After building, use `nova` in terminal for testing
-* Use `nova config view` for getting configured values (host, nucleus-token, etc.)
+* Use `nova config view` for getting configured values (host, nucleus-host, etc.); tokens are redacted, add `--show-secrets` only when you really need one
+* Test with a throwaway `HOME` (e.g. `HOME=$(mktemp -d) ./bin/nova …`) when a command writes the config, so the user's `~/.nova/config.yaml` stays untouched
 * The command reference is not committed: it lives on the CLI reference site (GitHub Pages, deployed by the release workflow for stable releases). Look up commands with `nova <command> --help`.
 * Site build: `hack/docsite/build.sh [version]` → `_site/`. Generates markdown into a temp dir (`go run . gendoc` alone writes to the gitignored `_docs/`) and renders it with `hack/docsite` (goldmark + template styled with `@wandelbots/design-tokens` / `@wandelbots/fonts`, vendored from npm at build time — bump the pinned versions in `build.sh`).
+
+## Instances (ADR `docs/decisions/0016-named-instances.md`)
+
+* `~/.nova/config.yaml` holds a list `instances` (name, `kind`: `cloud` | `host` | `cluster`, host, cellname, id, nucleus-host, nucleus-token, kubeconfig) plus `current-instance`. Global settings (editor, image-registry, container-runtime, catalogs, portal login `token`) stay top-level.
+* Target resolution: `--instance <name>` → `NOVA_INSTANCE` → `current-instance`. An unknown name is an error, never a fallback. Resolving never writes the config. Use `--instance` instead of `nova instance select` when working in parallel with other sessions.
+* Code reads the target via `currentHost()` / `currentCell()` / `currentTarget()` (`pkg/cmd/target.go`), never `viper.GetString("host")`. Registry logic: `pkg/instances`. Commands that manage the registry themselves carry the `annotationNoTarget` annotation.
+* Legacy configs (bare top-level `host`) are migrated in memory into an entry `default` and persisted on the next write; legacy keys are kept and `host`/`cellname`/`virtualid` are mirrored from the selected entry for older CLI versions.
+* `nova instance add/remove` manage local entries; `create/delete/start/stop` are cloud-only. `nova cluster` (Wandelbots internal, formerly `nova virtual`) creates named clusters.
 
 ## App install: `--copy-image` (registry-less)
 
