@@ -552,6 +552,67 @@ func TestNucleusCpDownloadSingleFileFails(t *testing.T) {
 	}
 }
 
+// A recursive download keeps going when the server drops the API WebSocket:
+// the client reconnects and the remaining files are still fetched.
+func TestNucleusCpDownloadDirectorySurvivesConnectionDrop(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+
+	fake.SetEntries("/Projects/mydir/", []nucleus.Entry{
+		{Path: "/Projects/mydir/a.txt", PathType: "file"},
+		{Path: "/Projects/mydir/sub", PathType: "folder"},
+	})
+	fake.SetEntries("/Projects/mydir/sub/", []nucleus.Entry{
+		{Path: "/Projects/mydir/sub/b.txt", PathType: "file"},
+	})
+	fake.SetFile("/Projects/mydir/a.txt", []byte("file-a"))
+	fake.SetFile("/Projects/mydir/sub/b.txt", []byte("file-b"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := nucleus.Dial(ctx, nucleus.ClientConfig{
+		Host: fake.Host(), APIToken: "fake-token", TLS: false,
+		ReadMaxAttempts: 3, ReadRetryBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer client.Close()
+
+	// Drop the connection before the download starts: the first List and
+	// every following operation must go through a fresh connection.
+	fake.DropConnections()
+	deadline := time.Now().Add(5 * time.Second)
+	for !client.Conn().Closed() {
+		if time.Now().After(deadline) {
+			t.Fatal("connection never reported closed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	dstDir := t.TempDir() + "/downloaded"
+	var stderr bytes.Buffer
+	if err := downloadRecursive(ctx, client, "/Projects/mydir/", dstDir, &stderr); err != nil {
+		t.Fatalf("downloadRecursive: %v (stderr: %s)", err, stderr.String())
+	}
+	for name, want := range map[string]string{"a.txt": "file-a", "sub/b.txt": "file-b"} {
+		data, err := readTestFile(dstDir + "/" + name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if data != want {
+			t.Errorf("%s = %q, want %q", name, data, want)
+		}
+	}
+	if n := client.Reconnects(); n != 1 {
+		t.Errorf("Reconnects() = %d, want 1", n)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("unexpected warnings: %s", stderr.String())
+	}
+}
+
 // --- helpers ---
 
 func writeTestFile(path, content string) error {

@@ -44,6 +44,9 @@ type Server struct {
 	useLFT      bool           // redirect reads to the fake LFT endpoint
 	lftFailures map[string]int // file path -> error pages still to serve
 	lftRequests map[string]int // file path -> LFT GETs received
+
+	apiConns    map[*websocket.Conn]struct{} // live API WebSockets
+	apiAccepted int                          // API WebSockets accepted so far
 }
 
 // New creates and starts a fake Nucleus server.
@@ -53,6 +56,7 @@ func New() *Server {
 		files:       make(map[string][]byte),
 		lftFailures: make(map[string]int),
 		lftRequests: make(map[string]int),
+		apiConns:    make(map[*websocket.Conn]struct{}),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/omni/auth", s.handleAuth)
@@ -210,13 +214,45 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	conn.Close(websocket.StatusNormalClosure, "")
 }
 
+// DropConnections abruptly closes every live API WebSocket, simulating the
+// server (or a proxy) dropping the connection mid-session. Clients see the
+// read loop end and subsequent writes fail.
+func (s *Server) DropConnections() {
+	s.mu.Lock()
+	conns := make([]*websocket.Conn, 0, len(s.apiConns))
+	for c := range s.apiConns {
+		conns = append(conns, c)
+	}
+	s.mu.Unlock()
+	for _, c := range conns {
+		c.CloseNow()
+	}
+}
+
+// APIConnections returns how many API WebSockets the server has accepted,
+// i.e. 1 + the number of client reconnects.
+func (s *Server) APIConnections() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.apiAccepted
+}
+
 // handleAPI fakes the connlib API WebSocket.
 func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
 	}
-	defer conn.CloseNow()
+	s.mu.Lock()
+	s.apiConns[conn] = struct{}{}
+	s.apiAccepted++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.apiConns, conn)
+		s.mu.Unlock()
+		conn.CloseNow()
+	}()
 
 	ctx := r.Context()
 	for {

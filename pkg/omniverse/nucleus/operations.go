@@ -13,15 +13,23 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/omniverse/nucleus/connlib"
 )
 
 // List returns the entries in a directory.
+// If the API connection has died, it reconnects and retries.
 func (c *Client) List(ctx context.Context, path string) ([]Entry, error) {
 	if path != "/" && !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
-	responses, err := c.conn.CallStream(ctx, "list2", map[string]any{
-		"path": path,
+	var responses []json.RawMessage
+	err := c.withReconnect(ctx, func() error {
+		var err error
+		responses, err = c.api().CallStream(ctx, "list2", map[string]any{
+			"path": path,
+		})
+		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list %s: %w", path, err)
@@ -81,7 +89,7 @@ func (c *Client) CreateFolder(ctx context.Context, path string) error {
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
-	resp, err := c.conn.Call(ctx, "create_directory", map[string]any{
+	resp, err := c.api().Call(ctx, "create_directory", map[string]any{
 		"path": map[string]any{
 			"path": path,
 		},
@@ -169,7 +177,7 @@ func (c *Client) DeleteRecursive(ctx context.Context, path string) error {
 
 // deleteSingle deletes a single file or empty directory.
 func (c *Client) deleteSingle(ctx context.Context, path string) error {
-	resp, err := c.conn.Call(ctx, "delete2", map[string]any{
+	resp, err := c.api().Call(ctx, "delete2", map[string]any{
 		"paths_to_delete": []map[string]any{
 			{"path": path},
 		},
@@ -258,7 +266,7 @@ func (c *Client) Copy(ctx context.Context, src, dst string) error {
 
 // copySingle copies a single file via copy2.
 func (c *Client) copySingle(ctx context.Context, src, dst string) error {
-	resp, err := c.conn.Call(ctx, "copy2", map[string]any{
+	resp, err := c.api().Call(ctx, "copy2", map[string]any{
 		"paths_to_copy": []map[string]any{
 			{
 				"src": map[string]any{"path": src},
@@ -291,7 +299,7 @@ func (c *Client) copySingle(ctx context.Context, src, dst string) error {
 
 // Move renames/moves a file or directory.
 func (c *Client) Move(ctx context.Context, src, dst string) error {
-	responses, err := c.conn.CallStream(ctx, "rename2", map[string]any{
+	responses, err := c.api().CallStream(ctx, "rename2", map[string]any{
 		"paths_to_rename": []map[string]any{
 			{
 				"src": map[string]any{"path": src},
@@ -339,7 +347,7 @@ func (c *Client) WriteFileFrom(ctx context.Context, path string, r io.Reader, si
 	}
 
 	// Use LFT for files above the threshold (if configured).
-	if c.connInfo.LFTAddress != "" && c.connInfo.LFTThreshold > 0 && size >= c.connInfo.LFTThreshold {
+	if c.Info().LFTAddress != "" && c.Info().LFTThreshold > 0 && size >= c.Info().LFTThreshold {
 		return c.uploadLFT(ctx, path, r, size)
 	}
 	content, err := io.ReadAll(r)
@@ -351,7 +359,7 @@ func (c *Client) WriteFileFrom(ctx context.Context, path string, r io.Reader, si
 
 // writeFileConnlib uploads content inline over the connlib WebSocket.
 func (c *Client) writeFileConnlib(ctx context.Context, path string, content []byte) error {
-	id := c.conn.NextID()
+	id := c.api().NextID()
 
 	msg := map[string]any{
 		"id":        id,
@@ -368,10 +376,10 @@ func (c *Client) writeFileConnlib(ctx context.Context, path string, content []by
 	// Connlib binary payload: json + \0 + binary
 	payload := bytes.Join([][]byte{jsonData, content}, []byte{0})
 
-	ch := c.conn.Register(id)
-	defer c.conn.Unregister(id)
+	ch := c.api().Register(id)
+	defer c.api().Unregister(id)
 
-	if err := c.conn.Send(ctx, payload); err != nil {
+	if err := c.api().Send(ctx, payload); err != nil {
 		return fmt.Errorf("send create: %w", err)
 	}
 
@@ -393,12 +401,67 @@ func (c *Client) writeFileConnlib(ctx context.Context, path string, content []by
 }
 
 // Default retry policy for transient read failures (LFT 5xx, ingress error
-// pages, network errors, content that fails verification). Backoff doubles
-// per attempt: 0.5s, 1s, 2s, 4s. Override via [ClientConfig].
+// pages, network errors, lost API connection, content that fails
+// verification). Backoff doubles per attempt and is capped: 1s, 2s, 4s, 8s,
+// 16s, 30s, 30s — about 90s in total, enough to ride out a short overload
+// of the LFT service. Override via [ClientConfig].
 const (
-	defaultReadMaxAttempts  = 5
-	defaultReadRetryBackoff = 500 * time.Millisecond
+	defaultReadMaxAttempts  = 8
+	defaultReadRetryBackoff = time.Second
+	maxReadRetryBackoff     = 30 * time.Second
 )
+
+// lftToken returns the JWT access token for the current connection.
+func (c *Client) lftToken() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.accessToken
+}
+
+// retryPolicy returns the effective attempts/backoff from the config.
+func (c *Client) retryPolicy() (attempts int, backoff time.Duration) {
+	attempts, backoff = c.cfg.ReadMaxAttempts, c.cfg.ReadRetryBackoff
+	if attempts <= 0 {
+		attempts = defaultReadMaxAttempts
+	}
+	if backoff <= 0 {
+		backoff = defaultReadRetryBackoff
+	}
+	return attempts, backoff
+}
+
+// retryDelay returns the capped exponential delay before attempt+1.
+func retryDelay(backoff time.Duration, attempt int) time.Duration {
+	d := backoff << (attempt - 1)
+	if d > maxReadRetryBackoff || d <= 0 {
+		d = maxReadRetryBackoff
+	}
+	return d
+}
+
+// withReconnect runs op and, if it failed because the API connection died,
+// re-dials and runs it again (with the read retry policy). Only use it for
+// idempotent operations.
+func (c *Client) withReconnect(ctx context.Context, op func() error) error {
+	maxAttempts, backoff := c.retryPolicy()
+	for attempt := 1; ; attempt++ {
+		dead := c.api()
+		err := op()
+		if err == nil || ctx.Err() != nil || !errors.Is(err, connlib.ErrClosed) || attempt >= maxAttempts {
+			return err
+		}
+		select {
+		case <-time.After(retryDelay(backoff, attempt)):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if rerr := c.reconnect(ctx, dead); rerr != nil && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// If reconnecting failed we still loop: op will fail fast with
+		// ErrClosed and we try to reconnect again after the next delay.
+	}
+}
 
 // transientError marks a failure that is worth retrying with a fresh read
 // request (and therefore a fresh LFT ticket).
@@ -470,32 +533,35 @@ func (e expectedContent) verify(data []byte) error {
 // mismatches) are retried with exponential backoff; the returned error
 // satisfies [IsTransient] if every attempt failed that way.
 func (c *Client) ReadFile(ctx context.Context, path string) ([]byte, error) {
-	maxAttempts, backoff := c.cfg.ReadMaxAttempts, c.cfg.ReadRetryBackoff
-	if maxAttempts <= 0 {
-		maxAttempts = defaultReadMaxAttempts
-	}
-	if backoff <= 0 {
-		backoff = defaultReadRetryBackoff
-	}
+	maxAttempts, backoff := c.retryPolicy()
 
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		dead := c.api()
 		data, err := c.readFileOnce(ctx, path)
 		if err == nil {
 			return data, nil
 		}
 		lastErr = err
-		if ctx.Err() != nil || !IsTransient(err) {
+		lostConn := errors.Is(err, connlib.ErrClosed)
+		if ctx.Err() != nil || (!IsTransient(err) && !lostConn) {
 			return nil, err
 		}
 		if attempt == maxAttempts {
 			break
 		}
-		delay := backoff << (attempt - 1)
 		select {
-		case <-time.After(delay):
+		case <-time.After(retryDelay(backoff, attempt)):
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		}
+		if lostConn {
+			if rerr := c.reconnect(ctx, dead); rerr != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				lastErr = rerr
+			}
 		}
 	}
 	return nil, &transientError{fmt.Errorf("read %s: giving up after %d attempts: %w", path, maxAttempts, lastErr)}
@@ -503,7 +569,7 @@ func (c *Client) ReadFile(ctx context.Context, path string) ([]byte, error) {
 
 // readFileOnce performs a single read request without retries.
 func (c *Client) readFileOnce(ctx context.Context, path string) ([]byte, error) {
-	id := c.conn.NextID()
+	id := c.api().NextID()
 
 	msg := map[string]any{
 		"id":      id,
@@ -516,17 +582,18 @@ func (c *Client) readFileOnce(ctx context.Context, path string) ([]byte, error) 
 		return nil, fmt.Errorf("marshal read: %w", err)
 	}
 
-	ch := c.conn.RegisterBinary(id, 1)
-	defer c.conn.UnregisterBinary(id)
+	conn := c.api()
+	ch := conn.RegisterBinary(id, 1)
+	defer conn.UnregisterBinary(id)
 
-	if err := c.conn.Send(ctx, jsonData); err != nil {
+	if err := conn.Send(ctx, jsonData); err != nil {
 		return nil, fmt.Errorf("send read: %w", err)
 	}
 
 	select {
 	case frame, ok := <-ch:
 		if !ok {
-			return nil, fmt.Errorf("read %s: connection closed", path)
+			return nil, fmt.Errorf("read %s: %w", path, connlib.ErrClosed)
 		}
 		var r struct {
 			Status         string `json:"status"`
@@ -643,8 +710,8 @@ func errorPageSummary(body []byte) string {
 func (c *Client) uploadLFT(ctx context.Context, path string, body io.Reader, size int64) error {
 	encodedPath := base64.StdEncoding.EncodeToString([]byte(path))
 	params := fmt.Sprintf("path=%s&token=%s&iat=%d",
-		encodedPath, c.accessToken, time.Now().UnixMilli())
-	url := fmt.Sprintf("%s/path/?%s", c.connInfo.LFTAddress, params)
+		encodedPath, c.lftToken(), time.Now().UnixMilli())
+	url := fmt.Sprintf("%s/path/?%s", c.Info().LFTAddress, params)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {

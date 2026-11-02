@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -13,13 +14,21 @@ import (
 )
 
 // Client is a Nucleus API client. Use [Dial] to create one.
+//
+// The API WebSocket can be dropped by the server (observed after ~30 minutes
+// of sustained downloads). Read-only operations (List, Stat, ReadFile)
+// transparently re-dial and re-authenticate when that happens; mutating
+// operations return an error wrapping [connlib.ErrClosed] instead, so the
+// caller decides whether to repeat them.
 type Client struct {
-	cfg         ClientConfig
+	cfg ClientConfig
+
+	mu          sync.Mutex // guards the fields below across reconnects
 	conn        *connlib.Conn
 	cancel      context.CancelFunc // cancels the read loop
 	accessToken string             // JWT from auth service, needed for LFT
-
-	connInfo ConnectionInfo
+	connInfo    ConnectionInfo
+	reconnects  int
 }
 
 // Dial connects to a Nucleus server, authenticates using the API token,
@@ -35,6 +44,18 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 		return nil, fmt.Errorf("nucleus: APIToken is required")
 	}
 
+	c := &Client{cfg: cfg}
+	if err := c.connect(ctx); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// connect performs the full handshake (SOWS auth, API WebSocket,
+// authorize_token) and installs the resulting connection on c, closing any
+// previous one.
+func (c *Client) connect(ctx context.Context) error {
+	cfg := c.cfg
 	scheme := "wss"
 	if !cfg.TLS {
 		scheme = "ws"
@@ -43,7 +64,7 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 	// Step 1: Authenticate via the Auth service (SOWS protocol) to get an access token.
 	accessToken, err := authenticate(ctx, scheme, cfg.Host, cfg.APIToken)
 	if err != nil {
-		return nil, fmt.Errorf("nucleus: auth: %w", err)
+		return fmt.Errorf("nucleus: auth: %w", err)
 	}
 
 	// Step 2: Connect to the API service (connlib protocol).
@@ -60,47 +81,86 @@ func Dial(ctx context.Context, cfg ClientConfig) (*Client, error) {
 		}
 	}
 	if err != nil {
-		return nil, fmt.Errorf("nucleus: connect API: %w", err)
+		return fmt.Errorf("nucleus: connect API: %w", err)
 	}
 
 	// Increase read limit for large directory listings.
 	apiWS.SetReadLimit(32 * 1024 * 1024)
 
 	loopCtx, loopCancel := context.WithCancel(context.Background())
-
-	c := &Client{
-		cfg:         cfg,
-		conn:        connlib.NewConn(apiWS),
-		cancel:      loopCancel,
-		accessToken: accessToken,
-	}
+	conn := connlib.NewConn(apiWS)
 
 	// Start background reader (uses its own context, not the dial context).
-	go c.conn.StartReadLoop(loopCtx)
+	go conn.StartReadLoop(loopCtx)
 
 	// Step 3: Authorize the access token on the API connection.
-	if err := c.authorizeToken(ctx, accessToken); err != nil {
-		c.conn.Close()
-		return nil, fmt.Errorf("nucleus: authorize: %w", err)
+	info, err := authorizeToken(ctx, conn, accessToken, cfg.UserAgent)
+	if err != nil {
+		loopCancel()
+		conn.Close()
+		return fmt.Errorf("nucleus: authorize: %w", err)
 	}
 
-	return c, nil
+	c.mu.Lock()
+	if c.conn != nil {
+		c.cancel()
+		c.conn.Close()
+		c.reconnects++
+	}
+	c.conn = conn
+	c.cancel = loopCancel
+	c.accessToken = accessToken
+	c.connInfo = info
+	c.mu.Unlock()
+	return nil
+}
+
+// reconnect re-establishes the API connection after it died. It is a no-op
+// if another caller already replaced the dead connection.
+func (c *Client) reconnect(ctx context.Context, dead *connlib.Conn) error {
+	c.mu.Lock()
+	current := c.conn
+	c.mu.Unlock()
+	if current != dead && !current.Closed() {
+		return nil
+	}
+	return c.connect(ctx)
+}
+
+// api returns the current API connection.
+func (c *Client) api() *connlib.Conn {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn
 }
 
 // Close cleanly shuts down the connection.
 func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.cancel()
 	return c.conn.Close()
 }
 
-// Info returns the connection info from the initial authorization.
+// Info returns the connection info from the (most recent) authorization.
 func (c *Client) Info() ConnectionInfo {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.connInfo
 }
 
-// Conn returns the underlying connlib connection for advanced use.
+// Reconnects returns how many times the client re-dialed after losing the
+// API connection.
+func (c *Client) Reconnects() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.reconnects
+}
+
+// Conn returns the underlying connlib connection for advanced use. It may
+// change after a reconnect; don't cache it.
 func (c *Client) Conn() *connlib.Conn {
-	return c.conn
+	return c.api()
 }
 
 // clientCapabilities declares what commands/versions this client supports.
@@ -192,24 +252,25 @@ func authenticate(ctx context.Context, scheme, host, apiToken string) (string, e
 }
 
 // authorizeToken sends the access token to the API service.
-func (c *Client) authorizeToken(ctx context.Context, accessToken string) error {
-	resp, err := c.conn.Call(ctx, "authorize_token", map[string]any{
+func authorizeToken(ctx context.Context, conn *connlib.Conn, accessToken, userAgent string) (ConnectionInfo, error) {
+	var info ConnectionInfo
+	resp, err := conn.Call(ctx, "authorize_token", map[string]any{
 		"version":             "1.19",
 		"client_capabilities": clientCapabilities,
 		"token":               accessToken,
-		"userAgent":           c.cfg.UserAgent,
+		"userAgent":           userAgent,
 	})
 	if err != nil {
-		return err
+		return info, err
 	}
 
-	if err := json.Unmarshal(resp, &c.connInfo); err != nil {
-		return fmt.Errorf("parse authorize response: %w", err)
+	if err := json.Unmarshal(resp, &info); err != nil {
+		return info, fmt.Errorf("parse authorize response: %w", err)
 	}
 
-	if c.connInfo.Status != "OK" {
-		return fmt.Errorf("authorize failed: %s", c.connInfo.Status)
+	if info.Status != "OK" {
+		return info, fmt.Errorf("authorize failed: %s", info.Status)
 	}
 
-	return nil
+	return info, nil
 }

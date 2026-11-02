@@ -24,6 +24,7 @@
 * `create_directory` requires trailing `/` on paths or returns `INVALID_URI`
 * `rename2` is the only file op that returns a stream; others return single response
 * The ingress in front of LFT (`nucleus-lft`, ingress-nginx with `custom-http-errors` + `tarampampam/error-pages`, see `wb-int/evergreen`) replaces 5xx/404 from the service with a plain-text error page served as **HTTP 200**. Never trust the status code of an LFT download alone — `ReadFile` verifies the body against the `size`/`hash_value` from the `read` response and retries (issue #41).
+* The server drops the API WebSocket after ~30 min of sustained downloads. `connlib` reports that as `ErrClosed`; `List`/`ReadFile` re-dial and re-authenticate automatically (`Client.Reconnects()`), mutating ops surface the error instead.
 * `hash_type: sha-256-flat` is **not** a plain SHA-256: split the file into `hash_bsize` blocks (1 MiB), SHA-256 each, then SHA-256 the concatenated raw digests (`nucleus.FlatHash`). A one-block file hashes to sha256(sha256(data)). Verified live; `protocol.md` in `wb-int/nucleus-api` doesn't document this yet.
 
 ## Repository

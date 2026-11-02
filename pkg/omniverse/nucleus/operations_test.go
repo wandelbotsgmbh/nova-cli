@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/wandelbotsgmbh/nova-cli/pkg/omniverse/nucleus"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/omniverse/nucleus/connlib"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/omniverse/nucleus/fakeserver"
 )
 
@@ -488,5 +489,101 @@ func TestReadFileRetryHonoursContext(t *testing.T) {
 	}
 	if time.Since(start) > 2*time.Second {
 		t.Errorf("ReadFile did not stop waiting on context cancel")
+	}
+}
+
+// The server (or a proxy) can drop the API WebSocket mid-session — seen
+// after ~30 minutes of sustained downloads. Read-only operations must
+// re-dial and carry on instead of failing every remaining file.
+func TestReadFileReconnectsAfterConnectionDrop(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("binary-image-data"))
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	ctx := context.Background()
+	if _, err := client.ReadFile(ctx, "/Projects/tex.png"); err != nil {
+		t.Fatalf("first ReadFile: %v", err)
+	}
+
+	fake.DropConnections()
+	waitForClosed(t, client)
+
+	data, err := client.ReadFile(ctx, "/Projects/tex.png")
+	if err != nil {
+		t.Fatalf("ReadFile after drop: %v", err)
+	}
+	if string(data) != "binary-image-data" {
+		t.Errorf("content = %q, want %q", data, "binary-image-data")
+	}
+	if n := client.Reconnects(); n != 1 {
+		t.Errorf("Reconnects() = %d, want 1", n)
+	}
+	if n := fake.APIConnections(); n != 2 {
+		t.Errorf("server accepted %d API connections, want 2", n)
+	}
+	if client.Info().Username != "testuser" {
+		t.Errorf("connection info not refreshed after reconnect: %+v", client.Info())
+	}
+}
+
+func TestListReconnectsAfterConnectionDrop(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.SetEntries("/Projects/", []nucleus.Entry{
+		{Path: "/Projects/a.usd", PathType: "file"},
+	})
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	fake.DropConnections()
+	waitForClosed(t, client)
+
+	entries, err := client.List(context.Background(), "/Projects/")
+	if err != nil {
+		t.Fatalf("List after drop: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Path != "/Projects/a.usd" {
+		t.Errorf("entries = %+v", entries)
+	}
+	if n := client.Reconnects(); n != 1 {
+		t.Errorf("Reconnects() = %d, want 1", n)
+	}
+}
+
+// Mutating operations are not replayed automatically; they surface the
+// dropped connection so the caller can decide.
+func TestCreateFolderReportsClosedConnection(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	fake.DropConnections()
+	waitForClosed(t, client)
+
+	err := client.CreateFolder(context.Background(), "/Projects/new/")
+	if !errors.Is(err, connlib.ErrClosed) {
+		t.Errorf("err = %v, want connlib.ErrClosed", err)
+	}
+	if n := client.Reconnects(); n != 0 {
+		t.Errorf("Reconnects() = %d, want 0 for a mutating op", n)
+	}
+}
+
+// waitForClosed blocks until the client's read loop has noticed the drop.
+func waitForClosed(t *testing.T, client *nucleus.Client) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !client.Conn().Closed() {
+		if time.Now().After(deadline) {
+			t.Fatal("connection never reported closed")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
