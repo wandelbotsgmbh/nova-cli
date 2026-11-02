@@ -32,7 +32,20 @@ func NewPortal(environment oauth.AuthEnvironment) (*Portal, error) {
 	if err := oauth.RefreshTokenOrLogin(host); err != nil {
 		return nil, err
 	}
+	return newPortal(host)
+}
 
+// NewPortalNonInteractive is like NewPortal but never starts the interactive device
+// login: it fails if the stored login of the environment can't be refreshed. For
+// best-effort lookups (listings, completion) that must not wait for a browser.
+func NewPortalNonInteractive(environment oauth.AuthEnvironment) (*Portal, error) {
+	if err := oauth.RefreshToken(context.Background(), environment); err != nil {
+		return nil, err
+	}
+	return newPortal(getPortalHost(environment))
+}
+
+func newPortal(host string) (*Portal, error) {
 	client, error := NewClientWithResponses(host, WithHTTPClient(httpx.Client()), WithRequestEditorFn(oauth.SetAuthForClient), WithRequestEditorFn(version.SetUserAgent))
 	if error != nil {
 		return nil, error

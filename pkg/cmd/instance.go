@@ -238,7 +238,7 @@ With --cloud, lists the instances on portal.wandelbots.io in the previous format
 
 		var unregistered []portal.UserInstance
 		if loggedIn() {
-			if p, err := portal.NewPortal(portalEnvironment); err != nil {
+			if p, err := portal.NewPortalNonInteractive(portalEnvironment); err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), "warning: can't list cloud instances:", err)
 			} else if cloud, err := p.ListInstances(); err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), "warning: can't list cloud instances:", err)
@@ -456,7 +456,7 @@ $ nova instance info lab
 
 		var live *portal.UserInstance
 		if inst.Kind == instances.KindCloud && (!local || (!printHostInstanceInfoCmd && !printInstanceIdInstanceInfoCmd && loggedIn())) {
-			i, err := fetchCloudInstance(cloudID(inst, inst.Name))
+			i, err := fetchCloudInstance(cloudID(inst, inst.Name), !local)
 			switch {
 			case err == nil:
 				live = &i
@@ -719,8 +719,14 @@ func requireKind(inst instances.Instance, kind instances.Kind, verb string) erro
 		verb, inst.Name, inst.Kind, verb, kind, hint)
 }
 
-func fetchCloudInstance(id string) (portal.UserInstance, error) {
-	p, err := portal.NewPortal(portalEnvironment)
+// fetchCloudInstance looks up a cloud instance; best-effort lookups (interactive=false)
+// never start the interactive login.
+func fetchCloudInstance(id string, interactive bool) (portal.UserInstance, error) {
+	newPortal := portal.NewPortalNonInteractive
+	if interactive {
+		newPortal = portal.NewPortal
+	}
+	p, err := newPortal(portalEnvironment)
 	if err != nil {
 		return portal.UserInstance{}, err
 	}
@@ -758,7 +764,7 @@ func completeInstance(cmd *cobra.Command, args []string, toComplete string) ([]s
 
 	// PreRun seems not to be executed for completion thats why we do it explicitly here
 	setPortalEnvironment(cmd, args)
-	p, err := portal.NewPortal(portalEnvironment)
+	p, err := portal.NewPortalNonInteractive(portalEnvironment)
 	if err != nil {
 		return comp, directive
 	}
