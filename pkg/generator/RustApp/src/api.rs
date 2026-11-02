@@ -9,7 +9,7 @@ use serde::Serialize;
 use utoipa::openapi::server::Server;
 use utoipa::{OpenApi, ToSchema};
 
-use crate::nova::NovaClient;
+use crate::nova::{NovaClient, NovaError};
 
 const STOPLIGHT_HTML: &str = include_str!("stoplight.html");
 const APP_ICON: &[u8] = include_bytes!("../static/app_icon.png");
@@ -114,11 +114,11 @@ async fn position(State(state): State<Arc<AppState>>) -> Result<Json<Position>, 
 
 enum AppError {
     NotFound(&'static str),
-    Nova(reqwest::Error),
+    Nova(NovaError),
 }
 
-impl From<reqwest::Error> for AppError {
-    fn from(err: reqwest::Error) -> Self {
+impl From<NovaError> for AppError {
+    fn from(err: NovaError) -> Self {
         AppError::Nova(err)
     }
 }

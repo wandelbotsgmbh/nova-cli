@@ -30,7 +30,15 @@ uv sync
 uv sync
 ```
 
-5- Download robot models
+5- Make sure the app can reach the NOVA instance
+```bash
+nova app update-env
+```
+This refreshes `NOVA_ACCESS_TOKEN` in the gitignored `.env` (portal tokens last 24h) and keeps the other values.
+Check that the listed `NOVA_API` is the intended instance; if the user switched instances, run `nova app update-env --reset`.
+Never print or commit the token.
+
+6- Download robot models
 ```bash
 uv run download-models
 ```

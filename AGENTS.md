@@ -16,6 +16,14 @@
 * Target needs sudo for `ctr` (containerd socket is root-only); k3s is invoked by absolute path so the NOPASSWD rule matches. Use `--no-sudo` for root logins.
 * Code: `pkg/cmd/app.go` (`installAppViaCopy`/`copyIncremental`/`copyWholeImage`), `pkg/remote/` (ssh/scp + `setup.go`), `pkg/docker/` (`BuildImageOCI`, `save.go`, `ocilayout.go`).
 
+## App templates: local dev settings (`nova app update-env`)
+
+* Templates live in `pkg/generator/<Type>App` (`*.tpl` files are rendered, `__Field__` folders renamed). Generated projects keep instance url, cell, base path and access token in a gitignored env file: `.env.local` (rust/golang/nextjs) or `.env` (python, python-decouple doesn't read `.env.local`). Go/Rust apps load it themselves on startup (godotenv/dotenvy), so launch configs carry no env and no token.
+* `nova app update-env [path]` (`pkg/appenv`, `writeAppEnv` in `pkg/cmd/app.go`): always replaces the token (refreshed for `*.wandelbots.io`, empty otherwise), adds instance settings only if missing (`--reset` replaces them), keeps all other lines. `nova app create` runs it with reset. Variable names differ per template, see `appenv.Layout`.
+* Instance ingress answers a missing/expired token with plain text `Error 401: Unauthorized` and **HTTP 200**; the Go/Rust templates check the content type and return 502 with a hint. Portal tokens last 24h.
+* Python/novax registers its programs in the cell's program store under the app name from `BASE_PATH` (default `novax`) and removes them on shutdown: keep `BASE_PATH` unique when running locally against a shared instance.
+* Verify template changes by generating with the built CLI (`bin/nova app create x -g <type>`) and running the app against an instance; `go test ./pkg/generator` only checks rendering.
+
 ## Nucleus / Omniverse
 
 * Protocol docs, reference JS bundles and how to fetch fresh ones: internal repo `wb-int/nucleus-api` (private, not part of this repo)

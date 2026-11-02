@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	github.com/getkin/kin-openapi v0.152.0
+	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v4 v4.16.3
 	github.com/wandelbotsgmbh/nova-api-client-go/v26 v26.5.3
 )

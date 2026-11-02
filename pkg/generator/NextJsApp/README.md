@@ -22,7 +22,11 @@ pnpm install
 
 ## Local development with a NOVA instance
 
-You can run your app locally for development and connect it to a remote NOVA instance by providing the `NOVA_DEV_INSTANCE_URL`, `NOVA_DEV_ACCESS_TOKEN` and `CELL_ID` environment variables in `.env.local`. 
+You can run your app locally for development and connect it to a remote NOVA instance by providing the `NOVA_DEV_INSTANCE_URL`, `NOVA_DEV_ACCESS_TOKEN` and `CELL_ID` environment variables in the gitignored `.env.local`.
+
+`nova app create` fills them for the instance configured then (`nova config view`). When the token expired (portal tokens last 24h, the app keeps loading), run `nova app update-env`: it refreshes `NOVA_DEV_ACCESS_TOKEN` and keeps your other values; the dev server reloads `.env.local` by itself. After switching the instance or cell (`nova config set host|cellname`), run `nova app update-env --reset`.
+
+To set them by hand:
 
 For example, if your instance is at `my.instance.wandelbots.io` and your cell is called `cell`:
 

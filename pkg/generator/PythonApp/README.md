@@ -11,8 +11,12 @@ Use the following steps for development:
 
 * make sure you have `uv` installed
     * you can follow these steps https://docs.astral.sh/uv/getting-started/installation/
-* ensure proper environment variables are set in `.env`
-    * note: you might need to set/update `NOVA_ACCESS_TOKEN` and `NOVA_API`
+* the gitignored `.env` holds the settings for local runs (`NOVA_API`, `CELL_NAME`, `BASE_PATH`, `NOVA_ACCESS_TOKEN`),
+  `nova app create` filled it for the instance configured then (`nova config view`)
+    * token expired (portal tokens last 24h, the app can't connect): `nova app update-env` refreshes
+      `NOVA_ACCESS_TOKEN` and keeps your other values
+    * switched the instance or cell (`nova config set host|cellname`): `nova app update-env --reset`
+    * `BASE_PATH` (`/<cell>/<app>`) also names the app in the cell's program store, keep it unique
 * use `uv run app` to run the server
     * access the docs on `http://localhost:3000/docs`
 * build, push and install the app with `nova app install`

@@ -4,7 +4,11 @@ const createAppTxtLong = `This will create a new app project for NOVA OS to get 
 It contains a basic structure to build and deploy your app.
 
 Different programming languages are supported. Use with --generator to choose between python (python_app),
-typescript (nextjs_app), go (golang_app) and rust (rust_app).`
+typescript (nextjs_app), go (golang_app) and rust (rust_app).
+
+The project gets a gitignored env file with the configured instance, cell and access token
+(see 'nova app update-env'), so it runs locally against the instance right away. Run
+'nova app update-env' in the project when the access token expired.`
 
 const installAppTxtLong = `Installs an app to Wandelbots NOVA OS
 This command will install the app depending on the provided source.
@@ -85,3 +89,38 @@ const editAppTxtLong = `Edits the configuration of an app directly in your favor
 If the files content changed, the app configuration is updated after closing the editor.
 
 If you want to change the editor you can call 'nova config set editor "code --wait"' to use Visual Studio Code.`
+
+const updateEnvAppTxtLong = `Updates the local development settings of an app project in its gitignored env file,
+so the app can be run locally (e.g. F5 in vscode, cargo run, go run ., uv run app, pnpm dev) against
+the configured instance.
+
+What gets written:
+  - the access token: always replaced. For portal instances (*.wandelbots.io) it is refreshed first,
+    like 'nova login token' does (starts a login if needed). Other hosts need no token, it is left empty.
+  - the instance settings (instance url, cell, base path): only added if missing, so values you
+    edited by hand are kept. --reset replaces them with the configured instance ('nova config view').
+  - everything else in the file (comments, your own variables) stays untouched.
+
+When to run it:
+  - the app gets "Error 401: Unauthorized" from the instance (portal tokens are valid for 24h).
+    The python and nextjs apps may only hang or retry instead, run it first if they don't connect.
+  - with --reset after switching the instance or cell ('nova config set host|cellname').
+  'nova app create' already runs it (with --reset) for a new project.
+
+File and variables per project type (detected by Cargo.toml, go.mod, package.json, pyproject.toml):
+  rust_app, golang_app  .env.local  token ACCESS_TOKEN, instance NOVA_API CELL_NAME BASE_PATH, LOG_LEVEL if missing
+  nextjs_app            .env.local  token NOVA_DEV_ACCESS_TOKEN, instance NOVA_DEV_INSTANCE_URL CELL_ID
+  python_app            .env        token NOVA_ACCESS_TOKEN, instance NOVA_API CELL_NAME BASE_PATH
+
+The apps read the file on startup: restart the app after updating (nextjs dev reloads it by itself).
+The token is never printed. The output lists the instance settings in effect and notes the ones that
+differ from the configured instance.`
+
+const updateEnvAppTxtExample = `# refresh the access token of the app project in the current directory
+nova app update-env
+
+# after 'nova config set host <other-instance>': point the app to the configured instance
+nova app update-env --reset
+
+# app project in another directory
+nova app update-env path/to/your-nova-app`
