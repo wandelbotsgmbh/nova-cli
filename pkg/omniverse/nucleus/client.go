@@ -24,6 +24,7 @@ type Client struct {
 	cfg ClientConfig
 
 	reconnectMu sync.Mutex // serializes reconnect attempts
+	cmdMu       sync.Mutex // serializes connlib commands, see [Client.withCmd]
 	mu          sync.Mutex // guards the fields below across reconnects
 	conn        *connlib.Conn
 	cancel      context.CancelFunc // cancels the read loop
@@ -130,6 +131,20 @@ func (c *Client) reconnect(ctx context.Context, dead *connlib.Conn) error {
 		return nil
 	}
 	return c.connect(ctx)
+}
+
+// withCmd runs one connlib command exchange (request + response) while
+// holding the command lock.
+//
+// The API service rejects a command that arrives while another one on the
+// same connection is still in progress with INVALID_COMMAND (measured live:
+// even two overlapping reads trip it). Commands are short — a read only
+// returns an LFT ticket, the transfer itself goes over HTTP outside the
+// lock — so serializing them costs little even with many parallel workers.
+func (c *Client) withCmd(fn func() error) error {
+	c.cmdMu.Lock()
+	defer c.cmdMu.Unlock()
+	return fn()
 }
 
 // api returns the current API connection.

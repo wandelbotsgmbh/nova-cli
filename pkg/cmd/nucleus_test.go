@@ -55,7 +55,7 @@ func newTestRootCmd() (*cobra.Command, *fakeserver.Server) {
 	cp := &cobra.Command{Use: nucleusCpCmd.Use, Args: nucleusCpCmd.Args, RunE: nucleusCpCmd.RunE}
 	cp.Flags().BoolP("parents", "p", false, "")
 	cp.Flags().BoolP("progress", "P", false, "")
-	cp.Flags().IntP("parallel", "j", 4, "")
+	cp.Flags().IntP("parallel", "j", 2, "")
 	nuc.AddCommand(cp)
 
 	return root, fake

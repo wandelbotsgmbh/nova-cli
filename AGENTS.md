@@ -23,8 +23,10 @@
 * Key gotcha: most connlib commands use **nested path objects** `{"path": {"path": "...", "branch": "..."}}`, not flat strings. See `protocol.md` in `wb-int/nucleus-api` for the exact schema per command.
 * `create_directory` requires trailing `/` on paths or returns `INVALID_URI`
 * `rename2` is the only file op that returns a stream; others return single response
-* The ingress in front of LFT (`nucleus-lft`, ingress-nginx with `custom-http-errors` + `tarampampam/error-pages`, see `wb-int/evergreen`) replaces 5xx/404 from the service with a plain-text error page served as **HTTP 200**. Never trust the status code of an LFT download alone — `ReadFile` verifies the body against the `size`/`hash_value` from the `read` response and retries (issue #41).
+* The ingress in front of LFT may replace 5xx/404 from the service with a plain-text error page served as **HTTP 200** (ingress-nginx `custom-http-errors` with an error-pages backend that defaults to 200). Never trust the status code of an LFT download alone — `ReadFile` verifies the body against the `size`/`hash_value` from the `read` response and retries (issue #41).
 * The API WebSocket can die mid-session (laptop sleep, network change, proxy idle timeout). `connlib` reports that as `ErrClosed`; `List`/`ReadFile` re-dial and re-authenticate automatically (`Client.Reconnects()`), mutating ops surface the error instead.
+* Request ids must reach the server in increasing order per connection, or it answers `INVALID_COMMAND` (same status as an unknown command). `Client.withCmd` allocates the id and sends under one lock; keep it that way when adding commands.
+* The LFT service of a typical deployment is small: more than ~2–4 parallel large downloads push it into 5xx. Keep `-j` modest and don't load-test against a shared server.
 * `hash_type: sha-256-flat` is **not** a plain SHA-256: split the file into `hash_bsize` blocks (1 MiB), SHA-256 each, then SHA-256 the concatenated raw digests (`nucleus.FlatHash`). A one-block file hashes to sha256(sha256(data)). Verified live; `protocol.md` in `wb-int/nucleus-api` doesn't document this yet.
 
 ## Repository

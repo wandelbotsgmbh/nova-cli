@@ -27,11 +27,13 @@ func (c *Client) List(ctx context.Context, path string) ([]Entry, error) {
 	}
 	var responses []json.RawMessage
 	err := c.withReconnect(ctx, func() error {
-		var err error
-		responses, err = c.api().CallStream(ctx, "list2", map[string]any{
-			"path": path,
+		return c.withCmd(func() error {
+			var err error
+			responses, err = c.api().CallStream(ctx, "list2", map[string]any{
+				"path": path,
+			})
+			return err
 		})
-		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list %s: %w", path, err)
@@ -91,10 +93,15 @@ func (c *Client) CreateFolder(ctx context.Context, path string) error {
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
-	resp, err := c.api().Call(ctx, "create_directory", map[string]any{
-		"path": map[string]any{
-			"path": path,
-		},
+	var resp json.RawMessage
+	err := c.withCmd(func() error {
+		var err error
+		resp, err = c.api().Call(ctx, "create_directory", map[string]any{
+			"path": map[string]any{
+				"path": path,
+			},
+		})
+		return err
 	})
 	if err != nil {
 		return fmt.Errorf("create_directory %s: %w", path, err)
@@ -179,10 +186,15 @@ func (c *Client) DeleteRecursive(ctx context.Context, path string) error {
 
 // deleteSingle deletes a single file or empty directory.
 func (c *Client) deleteSingle(ctx context.Context, path string) error {
-	resp, err := c.api().Call(ctx, "delete2", map[string]any{
-		"paths_to_delete": []map[string]any{
-			{"path": path},
-		},
+	var resp json.RawMessage
+	err := c.withCmd(func() error {
+		var err error
+		resp, err = c.api().Call(ctx, "delete2", map[string]any{
+			"paths_to_delete": []map[string]any{
+				{"path": path},
+			},
+		})
+		return err
 	})
 	if err != nil {
 		return fmt.Errorf("delete %s: %w", path, err)
@@ -268,13 +280,18 @@ func (c *Client) Copy(ctx context.Context, src, dst string) error {
 
 // copySingle copies a single file via copy2.
 func (c *Client) copySingle(ctx context.Context, src, dst string) error {
-	resp, err := c.api().Call(ctx, "copy2", map[string]any{
-		"paths_to_copy": []map[string]any{
-			{
-				"src": map[string]any{"path": src},
-				"dst": map[string]any{"path": dst},
+	var resp json.RawMessage
+	err := c.withCmd(func() error {
+		var err error
+		resp, err = c.api().Call(ctx, "copy2", map[string]any{
+			"paths_to_copy": []map[string]any{
+				{
+					"src": map[string]any{"path": src},
+					"dst": map[string]any{"path": dst},
+				},
 			},
-		},
+		})
+		return err
 	})
 	if err != nil {
 		return fmt.Errorf("copy %s -> %s: %w", src, dst, err)
@@ -301,13 +318,18 @@ func (c *Client) copySingle(ctx context.Context, src, dst string) error {
 
 // Move renames/moves a file or directory.
 func (c *Client) Move(ctx context.Context, src, dst string) error {
-	responses, err := c.api().CallStream(ctx, "rename2", map[string]any{
-		"paths_to_rename": []map[string]any{
-			{
-				"src": map[string]any{"path": src},
-				"dst": map[string]any{"path": dst},
+	var responses []json.RawMessage
+	err := c.withCmd(func() error {
+		var err error
+		responses, err = c.api().CallStream(ctx, "rename2", map[string]any{
+			"paths_to_rename": []map[string]any{
+				{
+					"src": map[string]any{"path": src},
+					"dst": map[string]any{"path": dst},
+				},
 			},
-		},
+		})
+		return err
 	})
 	if err != nil {
 		return fmt.Errorf("move %s -> %s: %w", src, dst, err)
@@ -361,45 +383,49 @@ func (c *Client) WriteFileFrom(ctx context.Context, path string, r io.Reader, si
 
 // writeFileConnlib uploads content inline over the connlib WebSocket.
 func (c *Client) writeFileConnlib(ctx context.Context, path string, content []byte) error {
-	id := c.api().NextID()
-
-	msg := map[string]any{
-		"id":        id,
-		"command":   "create",
-		"uri":       path,
-		"overwrite": true,
-	}
-
-	jsonData, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("marshal create: %w", err)
-	}
-
-	// Connlib binary payload: json + \0 + binary
-	payload := bytes.Join([][]byte{jsonData, content}, []byte{0})
-
-	ch := c.api().Register(id)
-	defer c.api().Unregister(id)
-
-	if err := c.api().Send(ctx, payload); err != nil {
-		return fmt.Errorf("send create: %w", err)
-	}
-
-	select {
-	case resp := <-ch:
-		var r struct {
-			Status string `json:"status"`
+	conn := c.api()
+	return c.withCmd(func() error {
+		id := conn.NextID()
+		msg := map[string]any{
+			"id":        id,
+			"command":   "create",
+			"uri":       path,
+			"overwrite": true,
 		}
-		if err := json.Unmarshal(resp, &r); err != nil {
-			return fmt.Errorf("parse create response: %w", err)
+		jsonData, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("marshal create: %w", err)
 		}
-		if r.Status != "OK" {
-			return fmt.Errorf("write %s: %s", path, r.Status)
+
+		// Connlib binary payload: json + \0 + binary
+		payload := bytes.Join([][]byte{jsonData, content}, []byte{0})
+
+		ch := conn.Register(id)
+		defer conn.Unregister(id)
+
+		if err := conn.Send(ctx, payload); err != nil {
+			return fmt.Errorf("send create: %w", err)
 		}
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+
+		select {
+		case resp, ok := <-ch:
+			if !ok {
+				return fmt.Errorf("write %s: %w", path, connlib.ErrClosed)
+			}
+			var r struct {
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal(resp, &r); err != nil {
+				return fmt.Errorf("parse create response: %w", err)
+			}
+			if r.Status != "OK" {
+				return fmt.Errorf("write %s: %s", path, r.Status)
+			}
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
 }
 
 // Default retry policy for transient read failures (LFT 5xx, ingress error
@@ -697,31 +723,47 @@ func (c *Client) readFileWithRetry(ctx context.Context, path string, sink func()
 // verified content to the writer returned by sink.
 func (c *Client) readFileOnce(ctx context.Context, path string, sink func() (io.Writer, error)) error {
 	conn := c.api()
-	id := conn.NextID()
 
-	msg := map[string]any{
-		"id":      id,
-		"command": "read",
-		"uri":     path,
-	}
-
-	jsonData, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("marshal read: %w", err)
-	}
-
-	ch := conn.RegisterBinary(id, 1)
-	defer conn.UnregisterBinary(id)
-
-	if err := conn.Send(ctx, jsonData); err != nil {
-		return fmt.Errorf("send read: %w", err)
-	}
-
-	select {
-	case frame, ok := <-ch:
-		if !ok {
-			return fmt.Errorf("read %s: %w", path, connlib.ErrClosed)
+	// ID allocation, request and response all happen under the command
+	// lock: the server rejects a request whose id is lower than the last
+	// one it saw on the connection (INVALID_COMMAND), so ids must hit the
+	// wire in allocation order. The LFT transfer below runs outside the
+	// lock so parallel downloads overlap.
+	var frame connlib.RawFrame
+	err := c.withCmd(func() error {
+		id := conn.NextID()
+		msg := map[string]any{
+			"id":      id,
+			"command": "read",
+			"uri":     path,
 		}
+		jsonData, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("marshal read: %w", err)
+		}
+
+		ch := conn.RegisterBinary(id, 1)
+		defer conn.UnregisterBinary(id)
+
+		if err := conn.Send(ctx, jsonData); err != nil {
+			return fmt.Errorf("send read: %w", err)
+		}
+		select {
+		case f, ok := <-ch:
+			if !ok {
+				return fmt.Errorf("read %s: %w", path, connlib.ErrClosed)
+			}
+			frame = f
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	if err != nil {
+		return err
+	}
+
+	{
 		var r struct {
 			Status         string `json:"status"`
 			URIRedirection string `json:"uri_redirection"`
@@ -754,8 +796,6 @@ func (c *Client) readFileOnce(ctx context.Context, path string, sink func() (io.
 		}
 		_, err = w.Write(frame.Binary)
 		return err
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 }
 

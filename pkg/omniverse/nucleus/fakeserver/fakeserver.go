@@ -255,6 +255,7 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	ctx := r.Context()
+	var lastID uint32
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
@@ -278,6 +279,14 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 
 		id := uint32(req["id"].(float64))
 		command, _ := req["command"].(string)
+
+		// Real servers reject a request whose id is not higher than the last
+		// one seen on the connection with INVALID_COMMAND (measured live).
+		if id <= lastID {
+			s.reply(ctx, conn, id, map[string]any{"status": "INVALID_COMMAND"})
+			continue
+		}
+		lastID = id
 
 		switch command {
 		case "authorize_token":

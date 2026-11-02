@@ -120,8 +120,8 @@ Supported directions:
   # Download a file from Nucleus
   nova nucleus cp n:/Projects/Scene.usd ./Scene.usd
 
-  # Download a directory recursively, 8 files at a time
-  nova nucleus cp -j 8 n:/Projects/MyProject/ ./MyProject/
+  # Download a directory recursively, 4 files at a time
+  nova nucleus cp -j 4 n:/Projects/MyProject/ ./MyProject/
 
   # Copy within Nucleus
   nova nucleus cp n:/Projects/a.usd n:/Projects/b.usd
@@ -397,7 +397,7 @@ func init() {
 	// cp-specific flags.
 	nucleusCpCmd.Flags().BoolP("parents", "p", false, "Create parent directories on the destination if they don't exist")
 	nucleusCpCmd.Flags().BoolP("progress", "P", false, "Show upload progress (percent, speed, ETA) on stderr")
-	nucleusCpCmd.Flags().IntP("parallel", "j", 4, "Number of files to download at once (Nucleus -> local)")
+	nucleusCpCmd.Flags().IntP("parallel", "j", 2, "Files to download at once (Nucleus -> local); small Nucleus deployments return 5xx when this is high")
 }
 
 // completeNucleusPath provides tab completion for Nucleus paths.
