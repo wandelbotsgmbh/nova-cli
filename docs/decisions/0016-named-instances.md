@@ -61,8 +61,8 @@ pointed at one entry for a single invocation.
     portal listing stays available with `--cloud`.
   - `instance create/delete/start/stop` are cloud-only and return a typed error with a
     hint for other kinds.
-  - `nova virtual` is renamed `nova cluster` (hidden: internal), with `virtual` as a
-    deprecated alias. `cluster create --name <n>` registers a named cluster;
+  - `nova virtual` is renamed `nova cluster`, labelled "(Wandelbots internal)" in its
+    help; `virtual` stays as a hidden, deprecated copy of the group. `cluster create --name <n>` registers a named cluster;
     `cluster create` without `--name` means `--name cluster --replace`, which keeps the
     old "replace the previous one" behaviour but only for that unnamed entry. An
     existing name without `--replace` is an error. `cluster destroy [name]` and

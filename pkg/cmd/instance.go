@@ -685,6 +685,8 @@ func requireKind(inst instances.Instance, kind instances.Kind, verb string) erro
 		hint = "; use 'nova instance remove " + inst.Name + "' to forget it"
 	case instances.KindCluster:
 		hint = "; use 'nova cluster destroy " + inst.Name + "' for clusters"
+	case instances.KindCloud:
+		hint = "; use 'nova instance delete " + inst.Name + "' for cloud instances"
 	}
 	return fmt.Errorf("can't %s instance %q: it is a %s instance, '%s' only works for %s instances%s",
 		verb, inst.Name, inst.Kind, verb, kind, hint)
