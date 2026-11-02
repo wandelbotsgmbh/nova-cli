@@ -435,17 +435,17 @@ $ nova instance info lab
 
 		var live *portal.UserInstance
 		if inst.Kind == instances.KindCloud && (!local || (!printHostInstanceInfoCmd && !printInstanceIdInstanceInfoCmd && loggedIn())) {
-			p, err := portal.NewPortal(portalEnvironment)
-			if err != nil {
+			i, err := fetchCloudInstance(cloudID(inst, inst.Name))
+			switch {
+			case err == nil:
+				live = &i
+				if inst.Host == "" {
+					inst.Host = i.Host
+				}
+			case !local:
 				return err
-			}
-			i, err := p.GetInstance(cloudID(inst, inst.Name))
-			if err != nil {
-				return err
-			}
-			live = &i
-			if inst.Host == "" {
-				inst.Host = i.Host
+			default:
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning: can't fetch the cloud state:", err)
 			}
 		}
 
@@ -690,6 +690,14 @@ func requireKind(inst instances.Instance, kind instances.Kind, verb string) erro
 	}
 	return fmt.Errorf("can't %s instance %q: it is a %s instance, '%s' only works for %s instances%s",
 		verb, inst.Name, inst.Kind, verb, kind, hint)
+}
+
+func fetchCloudInstance(id string) (portal.UserInstance, error) {
+	p, err := portal.NewPortal(portalEnvironment)
+	if err != nil {
+		return portal.UserInstance{}, err
+	}
+	return p.GetInstance(id)
 }
 
 func loggedIn() bool {
