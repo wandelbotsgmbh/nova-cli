@@ -69,7 +69,7 @@ func TestK8sRunNamedSideBySide(t *testing.T) {
 		t.Error("named create must not write ./kubeconfig")
 	}
 
-	_, _, err := runNova(t, "k8srun", "create", "--name", "sim-a")
+	_, _, err := runWithConfig(t, "k8srun", "create", "--name", "sim-a")
 	if err == nil || !strings.Contains(err.Error(), "--replace") {
 		t.Fatalf("existing name without --replace: err = %v", err)
 	}
@@ -108,13 +108,13 @@ func TestK8sRunRefusesOtherKinds(t *testing.T) {
 	fake := newFakeK8sRunService(t)
 	mustRun(t, "instance", "add", "lab", "--host", "192.168.1.10")
 
-	if _, _, err := runNova(t, "k8srun", "create", "--name", "lab", "--replace"); err == nil || !strings.Contains(err.Error(), "host instance") {
+	if _, _, err := runWithConfig(t, "k8srun", "create", "--name", "lab", "--replace"); err == nil || !strings.Contains(err.Error(), "host instance") {
 		t.Errorf("create over a host entry: err = %v", err)
 	}
-	if _, _, err := runNova(t, "k8srun", "destroy", "lab"); err == nil || !strings.Contains(err.Error(), "only works for k8srun instances") {
+	if _, _, err := runWithConfig(t, "k8srun", "destroy", "lab"); err == nil || !strings.Contains(err.Error(), "only works for k8srun instances") {
 		t.Errorf("destroy a host entry: err = %v", err)
 	}
-	if _, _, err := runNova(t, "k8srun", "destroy"); err == nil {
+	if _, _, err := runWithConfig(t, "k8srun", "destroy"); err == nil {
 		t.Error("destroy without a name must refuse the selected host entry")
 	}
 	if fake.next != 0 || len(fake.destroyed) != 0 {
@@ -126,14 +126,14 @@ func TestVirtualAlias(t *testing.T) {
 	withConfig(t, "")
 	newFakeK8sRunService(t)
 	// cobra prints the deprecation note to the out writer, which defaults to stderr
-	out, errOut, err := runNova(t, "virtual", "create")
+	out, errOut, err := runWithConfig(t, "virtual", "create")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out+errOut, "use 'nova k8srun' instead") {
 		t.Errorf("expected a deprecation note, got %q", out+errOut)
 	}
-	if out, errOut, _ := runNova(t, "k8srun", "list"); strings.Contains(out+errOut, "deprecated") {
+	if out, errOut, _ := runWithConfig(t, "k8srun", "list"); strings.Contains(out+errOut, "deprecated") {
 		t.Error("no deprecation note for 'nova k8srun'")
 	}
 }

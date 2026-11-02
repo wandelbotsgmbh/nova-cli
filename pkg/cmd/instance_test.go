@@ -10,7 +10,6 @@ import (
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
-	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 )
 
 // withConfig points the CLI at a temporary home with the given config file content
@@ -35,22 +34,11 @@ func withConfig(t *testing.T, content string) string {
 	return path
 }
 
-// run executes the root command like main does and returns stdout and stderr.
-func runNova(t *testing.T, args ...string) (string, string, error) {
+// runWithConfig executes the root command like main does against the config from
+// withConfig and returns stdout and stderr.
+func runWithConfig(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
-	viper.Reset()
-	resetTarget()
-	instanceFlag = ""
-	envFlag, envSource, authEnvironment = "", "default", ""
-	oauth.SetActiveEnvironment("")
-	showSecretsConfigView = false
-	showSecretsInstanceInfoCmd = false
-	printHostInstanceInfoCmd, printInstanceIdInstanceInfoCmd = false, false
-	listCloudInstances, listVerboseInstances = false, false
-	k8srunName, k8srunReplace = "", false
-	hostAddInstanceCmd, cellAddInstanceCmd, selectAddInstanceCmd, sshUserAddInstanceCmd = "", "", false, ""
-	kubeconfigSSHUser, kubeconfigSSHPort, kubeconfigNoSudo, kubeconfigRefresh, kubeconfigSetupSSH = "", 0, false, false, false
-	envShell, envUnset, kubeconfigFrom = "", false, ""
+	resetState(rootCmd)
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
@@ -62,7 +50,7 @@ func runNova(t *testing.T, args ...string) (string, string, error) {
 
 func mustRun(t *testing.T, args ...string) string {
 	t.Helper()
-	out, errOut, err := runNova(t, args...)
+	out, errOut, err := runWithConfig(t, args...)
 	if err != nil {
 		t.Fatalf("nova %s: %v\n%s", strings.Join(args, " "), err, errOut)
 	}
@@ -124,7 +112,7 @@ func TestConfigSetMigratesIntoSelectedEntry(t *testing.T) {
 
 func TestConfigSetHostOnEmptyConfigCreatesDefault(t *testing.T) {
 	withConfig(t, "")
-	_, errOut, err := runNova(t, "config", "set", "host", "10.0.0.1")
+	_, errOut, err := runWithConfig(t, "config", "set", "host", "10.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +153,7 @@ func TestOverrideDoesNotTouchSelection(t *testing.T) {
 func TestUnknownOverrideFails(t *testing.T) {
 	withConfig(t, "host: 10.0.0.1\n")
 	t.Setenv(instances.EnvVar, "nope")
-	_, _, err := runNova(t, "config", "view")
+	_, _, err := runWithConfig(t, "config", "view")
 	if err == nil || !strings.Contains(err.Error(), instances.EnvVar) {
 		t.Fatalf("expected an error naming %s, got %v", instances.EnvVar, err)
 	}
@@ -202,7 +190,7 @@ func TestCloudOnlyCommandsRejectOtherKinds(t *testing.T) {
 		{"instance", "delete", "lab"},
 		{"instance", "stop"},
 	} {
-		_, _, err := runNova(t, args...)
+		_, _, err := runWithConfig(t, args...)
 		if err == nil || !strings.Contains(err.Error(), "only works for cloud instances") || !strings.Contains(err.Error(), "nova instance remove lab") {
 			t.Errorf("nova %s: err = %v", strings.Join(args, " "), err)
 		}
@@ -218,7 +206,7 @@ func TestSelectAndRemove(t *testing.T) {
 		t.Errorf("info --host = %q", out)
 	}
 
-	_, _, err := runNova(t, "instance", "add", "lab", "--host", "10.0.0.3")
+	_, _, err := runWithConfig(t, "instance", "add", "lab", "--host", "10.0.0.3")
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("duplicate add: err = %v", err)
 	}
@@ -228,7 +216,7 @@ func TestSelectAndRemove(t *testing.T) {
 	if strings.Contains(out, "ipc2") || strings.Contains(out, "*") {
 		t.Errorf("removed entry listed or still selected:\n%s", out)
 	}
-	if _, _, err := runNova(t, "instance", "info"); err == nil {
+	if _, _, err := runWithConfig(t, "instance", "info"); err == nil {
 		t.Error("info without a selection must fail")
 	}
 }

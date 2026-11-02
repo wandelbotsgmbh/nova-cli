@@ -51,14 +51,14 @@ func TestEnvResolution(t *testing.T) {
 	}
 
 	// an explicit environment that contradicts the cloud target is refused
-	if _, _, err := runNova(t, "config", "view"); err == nil || !strings.Contains(err.Error(), `in "dev"`) {
+	if _, _, err := runWithConfig(t, "config", "view"); err == nil || !strings.Contains(err.Error(), `in "dev"`) {
 		t.Errorf("NOVA_ENV=stg with a dev instance: err = %v", err)
 	}
 	t.Setenv(envVarName, "")
-	if _, _, err := runNova(t, "--env", "prod", "config", "view"); err == nil {
+	if _, _, err := runWithConfig(t, "--env", "prod", "config", "view"); err == nil {
 		t.Error("--env prod with a dev instance must fail")
 	}
-	if _, _, err := runNova(t, "--env", "qa", "--instance", "lab", "config", "view"); err == nil || !strings.Contains(err.Error(), "invalid environment") {
+	if _, _, err := runWithConfig(t, "--env", "qa", "--instance", "lab", "config", "view"); err == nil || !strings.Contains(err.Error(), "invalid environment") {
 		t.Errorf("unknown env: err = %v", err)
 	}
 }
@@ -66,11 +66,11 @@ func TestEnvResolution(t *testing.T) {
 func TestEnvForCloudOnlyCommandsOnOtherEntries(t *testing.T) {
 	withConfig(t, multiEnvConfig)
 	// stop <host entry> still fails on the kind, before any portal call
-	if _, _, err := runNova(t, "instance", "stop", "lab"); err == nil || !strings.Contains(err.Error(), "only works for cloud instances") {
+	if _, _, err := runWithConfig(t, "instance", "stop", "lab"); err == nil || !strings.Contains(err.Error(), "only works for cloud instances") {
 		t.Errorf("err = %v", err)
 	}
 	// --env that contradicts a named cloud entry is refused before contacting the portal
-	if _, _, err := runNova(t, "--instance", "lab", "--env", "prod", "instance", "stop", "devcloud"); err == nil || !strings.Contains(err.Error(), `in "dev"`) {
+	if _, _, err := runWithConfig(t, "--instance", "lab", "--env", "prod", "instance", "stop", "devcloud"); err == nil || !strings.Contains(err.Error(), `in "dev"`) {
 		t.Errorf("err = %v", err)
 	}
 }

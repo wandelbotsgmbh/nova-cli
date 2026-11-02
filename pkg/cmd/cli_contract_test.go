@@ -9,7 +9,10 @@ import (
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/bootstrap"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 )
 
 // runNova executes the real command tree in-process. A non-nil error is what
@@ -30,8 +33,9 @@ func runNova(t *testing.T, args ...string) (string, error) {
 		rootCmd.SetErr(nil)
 	})
 
-	rejectUnknownSubcommands(rootCmd)
-	resetFlags(rootCmd)
+	t.Setenv(instances.EnvVar, "")
+	t.Setenv(envVarName, "")
+	resetState(rootCmd)
 
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
@@ -39,6 +43,17 @@ func runNova(t *testing.T, args ...string) (string, error) {
 	rootCmd.SetArgs(args)
 	err := rootCmd.Execute()
 	return out.String(), err
+}
+
+// resetState prepares the package-global command tree and config for another
+// in-process run, like a fresh process would start.
+func resetState(root *cobra.Command) {
+	viper.Reset()
+	resetTarget()
+	envSource = "default"
+	oauth.SetActiveEnvironment("")
+	rejectUnknownSubcommands(root)
+	resetFlags(root)
 }
 
 // resetFlags undoes flag values and "changed" state left over from earlier

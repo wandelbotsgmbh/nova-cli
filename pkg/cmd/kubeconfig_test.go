@@ -168,7 +168,7 @@ func TestInstanceEnv(t *testing.T) {
 	if out := mustRun(t, "instance", "env", "--unset"); out != "unset NOVA_INSTANCE\nunset KUBECONFIG\n" {
 		t.Errorf("unset output: %q", out)
 	}
-	if _, _, err := runNova(t, "instance", "env", "lab", "--shell", "tcsh"); err == nil {
+	if _, _, err := runWithConfig(t, "instance", "env", "lab", "--shell", "tcsh"); err == nil {
 		t.Error("unknown shell must fail")
 	}
 }
@@ -181,10 +181,10 @@ instances:
     host: abc.instance.wandelbots.io
     id: abc
 `)
-	if _, _, err := runNova(t, "instance", "kubeconfig", "c"); err == nil || !strings.Contains(err.Error(), "no kubeconfig") {
+	if _, _, err := runWithConfig(t, "instance", "kubeconfig", "c"); err == nil || !strings.Contains(err.Error(), "no kubeconfig") {
 		t.Errorf("cloud: err = %v", err)
 	}
-	out, errOut, err := runNova(t, "instance", "env")
+	out, errOut, err := runWithConfig(t, "instance", "env")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestKubeconfigImport(t *testing.T) {
 
 	bad := filepath.Join(t.TempDir(), "bad.yaml")
 	_ = os.WriteFile(bad, []byte("hello: world\n"), 0o644)
-	if _, _, err := runNova(t, "instance", "kubeconfig", "lab", "--kubeconfig", bad); err == nil || !strings.Contains(err.Error(), "not a valid kubeconfig") {
+	if _, _, err := runWithConfig(t, "instance", "kubeconfig", "lab", "--kubeconfig", bad); err == nil || !strings.Contains(err.Error(), "not a valid kubeconfig") {
 		t.Errorf("invalid file: err = %v", err)
 	}
 }
