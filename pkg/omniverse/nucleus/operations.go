@@ -647,8 +647,13 @@ func (c *Client) DownloadFile(ctx context.Context, path, localPath string) (err 
 	tmp := localPath + ".part"
 	var f *os.File
 	defer func() {
+		// f is still open only when an earlier step failed (the success
+		// path closes it explicitly below); report a close failure if it
+		// is the first error.
 		if f != nil {
-			f.Close()
+			if closeErr := f.Close(); closeErr != nil && err == nil {
+				err = fmt.Errorf("writing %s: %w", tmp, closeErr)
+			}
 		}
 		if err != nil {
 			os.Remove(tmp)
