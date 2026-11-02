@@ -14,7 +14,7 @@ A NOVA app written in Rust ([axum](https://github.com/tokio-rs/axum) web server)
         - `BASE_PATH` (e.g. `/cell/my-app`, the app is then served on `http://localhost:8080/cell/my-app`)
         - `NOVA_API` (e.g. `https://xdxqzvpu.instance.wandelbots.io`, `http://` is assumed if no scheme is given)
         - `CELL_NAME` (defaults to `cell`)
-        - `ACCESS_TOKEN` (only needed for cloud instances)
+        - `ACCESS_TOKEN` (only needed for cloud instances, e.g. `ACCESS_TOKEN=$(nova login token) cargo run`; tokens expire, so refresh it when you get `Error 401: Unauthorized`)
         - `LOG_LEVEL` (optional: `debug`, `info`, `warn`, `error`)
     - ATTENTION: make sure not to leak the `ACCESS_TOKEN` in any git repository
 - run the tests with `cargo test`

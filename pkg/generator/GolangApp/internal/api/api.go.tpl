@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
+
 	"{{ .PluginName }}/internal/environment"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -95,7 +97,7 @@ func (a *AppApi) GetPosition(ctx echo.Context) error {
 		return err
 	}
 	if controllersResp.JSON200 == nil {
-		return fmt.Errorf("listing controllers failed: %s", controllersResp.Status())
+		return unexpectedResponse(controllersResp.HTTPResponse, controllersResp.Body)
 	}
 
 	// the first motion group of the first controller that has one
@@ -105,7 +107,7 @@ func (a *AppApi) GetPosition(ctx echo.Context) error {
 			return err
 		}
 		if stateResp.JSON200 == nil {
-			return fmt.Errorf("getting state of controller %s failed: %s", controller, stateResp.Status())
+			return unexpectedResponse(stateResp.HTTPResponse, stateResp.Body)
 		}
 		if len(stateResp.JSON200.MotionGroups) == 0 {
 			continue
@@ -128,4 +130,14 @@ func (a *AppApi) GetPosition(ctx echo.Context) error {
 	}
 
 	return ctx.String(http.StatusNotFound, "No controller with a motion group found")
+}
+
+// Describes a NOVA API response that could not be decoded.
+// The ingress of an instance may answer errors (e.g. 401 for a missing or expired
+// ACCESS_TOKEN) with a plain text error page and status 200.
+func unexpectedResponse(resp *http.Response, body []byte) error {
+	message, _, _ := strings.Cut(strings.TrimSpace(string(body)), "\n")
+	return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf(
+		"NOVA API request failed: unexpected response for url (%s): %s %q. Check NOVA_API and ACCESS_TOKEN (get a fresh one with `nova login token`)",
+		resp.Request.URL, resp.Status, message))
 }
