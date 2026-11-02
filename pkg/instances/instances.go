@@ -56,6 +56,7 @@ type Instance struct {
 	NucleusHost  string `mapstructure:"nucleus-host" yaml:"nucleus-host,omitempty"`
 	NucleusToken string `mapstructure:"nucleus-token" yaml:"nucleus-token,omitempty"`
 	Kubeconfig   string `mapstructure:"kubeconfig" yaml:"kubeconfig,omitempty"`
+	SSHUser      string `mapstructure:"ssh-user" yaml:"ssh-user,omitempty"`
 }
 
 // Cell returns the configured cell or DefaultCell.
@@ -197,6 +198,7 @@ func toMap(i Instance) map[string]any {
 		"nucleus-host":  i.NucleusHost,
 		"nucleus-token": i.NucleusToken,
 		"kubeconfig":    i.Kubeconfig,
+		"ssh-user":      i.SSHUser,
 	} {
 		if val != "" {
 			m[k] = val

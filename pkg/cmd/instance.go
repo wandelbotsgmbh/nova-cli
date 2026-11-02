@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -33,9 +34,10 @@ var (
 	printInstanceIdInstanceInfoCmd bool
 	showSecretsInstanceInfoCmd     bool
 
-	hostAddInstanceCmd   string
-	cellAddInstanceCmd   string
-	selectAddInstanceCmd bool
+	hostAddInstanceCmd    string
+	cellAddInstanceCmd    string
+	selectAddInstanceCmd  bool
+	sshUserAddInstanceCmd string
 )
 
 var (
@@ -103,6 +105,7 @@ $ nova instance add line2 --host https://ipc-line2.example.com --cell line2 --se
 			Kind:     instances.KindHost,
 			Host:     hostAddInstanceCmd,
 			CellName: cellAddInstanceCmd,
+			SSHUser:  sshUserAddInstanceCmd,
 		}
 		if err := r.Add(inst); err != nil {
 			return err
@@ -140,6 +143,10 @@ afterwards.`,
 		}
 		if err := saveRegistry(r); err != nil {
 			return err
+		}
+		// drop a stored kubeconfig together with the entry
+		if dir, err := instanceDir(name); err == nil {
+			_ = os.RemoveAll(dir)
 		}
 		switch {
 		case ok && inst.Kind == instances.KindCloud:
@@ -575,6 +582,7 @@ func init() {
 
 	addInstanceCmd.Flags().StringVar(&hostAddInstanceCmd, "host", "", "Host of the NOVA instance, e.g. 192.168.1.10 or https://ipc.example.com (required)")
 	addInstanceCmd.Flags().StringVar(&cellAddInstanceCmd, "cell", "", "Cell to work with on this instance (default \"cell\")")
+	addInstanceCmd.Flags().StringVar(&sshUserAddInstanceCmd, "ssh-user", "", "SSH user for 'nova instance kubeconfig' on this host")
 	addInstanceCmd.Flags().BoolVar(&selectAddInstanceCmd, "select", false, "Select the new instance (it is always selected if no instance is selected yet)")
 
 	infoInstanceCmd.Flags().BoolVar(&printHostInstanceInfoCmd, "host", false, "Only return the host of the instance instead of the full information.")

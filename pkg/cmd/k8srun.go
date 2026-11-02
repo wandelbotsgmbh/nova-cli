@@ -10,9 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
@@ -108,7 +106,7 @@ $ nova k8srun create`,
 			if err != nil {
 				return err
 			}
-			kubeconfig, err := writeClusterKubeconfig(name, kubeBytes)
+			kubeconfig, err := writeInstanceKubeconfig(name, kubeBytes)
 			if err != nil {
 				return err
 			}
@@ -187,7 +185,7 @@ Without a name, the targeted instance is destroyed; it must be a cluster.`,
 			if err := saveRegistry(r); err != nil {
 				return err
 			}
-			if dir, err := clusterDir(inst.Name); err == nil {
+			if dir, err := instanceDir(inst.Name); err == nil {
 				_ = os.RemoveAll(dir)
 			}
 			return nil
@@ -269,26 +267,6 @@ func requestCluster(version string) (virtualInstance, error) {
 		return instance, errors.New("no instance kubeconfig returned")
 	}
 	return instance, nil
-}
-
-func clusterDir(name string) (string, error) {
-	home, err := homedir.Dir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".nova", "instances", name), nil
-}
-
-func writeClusterKubeconfig(name string, content []byte) (string, error) {
-	dir, err := clusterDir(name)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	path := filepath.Join(dir, "kubeconfig")
-	return path, os.WriteFile(path, content, 0o600)
 }
 
 func destroyVirtual(instanceId string) error {

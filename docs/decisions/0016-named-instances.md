@@ -68,6 +68,16 @@ pointed at one entry for a single invocation.
     one" behaviour but only for that unnamed entry. An existing name without
     `--replace` is an error. `k8srun destroy [name]` and `k8srun list` are added. No
     prompts (ADR-0010).
+- **Kubeconfig and shell shortcut:** `nova instance kubeconfig [name]` prints the path of
+  the instance's kubeconfig: stored on `k8srun create`, fetched once over ssh for `host`
+  entries (`sudo -n <k3s> kubectl config view --raw`, server rewritten from 127.0.0.1 to
+  the host, stored with mode 0600 next to the entry; `--refresh` fetches again;
+  `--setup-ssh-key` reuses the k3s-scoped sudo rule of `app install --copy-image`), not
+  available for `cloud`. `nova instance env [name]` prints `NOVA_INSTANCE` and
+  `KUBECONFIG` exports for `eval` (sh, fish, PowerShell), so a shell can be pinned to an
+  instance without changing the selection. Only paths are printed, never the content; it
+  is fetched only on these explicit commands, never as a side effect of `add` or
+  `select`.
 - **Secrets:** `config view` and `instance info` redact tokens unless `--show-secrets`
   (ADR-0006).
 - **Migration:** on first run with a bare top-level `host`, the CLI adds an entry
@@ -97,6 +107,9 @@ pointed at one entry for a single invocation.
   holds at most an instance **name**, never a host or credentials.
 - `nova status` (ADR-0011) should report the active instance, its kind and where the
   choice came from (flag, env, config).
+- A kubeconfig is cluster admin on the instance. For an instance that drives real robots
+  it falls under ADR-0009's "credentials for a real cell are not given to an agent working
+  unattended"; the kit must not fetch it on its own.
 - Follow-ups:
   - Attach the portal token only to cloud hosts and basic auth only to its entry
     (ADR-0006, "auth only to the configured host").
