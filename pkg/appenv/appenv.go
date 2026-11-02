@@ -66,6 +66,8 @@ var pythonLayout = Layout{
 		return []KV{
 			{"NOVA_API", s.NovaApi},
 			{"CELL_NAME", s.Cell},
+			// novax registers the programs in the cell's program store under the app name from BASE_PATH
+			{"BASE_PATH", "/" + s.Cell + "/" + s.AppName},
 			{"NOVA_ACCESS_TOKEN", s.AccessToken},
 		}
 	},

@@ -96,7 +96,7 @@ or after switching the instance with 'nova config set host'.
 Existing lines in the file are kept, only the managed variables are replaced:
   rust_app, golang_app: .env.local       NOVA_API, CELL_NAME, BASE_PATH, ACCESS_TOKEN (and LOG_LEVEL if missing)
   nextjs_app:           .env.local       NOVA_DEV_INSTANCE_URL, NOVA_DEV_ACCESS_TOKEN, CELL_ID
-  python_app:           .env             NOVA_API, CELL_NAME, NOVA_ACCESS_TOKEN
+  python_app:           .env             NOVA_API, CELL_NAME, BASE_PATH, NOVA_ACCESS_TOKEN
 
 'nova app create' runs this once for a new project.`
 
