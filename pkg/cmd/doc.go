@@ -32,6 +32,6 @@ func disableAutoGenTag(c *cobra.Command) {
 }
 
 func init() {
-	genDoc.Flags().StringVar(&genDocDir, "dir", "docs", "Output directory for the generated markdown files")
+	genDoc.Flags().StringVar(&genDocDir, "dir", "_docs", "Output directory for the generated markdown files")
 	rootCmd.AddCommand(genDoc)
 }

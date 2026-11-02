@@ -47,7 +47,7 @@ type pageData struct {
 }
 
 func main() {
-	src := flag.String("src", "docs", "directory with the cobra-generated markdown files")
+	src := flag.String("src", "_docs", "directory with the cobra-generated markdown files")
 	out := flag.String("out", "_site", "output directory")
 	version := flag.String("version", "dev", "CLI version shown in the header")
 	repo := flag.String("repo", "https://github.com/wandelbotsgmbh/nova-cli", "repository link shown in the header")

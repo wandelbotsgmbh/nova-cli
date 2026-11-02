@@ -30,7 +30,7 @@ Find the latest binaries at https://github.com/wandelbotsgmbh/nova-cli/releases
 
 Download the binary, rename it to `nova`, and make it executable. Make sure to grant the file execute permissions, as the program is not signed. Add it to your PATH and you should be ready for lift-off 🚀
 
-[Completions are available](docs/nova_completion.md) for the most common terminals.
+[Completions are available](https://wandelbotsgmbh.github.io/nova-cli/nova_completion.html) for the most common terminals.
 
 Or use the install script (macOS/Linux, installs to `/usr/local/bin`):
 
@@ -135,7 +135,7 @@ nova config set host 192.168.1.100
 
 ## Usage
 
-For an overview and description of all available commands have a look at the [docs](docs/nova.md).
+For an overview and description of all available commands have a look at the [CLI reference](https://wandelbotsgmbh.github.io/nova-cli/) (latest release), or run `nova <command> --help`.
 
 ### Autocompletion on macOS zsh
 
