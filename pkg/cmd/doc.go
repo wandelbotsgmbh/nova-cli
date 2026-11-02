@@ -17,8 +17,18 @@ var genDoc = &cobra.Command{
 		if err := os.MkdirAll(genDocDir, os.ModePerm); err != nil {
 			return err
 		}
+		disableAutoGenTag(rootCmd)
 		return doc.GenMarkdownTree(rootCmd, genDocDir)
 	},
+}
+
+// cobra only inherits DisableAutoGenTag on pages with a "SEE ALSO" section,
+// so it is set on every command to keep the date out of all pages.
+func disableAutoGenTag(c *cobra.Command) {
+	c.DisableAutoGenTag = true
+	for _, sub := range c.Commands() {
+		disableAutoGenTag(sub)
+	}
 }
 
 func init() {
