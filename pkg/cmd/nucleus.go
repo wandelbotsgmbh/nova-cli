@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/omniverse/nucleus"
 )
 
@@ -673,7 +672,7 @@ func uploadFile(ctx context.Context, client *nucleus.Client, localPath, remotePa
 func dialNucleus(cmd *cobra.Command) (*nucleus.Client, error) {
 	host, _ := cmd.Flags().GetString("nucleus-host")
 	if host == "" {
-		host = viper.GetString("nucleus-host")
+		host = currentTarget().NucleusHost
 	}
 	if host == "" {
 		return nil, fmt.Errorf("nucleus host not configured — set via --nucleus-host flag or `nova config set nucleus-host <host>`")
@@ -684,7 +683,7 @@ func dialNucleus(cmd *cobra.Command) (*nucleus.Client, error) {
 		token = os.Getenv("NUCLEUS_TOKEN")
 	}
 	if token == "" {
-		token = viper.GetString("nucleus-token")
+		token = currentTarget().NucleusToken
 	}
 	if token == "" {
 		return nil, fmt.Errorf("nucleus API token not set — use --nucleus-token flag, NUCLEUS_TOKEN env var, or `nova config set nucleus-token <token>`")

@@ -4,17 +4,18 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp"
 )
 
 var mcpCmd = &cobra.Command{
 	Use:   "mcp",
 	Short: "EXPERIMENTAL: Start an MCP server",
-	Long: `EXPERIMENTAL: Start an MCP server based on the NOVA API of the configured host.
+	Long: `EXPERIMENTAL: Start an MCP server based on the NOVA API of the selected instance.
 
-You can configure the host using 'nova config set host <host>'.
-The local running server will proxy all requests from the LLM to the configured host.
+The server targets the selected instance ('nova instance select <name>'). To pin it to
+a specific instance regardless of the selection, pass --instance <name> or set the
+NOVA_INSTANCE environment variable (e.g. in the "env" of the MCP client config).
+The local running server will proxy all requests from the LLM to that instance.
 
 The configuration depends on the AI Coding Assistent of your choice.
 For example if using Cursor (https://www.cursor.com/) it looks like this:
@@ -25,7 +26,10 @@ For example if using Cursor (https://www.cursor.com/) it looks like this:
       "command": "nova",
       "args": [
         "mcp"
-      ]
+      ],
+      "env": {
+        "NOVA_INSTANCE": "my-instance"
+      }
     }
   }
 }
@@ -34,9 +38,9 @@ For example if using Cursor (https://www.cursor.com/) it looks like this:
 To stop the server, use Ctrl+C.
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
+		host := currentHost()
 		if host == "" {
-			return fmt.Errorf("error: Host is not configured. Please set the host using 'nova config set host <host>'")
+			return fmt.Errorf("error: no instance selected. Select one with 'nova instance select <name>' or register one with 'nova instance add <name> --host <url>'")
 		}
 		return mcp.RunOpenAPIMCPServer(host)
 	},

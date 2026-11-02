@@ -14,7 +14,6 @@ import (
 	"github.com/wandelbotsgmbh/nova-cli/pkg/utils"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 // If this is true, the file will be saved in json format, otherwise in yaml format
@@ -34,8 +33,8 @@ var deleteCmd = &cobra.Command{
 	Long: `Deletes an existing cell.
 If no name is given, the default cellname is used (which can be changed with 'nova config set cellname <name>').`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		cell := viper.GetString("cellname")
+		host := currentHost()
+		cell := currentCell()
 		if len(args) > 0 {
 			cell = args[0]
 		}
@@ -50,8 +49,8 @@ var addCmd = &cobra.Command{
 	Long: `Add a new cell with default configuration.
 If no name is given, the default cellname is used (which can be changed with 'nova config set cellname <name>').`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		name := viper.GetString("cellname")
+		host := currentHost()
+		name := currentCell()
 		if len(args) > 0 {
 			name = args[0]
 		}
@@ -68,7 +67,7 @@ var listCmd = &cobra.Command{
 	Short: "List all existing cells",
 	Long:  ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
+		host := currentHost()
 		cells, err := nova.ListCells(host)
 		if err != nil {
 			return err
@@ -101,8 +100,8 @@ If no name is given, the default cellname is used (which can be changed with 'no
 	nova cell save mycell
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		cell := viper.GetString("cellname")
+		host := currentHost()
+		cell := currentCell()
 		if len(args) > 0 {
 			cell = args[0]
 		}
@@ -166,7 +165,7 @@ This is the equivalent of running 'nova config set cellname <name>' with the cel
 	nova cell install https://somehost.com/path/to/cell.yaml?latest=true
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
+		host := currentHost()
 
 		if !specfile.IsSpec(args[0]) {
 			return fmt.Errorf("file '%s' is not a valid spec file (yaml, yml, json, or url)", args[0])
@@ -181,9 +180,6 @@ This is the equivalent of running 'nova config set cellname <name>' with the cel
 		if !ok {
 			return errors.New("spec file does not contain a name field. check that the file contains a valid cell configuration")
 		}
-
-		// TODO is this nice?
-		viper.Set("cellname", cellName)
 
 		cellSetup, err := json.Marshal(specfile)
 		if err != nil {
@@ -214,8 +210,8 @@ If the files content changed, the cell configuration is updated after closing th
 If you want to change the editor you can call e.g. 'nova config set editor "code --wait"' to use Visual Studio Code.
 	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		cellName := viper.GetString("cellname")
+		host := currentHost()
+		cellName := currentCell()
 		if len(args) > 0 {
 			cellName = args[0]
 		}
@@ -241,7 +237,7 @@ If you want to change the editor you can call e.g. 'nova config set editor "code
 }
 
 func completeCell(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	cells, err := nova.ListCells(viper.GetString("host"))
+	cells, err := nova.ListCells(currentHost())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

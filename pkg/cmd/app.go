@@ -141,12 +141,12 @@ var installAppCmd = &cobra.Command{
 	Long:    installAppTxtLong,
 	Example: installAppTxtExample,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
+		host := currentHost()
 		if host == "" {
 			return fmt.Errorf("please provide the nova host via `nova config set host <host>`")
 		}
 
-		cellname := viper.GetString("cellname")
+		cellname := currentCell()
 
 		if appSetupSSHKey && !appCopyImage {
 			return fmt.Errorf("--setup-ssh-key only applies together with --copy-image")
@@ -404,8 +404,8 @@ var deleteAppCmd = &cobra.Command{
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeApp,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		cell := viper.GetString("cellname")
+		host := currentHost()
+		cell := currentCell()
 
 		appName := args[0]
 		err := nova.DeleteApp(host, cell, appName)
@@ -421,8 +421,8 @@ var listAppsCmd = &cobra.Command{
 	Short: "Lists all installed apps",
 	Long:  `Lists all installed apps."`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		cell := viper.GetString("cellname")
+		host := currentHost()
+		cell := currentCell()
 
 		cellExists, err := nova.CellExists(host, cell)
 		if err != nil || !cellExists {
@@ -447,8 +447,8 @@ var editAppCmd = &cobra.Command{
 	Short:             "edit an app configuration",
 	Long:              editAppTxtLong,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		cell := viper.GetString("cellname")
+		host := currentHost()
+		cell := currentCell()
 		appName := args[0]
 
 		app, err := nova.GetAppYaml(host, cell, appName)
@@ -529,8 +529,8 @@ func createAppProject(appName string) error {
 		Timestamp:        fmt.Sprintf("%d", time.Now().UnixMilli()),
 		GeneratorVersion: cliVersion,
 		InstanceInformation: generator.InstanceInformation{
-			NovaApiHost: viper.GetString("host"),
-			CellName:    viper.GetString("cellname"),
+			NovaApiHost: currentHost(),
+			CellName:    currentCell(),
 		},
 	}
 
@@ -926,7 +926,7 @@ func (app *DotNovaApp) verify() error {
 }
 
 func completeApp(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	apps, err := nova.ListApps(viper.GetString("host"), viper.GetString("cellname"))
+	apps, err := nova.ListApps(currentHost(), currentCell())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

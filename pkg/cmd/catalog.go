@@ -10,7 +10,6 @@ import (
 	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	apiv1 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova"
 	apiv2 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova/v2"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/catalog"
@@ -110,8 +109,8 @@ var catalogInstallCmd = &cobra.Command{
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeCatalog,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		cell := viper.GetString("cellname")
+		host := currentHost()
+		cell := currentCell()
 
 		c, err := catalog.NewDefault(catalogUsePreview)
 		if err != nil {

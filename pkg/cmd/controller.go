@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 )
 
@@ -17,8 +16,8 @@ var controllerListCmd = &cobra.Command{
 	Short: "List all configured robot controllers.",
 	Long:  `List all configured robot controllers.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		cell := viper.GetString("cellname")
+		host := currentHost()
+		cell := currentCell()
 
 		controllers, err := nova.ListControllers(host, cell)
 		if err != nil {

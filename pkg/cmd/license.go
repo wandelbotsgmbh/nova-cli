@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 )
 
@@ -19,7 +18,7 @@ var licenseActivateCmd = &cobra.Command{
 	Long:  `Activate the license for the current instance`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
+		host := currentHost()
 		return nova.ActivateLicense(host)
 	},
 }
@@ -30,7 +29,7 @@ var licenseGetCmd = &cobra.Command{
 	Long:  `Get the license for the current instance`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
+		host := currentHost()
 		license, err := nova.GetLicense(host)
 		if err != nil {
 			return err
