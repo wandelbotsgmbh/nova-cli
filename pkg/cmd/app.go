@@ -12,6 +12,7 @@ import (
 
 	apiv1 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova"
 	apiv2 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova/v2"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/appenv"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/credentials"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/docker"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/editor"
@@ -112,6 +113,21 @@ var createAppCmd = &cobra.Command{
 			appName = strings.TrimSpace(args[0])
 		}
 		return createAppProject(appName)
+	},
+}
+
+var envAppCmd = &cobra.Command{
+	Use:     "env [path]",
+	Short:   "Writes the local development settings of an app project",
+	Long:    envAppTxtLong,
+	Example: envAppTxtExample,
+	Args:    cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dir := "."
+		if len(args) > 0 {
+			dir = args[0]
+		}
+		return writeAppEnv(cmd, dir)
 	},
 }
 
@@ -455,6 +471,7 @@ func init() {
 	appCmd.AddCommand(listAppsCmd)
 	appCmd.AddCommand(deleteAppCmd)
 	appCmd.AddCommand(editAppCmd)
+	appCmd.AddCommand(envAppCmd)
 
 	// TODO generate this flag somehow, with the available generators?
 	// Otherwise possible apps needs to be put into the readme by hand.
@@ -527,7 +544,72 @@ func createAppProject(appName string) error {
 		}
 	}
 
-	return appGen.CreateProject(outpath, spec)
+	if err := appGen.CreateProject(outpath, spec); err != nil {
+		return err
+	}
+
+	if err := writeAppEnv(rootCmd, outpath); err != nil {
+		fmt.Printf("Could not write the local development settings: %v\nRun 'nova app env' in %s once that is fixed.\n", err, outpath)
+	}
+	return nil
+}
+
+// Writes the instance url, cell and a fresh access token into the gitignored env file of the
+// app project in dir, using the file and variable names of its project type.
+func writeAppEnv(cmd *cobra.Command, dir string) error {
+	layout, err := appenv.DetectLayout(dir)
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, ".nova"))
+	if err != nil {
+		return fmt.Errorf("%s is no nova app project folder: %w", dir, err)
+	}
+	app := DotNovaApp{}
+	if err := yaml.Unmarshal(data, &app); err != nil {
+		return fmt.Errorf("invalid .nova file: %w", err)
+	}
+
+	host := viper.GetString("host")
+	if host == "" {
+		return fmt.Errorf("no host configured, set it with 'nova config set host <host>'")
+	}
+	cell := viper.GetString("cellname")
+	if cell == "" {
+		cell = "cell"
+	}
+
+	// only portal instances need a token; refresh it so the file holds a valid one
+	accessToken := ""
+	if strings.Contains(host, oauth.WABO_CLOUD_HOST) {
+		if err := oauth.RefreshTokenOrLogin(host); err != nil {
+			return err
+		}
+		token, err := oauth.LoadToken()
+		if err != nil {
+			return fmt.Errorf("failed to load the access token: %w", err)
+		}
+		accessToken = token.OAuth2Token.AccessToken
+	}
+
+	novaApi := nova.HostWithProtocol(host)
+	path, err := appenv.Write(dir, layout, appenv.Settings{
+		NovaApi:     novaApi,
+		Cell:        cell,
+		AppName:     app.Name,
+		AccessToken: accessToken,
+	})
+	if err != nil {
+		return err
+	}
+
+	tokenInfo := "not needed for this host"
+	if accessToken != "" {
+		tokenInfo = "refreshed"
+	}
+	cmd.Printf("Updated %s (instance %s, cell %s, access token %s)\n", path, novaApi, cell, tokenInfo)
+	return nil
 }
 
 func installApp(host, cell, completeImageName string, appContext DotNovaAppContext) error {

@@ -18,6 +18,10 @@ use crate::nova::NovaClient;
 
 #[tokio::main]
 async fn main() {
+    // local development settings, written by `nova app env`. Variables already set in the
+    // environment take precedence; in the container the platform sets them and there is no file.
+    let env_file = dotenvy::from_filename(".env.local").ok();
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::new(format!(
             "{}={level},tower_http={level}",
@@ -25,6 +29,9 @@ async fn main() {
             level = env::log_level()
         )))
         .init();
+    if let Some(path) = env_file {
+        tracing::info!("loaded {}", path.display());
+    }
 
     if let Err(err) = run().await {
         tracing::error!("{err}");

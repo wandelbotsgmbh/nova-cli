@@ -100,7 +100,7 @@ impl fmt::Display for NovaError {
             NovaError::Request(err) => write!(f, "{err}"),
             NovaError::NotJson { url, message } => write!(
                 f,
-                "unexpected non-JSON response for url ({url}): {message:?}. Check NOVA_API and ACCESS_TOKEN (get a fresh one with `nova login token`)."
+                "unexpected non-JSON response for url ({url}): {message:?}. Check NOVA_API and ACCESS_TOKEN (refresh it with `nova app env`)."
             ),
         }
     }

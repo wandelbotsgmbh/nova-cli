@@ -1,0 +1,14 @@
+{
+    // The app reads its settings from .env.local, run `nova app env` to create or refresh it.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "App",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

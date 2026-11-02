@@ -9,14 +9,14 @@ A NOVA app written in Rust ([axum](https://github.com/tokio-rs/axum) web server)
 
 ## Development
 
-- run locally with `cargo run`, or press `F5` in vscode to run/debug (needs the CodeLLDB extension)
-    - make sure the following env vars are properly set in your environment or `.vscode/launch.json`:
-        - `BASE_PATH` (e.g. `/cell/my-app`, the app is then served on `http://localhost:8080/cell/my-app`)
-        - `NOVA_API` (e.g. `https://xdxqzvpu.instance.wandelbots.io`, `http://` is assumed if no scheme is given)
-        - `CELL_NAME` (defaults to `cell`)
-        - `ACCESS_TOKEN` (only needed for cloud instances, e.g. `ACCESS_TOKEN=$(nova login token) cargo run`; tokens expire, so refresh it when you get `Error 401: Unauthorized`)
-        - `LOG_LEVEL` (optional: `debug`, `info`, `warn`, `error`)
-    - ATTENTION: make sure not to leak the `ACCESS_TOKEN` in any git repository
+- `nova app env` writes the settings for your configured instance (`nova config view`) into the gitignored `.env.local`:
+  `NOVA_API`, `CELL_NAME`, `BASE_PATH` and, for portal instances, a fresh `ACCESS_TOKEN`.
+  Run it again when the token expired (the instance answers `Error 401: Unauthorized`) or after switching the instance.
+- run locally with `cargo run` (served on `http://localhost:8080` + `BASE_PATH`), or press `F5` in vscode to run/debug
+  (needs the CodeLLDB extension)
+    - the app loads `.env.local` on startup; variables set in your environment take precedence
+    - `LOG_LEVEL` (`debug`, `info`, `warn`, `error`) is set to `debug` there, change it as you like
+    - ATTENTION: `.env.local` contains the access token, keep it out of git
 - run the tests with `cargo test`
 - build docker and deploy with `nova app install`
 

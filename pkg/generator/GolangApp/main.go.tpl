@@ -13,11 +13,16 @@ import (
 	"{{ .PluginName }}/internal/environment"
 	"{{ .PluginName }}/internal/renderer"
 
+	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
 
 func main() {
+	// local development settings, written by `nova app env`. Variables already set in the
+	// environment take precedence; in the container the platform sets them and there is no file.
+	envFileErr := godotenv.Load(".env.local")
+
 	e := echo.New()
 	e.HideBanner = true
 
@@ -27,6 +32,9 @@ func main() {
 
 	logHander := slog.NewTextHandler(os.Stdout, opts)
 	slog.SetDefault(slog.New(logHander))
+	if envFileErr == nil {
+		slog.Info("loaded .env.local")
+	}
 
 	e.Pre(middleware.RemoveTrailingSlash())
 	e.Use(middleware.CORS())

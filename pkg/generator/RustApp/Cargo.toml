@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 axum = "0.8"
+dotenvy = "0.15"
 reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "rustls-no-provider"] }
 # ring instead of the default aws-lc-rs: it cross-compiles with a plain C compiler (see Dockerfile)
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

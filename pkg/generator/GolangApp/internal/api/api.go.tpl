@@ -138,6 +138,6 @@ func (a *AppApi) GetPosition(ctx echo.Context) error {
 func unexpectedResponse(resp *http.Response, body []byte) error {
 	message, _, _ := strings.Cut(strings.TrimSpace(string(body)), "\n")
 	return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf(
-		"NOVA API request failed: unexpected response for url (%s): %s %q. Check NOVA_API and ACCESS_TOKEN (get a fresh one with `nova login token`)",
+		"NOVA API request failed: unexpected response for url (%s): %s %q. Check NOVA_API and ACCESS_TOKEN (refresh it with `nova app env`)",
 		resp.Request.URL, resp.Status, message))
 }

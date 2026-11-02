@@ -2,3 +2,4 @@ target/
 .git/
 .vscode/
 .env
+.env.local

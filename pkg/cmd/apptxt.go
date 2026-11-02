@@ -85,3 +85,23 @@ const editAppTxtLong = `Edits the configuration of an app directly in your favor
 If the files content changed, the app configuration is updated after closing the editor.
 
 If you want to change the editor you can call 'nova config set editor "code --wait"' to use Visual Studio Code.`
+
+const envAppTxtLong = `Writes the local development settings of an app project into its gitignored env file:
+the configured instance (host), the cell and, for portal instances (*.wandelbots.io), a fresh access token.
+The access token is refreshed (or a login is started) like 'nova login token' does.
+
+Run it again when the access token expired (the app gets "Error 401: Unauthorized" from the instance)
+or after switching the instance with 'nova config set host'.
+
+Existing lines in the file are kept, only the managed variables are replaced:
+  rust_app, golang_app: .env.local       NOVA_API, CELL_NAME, BASE_PATH, ACCESS_TOKEN (and LOG_LEVEL if missing)
+  nextjs_app:           .env.local       NOVA_DEV_INSTANCE_URL, NOVA_DEV_ACCESS_TOKEN, CELL_ID
+  python_app:           .env             NOVA_API, CELL_NAME, NOVA_ACCESS_TOKEN
+
+'nova app create' runs this once for a new project.`
+
+const envAppTxtExample = `# update the env file of the app project in the current directory
+nova app env
+
+# update the env file of another app project
+nova app env path/to/your-nova-app`
