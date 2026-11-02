@@ -7,8 +7,10 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	homedir "github.com/mitchellh/go-homedir"
@@ -81,16 +83,19 @@ the selection of other sessions.
 
 For host instances the kubeconfig is fetched over ssh if needed (see
 'nova instance kubeconfig'); cloud instances have no kubeconfig, so only NOVA_INSTANCE is
-set. --unset prints the commands that undo it.`,
+set. --unset prints the commands that undo it.
+
+The syntax matches the shell that runs the command (detected from the parent process,
+then $SHELL); --shell overrides it.`,
 	Example: `# bash / zsh
 $ eval "$(nova instance env lab)"
 $ eval "$(nova instance env --unset)"
 
 # fish
-$ nova instance env lab --shell fish | source
+$ nova instance env lab | source
 
 # PowerShell
-PS> nova instance env lab --shell powershell | Invoke-Expression`,
+PS> nova instance env lab | Invoke-Expression`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		shell := envShell
 		if shell == "" {
@@ -137,7 +142,7 @@ func init() {
 		c.Flags().BoolVar(&kubeconfigRefresh, "refresh", false, "Fetch the kubeconfig of a host instance again.")
 		c.Flags().BoolVar(&kubeconfigSetupSSH, "setup-ssh-key", false, "Before fetching, install your SSH public key and (unless --no-sudo) a passwordless sudo rule for k3s on the host. Needs the SSH and one sudo password once.")
 	}
-	envInstanceCmd.Flags().StringVar(&envShell, "shell", "", "Shell syntax: sh (bash, zsh), fish or powershell. Detected from $SHELL if empty.")
+	envInstanceCmd.Flags().StringVar(&envShell, "shell", "", "Shell syntax: sh (bash, zsh), fish or powershell. Detected from the calling shell if empty.")
 	envInstanceCmd.Flags().BoolVar(&envUnset, "unset", false, "Print the commands that unset NOVA_INSTANCE and KUBECONFIG.")
 }
 
@@ -353,21 +358,60 @@ func writeEnv(out io.Writer, shell string, vars []envVar, unset bool) {
 func evalHint(shell, name string) string {
 	switch shell {
 	case "fish":
-		return "nova instance env " + name + " --shell fish | source"
+		return "nova instance env " + name + " | source"
 	case "powershell":
-		return "nova instance env " + name + " --shell powershell | Invoke-Expression"
+		return "nova instance env " + name + " | Invoke-Expression"
 	}
 	return `eval "$(nova instance env ` + name + `)"`
 }
 
+// detectShell picks the syntax for the shell that runs nova: the parent process
+// (e.g. zsh for eval "$(...)", fish for "| source"), then $SHELL (the login shell),
+// then PowerShell on Windows and sh elsewhere.
 func detectShell() string {
-	if strings.HasSuffix(os.Getenv("SHELL"), "fish") {
-		return "fish"
+	if shell, ok := shellFromName(parentProcessName()); ok {
+		return shell
 	}
-	if runtime.GOOS == "windows" && os.Getenv("SHELL") == "" {
+	if shell, ok := shellFromName(os.Getenv("SHELL")); ok {
+		return shell
+	}
+	if runtime.GOOS == "windows" {
 		return "powershell"
 	}
 	return "sh"
+}
+
+// shellFromName maps a process name or path ("-zsh", "/usr/bin/fish", "pwsh.exe")
+// to the syntax nova prints.
+func shellFromName(name string) (string, bool) {
+	name = strings.TrimPrefix(filepath.Base(strings.TrimSpace(name)), "-")
+	name = strings.TrimSuffix(strings.ToLower(name), ".exe")
+	switch name {
+	case "fish":
+		return "fish", true
+	case "pwsh", "powershell":
+		return "powershell", true
+	case "sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "busybox":
+		return "sh", true
+	}
+	return "", false
+}
+
+// parentProcessName returns the name of the parent process, or "" if unknown
+// (always on Windows, where $SHELL and the PowerShell default apply).
+func parentProcessName() string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	ppid := strconv.Itoa(os.Getppid())
+	if b, err := os.ReadFile("/proc/" + ppid + "/comm"); err == nil {
+		return string(b)
+	}
+	out, err := exec.Command("ps", "-o", "comm=", "-p", ppid).Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
 }
 
 // shQuote single-quotes s for sh and fish.

@@ -202,3 +202,24 @@ func TestKubeconfigOfK8sRun(t *testing.T) {
 		t.Errorf("k8srun kubeconfig: %q, %v", b, err)
 	}
 }
+
+func TestShellFromName(t *testing.T) {
+	for in, want := range map[string]string{
+		"-zsh\n":         "sh",
+		"/bin/bash":      "sh",
+		"/usr/bin/fish":  "fish",
+		"fish\n":         "fish",
+		"pwsh":           "powershell",
+		"powershell.exe": "powershell",
+		"PowerShell.EXE": "powershell",
+	} {
+		if got, ok := shellFromName(in); !ok || got != want {
+			t.Errorf("shellFromName(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+	for _, in := range []string{"", "go", "nova", "python3", "sudo"} {
+		if got, ok := shellFromName(in); ok {
+			t.Errorf("shellFromName(%q) = %q, want unknown", in, got)
+		}
+	}
+}

@@ -74,7 +74,7 @@ pointed at one entry for a single invocation.
   the host, stored with mode 0600 next to the entry; `--refresh` fetches again;
   `--setup-ssh-key` reuses the k3s-scoped sudo rule of `app install --copy-image`), not
   available for `cloud`. `nova instance env [name]` prints `NOVA_INSTANCE` and
-  `KUBECONFIG` exports for `eval` (sh, fish, PowerShell), so a shell can be pinned to an
+  `KUBECONFIG` exports for `eval` in the syntax of the calling shell (sh, fish, PowerShell; detected from the parent process), so a shell can be pinned to an
   instance without changing the selection. Only paths are printed, never the content; it
   is fetched only on these explicit commands, never as a side effect of `add` or
   `select`.
