@@ -5,14 +5,24 @@ const configSetTxtLong = `Sets a configuration value in the Wandelbots NOVA CLI 
 Most common configurations values are:
 - host: the host of the Wandelbots NOVA OS instance
 - cellname: name of the default cell to be used
+
+host, cellname, virtualid, nucleus-host and nucleus-token are stored per instance: they
+apply to the selected instance, or to the one named via --instance / NOVA_INSTANCE (see
+'nova instance'). If no instance exists yet, an instance "default" is created.
+All other values are global.
+
+Other values:
 - editor: when editing cell or app definitions one can specify the default editor.
 	- use e.g. "code --wait" to edit files with VS Code
 - container-runtime: force docker or podman for building and pushing images
 	- auto-detected when unset (docker preferred, podman fallback)`
 
 const configSetTxtExample = `
-# Setting the host for interacting via the nova CLI (defaults to any instance created or selected via 'nova instance' command)
+# Setting the host of the selected instance (set automatically by 'nova instance create/select')
 nova config set host instanceid.instance.wandelbots.io
+
+# Setting the Nucleus token of a specific instance without selecting it
+nova --instance lab config set nucleus-token <token>
 
 # Setting the default image registry to be used for pushing images via 'nova app install' command
 # Example shows different providers:
