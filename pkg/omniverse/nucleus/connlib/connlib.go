@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,11 @@ type RawFrame struct {
 	Binary []byte // nil if no binary payload
 }
 
+// ErrClosed is returned (possibly wrapped) by Send, Call and CallStream once
+// the underlying WebSocket has died, and by callers that find their response
+// channel closed for that reason. Callers may re-dial and retry.
+var ErrClosed = errors.New("connlib: connection closed")
+
 // Conn is a connlib protocol connection over a WebSocket.
 type Conn struct {
 	ws            *websocket.Conn
@@ -30,6 +36,29 @@ type Conn struct {
 	requestID     atomic.Uint32
 	pending       map[uint32]chan json.RawMessage
 	pendingBinary map[uint32]chan RawFrame
+	closed        atomic.Bool // set once the read loop has exited
+}
+
+// Closed reports whether the connection is dead (read loop exited or a
+// write failed). A closed Conn never recovers; dial a new one.
+func (c *Conn) Closed() bool {
+	return c.closed.Load()
+}
+
+// write sends a WebSocket message, translating failures into ErrClosed
+// (unless the caller's context is what ended the write).
+func (c *Conn) write(ctx context.Context, data []byte) error {
+	if c.closed.Load() {
+		return ErrClosed
+	}
+	if err := c.ws.Write(ctx, websocket.MessageBinary, data); err != nil {
+		if ctx.Err() != nil {
+			return err
+		}
+		c.closed.Store(true)
+		return fmt.Errorf("%w: %v", ErrClosed, err)
+	}
+	return nil
 }
 
 // NewConn wraps an existing WebSocket connection with the connlib protocol.
@@ -49,6 +78,9 @@ func (c *Conn) StartReadLoop(ctx context.Context) {
 	for {
 		_, data, err := c.ws.Read(ctx)
 		if err != nil {
+			// Mark closed before waking waiters so they can tell a dead
+			// connection from a normal end of stream.
+			c.closed.Store(true)
 			c.mu.Lock()
 			for _, ch := range c.pending {
 				close(ch)
@@ -139,12 +171,15 @@ func (c *Conn) Call(ctx context.Context, command string, params map[string]any) 
 	ch := c.Register(id)
 	defer c.Unregister(id)
 
-	if err := c.ws.Write(ctx, websocket.MessageBinary, data); err != nil {
+	if err := c.write(ctx, data); err != nil {
 		return nil, fmt.Errorf("send: %w", err)
 	}
 
 	select {
-	case resp := <-ch:
+	case resp, ok := <-ch:
+		if !ok {
+			return nil, ErrClosed
+		}
 		return resp, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -171,7 +206,7 @@ func (c *Conn) CallStream(ctx context.Context, command string, params map[string
 	ch := c.RegisterBuffered(id, 32)
 	defer c.Unregister(id)
 
-	if err := c.ws.Write(ctx, websocket.MessageBinary, data); err != nil {
+	if err := c.write(ctx, data); err != nil {
 		return nil, fmt.Errorf("send: %w", err)
 	}
 
@@ -180,6 +215,11 @@ func (c *Conn) CallStream(ctx context.Context, command string, params map[string
 		select {
 		case resp, ok := <-ch:
 			if !ok {
+				// Closed either after DONE (normal) or because the
+				// connection died (partial results are not trustworthy).
+				if c.closed.Load() {
+					return results, ErrClosed
+				}
 				return results, nil
 			}
 			var status struct {
@@ -245,8 +285,9 @@ func (c *Conn) UnregisterBinary(id uint32) {
 }
 
 // Send writes raw bytes to the underlying WebSocket as a binary message.
+// It returns an error wrapping ErrClosed once the connection is dead.
 func (c *Conn) Send(ctx context.Context, data []byte) error {
-	return c.ws.Write(ctx, websocket.MessageBinary, data)
+	return c.write(ctx, data)
 }
 
 // Close cleanly shuts down the WebSocket connection.

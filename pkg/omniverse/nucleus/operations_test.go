@@ -2,10 +2,16 @@ package nucleus_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/wandelbotsgmbh/nova-cli/pkg/omniverse/nucleus"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/omniverse/nucleus/connlib"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/omniverse/nucleus/fakeserver"
 )
 
@@ -344,4 +350,347 @@ func TestEnsureParentDirs(t *testing.T) {
 		t.Fatalf("List created dir: %v", err)
 	}
 	_ = entries
+}
+
+// dialFakeFastRetry dials the fake server with a retry policy that keeps
+// tests quick: 3 attempts, 10ms base backoff.
+func dialFakeFastRetry(t *testing.T, fake *fakeserver.Server) *nucleus.Client {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err := nucleus.Dial(ctx, nucleus.ClientConfig{
+		Host:             fake.Host(),
+		APIToken:         "fake-token",
+		TLS:              false,
+		ReadMaxAttempts:  3,
+		ReadRetryBackoff: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	return client
+}
+
+func TestReadFileLFT(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("binary-image-data"))
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	ctx := context.Background()
+	data, err := client.ReadFile(ctx, "/Projects/tex.png")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "binary-image-data" {
+		t.Errorf("content = %q, want %q", data, "binary-image-data")
+	}
+	if n := fake.LFTRequests("/Projects/tex.png"); n != 1 {
+		t.Errorf("LFT requests = %d, want 1", n)
+	}
+}
+
+// The ingress in front of LFT serves its own error page with HTTP 200 when
+// the service is overloaded (issue #41). ReadFile must not return that page
+// as file content; it retries with a fresh ticket and succeeds.
+func TestReadFileLFTRetriesErrorPage(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("binary-image-data"))
+	fake.FailLFT("/Projects/tex.png", 2)
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	data, err := client.ReadFile(context.Background(), "/Projects/tex.png")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "binary-image-data" {
+		t.Errorf("content = %q, want %q", data, "binary-image-data")
+	}
+	if n := fake.LFTRequests("/Projects/tex.png"); n != 3 {
+		t.Errorf("LFT requests = %d, want 3 (2 error pages + 1 success)", n)
+	}
+}
+
+func TestReadFileLFTGivesUp(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("binary-image-data"))
+	fake.FailLFT("/Projects/tex.png", 100)
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	data, err := client.ReadFile(context.Background(), "/Projects/tex.png")
+	if err == nil {
+		t.Fatalf("ReadFile succeeded with content %q, want error", data)
+	}
+	if data != nil {
+		t.Errorf("ReadFile returned data %q alongside error", data)
+	}
+	if !nucleus.IsTransient(err) {
+		t.Errorf("error is not transient: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Error 503: Service Unavailable") {
+		t.Errorf("error should name the server's error page, got: %v", err)
+	}
+	if n := fake.LFTRequests("/Projects/tex.png"); n != 3 {
+		t.Errorf("LFT requests = %d, want 3 (max attempts)", n)
+	}
+}
+
+func TestReadFileLFTNotFoundIsNotRetried(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("x"))
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	// Server-side "not a file" errors come back immediately.
+	_, err := client.ReadFile(context.Background(), "/Projects/missing.png")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if nucleus.IsTransient(err) {
+		t.Errorf("INVALID_URI must not be transient: %v", err)
+	}
+}
+
+func TestReadFileRetryHonoursContext(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("x"))
+	fake.FailLFT("/Projects/tex.png", 100)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err := nucleus.Dial(ctx, nucleus.ClientConfig{
+		Host: fake.Host(), APIToken: "fake-token", TLS: false,
+		ReadMaxAttempts: 10, ReadRetryBackoff: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer client.Close()
+
+	readCtx, readCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer readCancel()
+	start := time.Now()
+	_, err = client.ReadFile(readCtx, "/Projects/tex.png")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want context deadline exceeded", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("ReadFile did not stop waiting on context cancel")
+	}
+}
+
+// The API WebSocket can die mid-session (laptop sleep, network change,
+// proxy idle timeout). Read-only operations must re-dial and carry on
+// instead of failing every remaining file.
+func TestReadFileReconnectsAfterConnectionDrop(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("binary-image-data"))
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	ctx := context.Background()
+	if _, err := client.ReadFile(ctx, "/Projects/tex.png"); err != nil {
+		t.Fatalf("first ReadFile: %v", err)
+	}
+
+	fake.DropConnections()
+	waitForClosed(t, client)
+
+	data, err := client.ReadFile(ctx, "/Projects/tex.png")
+	if err != nil {
+		t.Fatalf("ReadFile after drop: %v", err)
+	}
+	if string(data) != "binary-image-data" {
+		t.Errorf("content = %q, want %q", data, "binary-image-data")
+	}
+	if n := client.Reconnects(); n != 1 {
+		t.Errorf("Reconnects() = %d, want 1", n)
+	}
+	if n := fake.APIConnections(); n != 2 {
+		t.Errorf("server accepted %d API connections, want 2", n)
+	}
+	if client.Info().Username != "testuser" {
+		t.Errorf("connection info not refreshed after reconnect: %+v", client.Info())
+	}
+}
+
+func TestListReconnectsAfterConnectionDrop(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.SetEntries("/Projects/", []nucleus.Entry{
+		{Path: "/Projects/a.usd", PathType: "file"},
+	})
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	fake.DropConnections()
+	waitForClosed(t, client)
+
+	entries, err := client.List(context.Background(), "/Projects/")
+	if err != nil {
+		t.Fatalf("List after drop: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Path != "/Projects/a.usd" {
+		t.Errorf("entries = %+v", entries)
+	}
+	if n := client.Reconnects(); n != 1 {
+		t.Errorf("Reconnects() = %d, want 1", n)
+	}
+}
+
+// Mutating operations are not replayed automatically; they surface the
+// dropped connection so the caller can decide.
+func TestCreateFolderReportsClosedConnection(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	fake.DropConnections()
+	waitForClosed(t, client)
+
+	err := client.CreateFolder(context.Background(), "/Projects/new/")
+	if !errors.Is(err, connlib.ErrClosed) {
+		t.Errorf("err = %v, want connlib.ErrClosed", err)
+	}
+	if n := client.Reconnects(); n != 0 {
+		t.Errorf("Reconnects() = %d, want 0 for a mutating op", n)
+	}
+}
+
+// waitForClosed blocks until the client's read loop has noticed the drop.
+func waitForClosed(t *testing.T, client *nucleus.Client) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !client.Conn().Closed() {
+		if time.Now().After(deadline) {
+			t.Fatal("connection never reported closed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestDownloadFile(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	content := strings.Repeat("0123456789", 1000)
+	fake.SetFile("/Projects/tex.png", []byte(content))
+	fake.FailLFT("/Projects/tex.png", 1)
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	dst := t.TempDir() + "/tex.png"
+	if err := client.DownloadFile(context.Background(), "/Projects/tex.png", dst); err != nil {
+		t.Fatalf("DownloadFile: %v", err)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("reading result: %v", err)
+	}
+	if string(data) != content {
+		t.Errorf("content mismatch (len %d, want %d)", len(data), len(content))
+	}
+	if _, err := os.Stat(dst + ".part"); !os.IsNotExist(err) {
+		t.Errorf(".part file left behind: %v", err)
+	}
+}
+
+func TestDownloadFileCleansUpOnFailure(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("real"))
+	fake.FailLFT("/Projects/tex.png", 1000)
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	dst := t.TempDir() + "/tex.png"
+	err := client.DownloadFile(context.Background(), "/Projects/tex.png", dst)
+	if !nucleus.IsTransient(err) {
+		t.Fatalf("err = %v, want transient", err)
+	}
+	for _, p := range []string{dst, dst + ".part"} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s must not exist after a failed download", p)
+		}
+	}
+}
+
+// Inline (non-LFT) reads go through the same path.
+func TestDownloadFileInline(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.SetFile("/Projects/small.txt", []byte("inline"))
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	dst := t.TempDir() + "/small.txt"
+	if err := client.DownloadFile(context.Background(), "/Projects/small.txt", dst); err != nil {
+		t.Fatalf("DownloadFile: %v", err)
+	}
+	data, _ := os.ReadFile(dst)
+	if string(data) != "inline" {
+		t.Errorf("content = %q", data)
+	}
+}
+
+// Many goroutines sharing one client must not trip the race detector or
+// corrupt each other's responses.
+func TestReadFileConcurrent(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	const n = 32
+	for i := 0; i < n; i++ {
+		fake.SetFile(fmt.Sprintf("/Projects/f%d", i), []byte(strings.Repeat(fmt.Sprint(i), 10+i)))
+	}
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			data, err := client.ReadFile(context.Background(), fmt.Sprintf("/Projects/f%d", i))
+			if err != nil {
+				errs <- err
+				return
+			}
+			if string(data) != strings.Repeat(fmt.Sprint(i), 10+i) {
+				errs <- fmt.Errorf("f%d: wrong content %q", i, data)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
 }

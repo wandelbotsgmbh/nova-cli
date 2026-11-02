@@ -49,7 +49,7 @@ entries, err := client.List(ctx, "/Projects/")
 | `client.Stat(ctx, path)`              | Get entry metadata       |
 | `client.CreateFolder(ctx, path)`      | Create a directory       |
 | `client.WriteFile(ctx, path, data)`   | Upload file content      |
-| `client.ReadFile(ctx, path)`          | Download file content    |
+| `client.ReadFile(ctx, path)`          | Download file content (verified against server size/hash, transient failures retried) |
 | `client.Delete(ctx, path)`            | Remove file or directory |
 | `client.Copy(ctx, src, dst)`          | Copy file/directory      |
 | `client.Move(ctx, src, dst)`          | Move/rename              |

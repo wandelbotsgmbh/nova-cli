@@ -2,12 +2,15 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	gopath "path"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -117,8 +120,8 @@ Supported directions:
   # Download a file from Nucleus
   nova nucleus cp n:/Projects/Scene.usd ./Scene.usd
 
-  # Download a directory recursively
-  nova nucleus cp n:/Projects/MyProject/ ./MyProject/
+  # Download a directory recursively, 4 files at a time
+  nova nucleus cp -j 4 n:/Projects/MyProject/ ./MyProject/
 
   # Copy within Nucleus
   nova nucleus cp n:/Projects/a.usd n:/Projects/b.usd
@@ -226,7 +229,8 @@ Supported directions:
 		case srcIsNucleus && !dstIsNucleus:
 			// Nucleus -> Local (download, supports files and directories)
 			nSrc := stripNucleusPrefix(src)
-			if err := downloadRecursive(ctx, client, nSrc, dst); err != nil {
+			parallel, _ := cmd.Flags().GetInt("parallel")
+			if err := downloadRecursive(ctx, client, nSrc, dst, cmd.ErrOrStderr(), parallel); err != nil {
 				return err
 			}
 		}
@@ -393,6 +397,7 @@ func init() {
 	// cp-specific flags.
 	nucleusCpCmd.Flags().BoolP("parents", "p", false, "Create parent directories on the destination if they don't exist")
 	nucleusCpCmd.Flags().BoolP("progress", "P", false, "Show upload progress (percent, speed, ETA) on stderr")
+	nucleusCpCmd.Flags().IntP("parallel", "j", 2, "Files to download at once (Nucleus -> local); small Nucleus deployments return 5xx when this is high")
 }
 
 // completeNucleusPath provides tab completion for Nucleus paths.
@@ -468,18 +473,35 @@ func completeNucleusRemotePath(cmd *cobra.Command, toComplete string) ([]string,
 	return comp, cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
 }
 
-// downloadRecursive downloads a file or directory from Nucleus to the local filesystem.
-func downloadRecursive(ctx context.Context, client *nucleus.Client, remotePath, localPath string) error {
+// downloadJob is one file to fetch during a recursive download.
+type downloadJob struct {
+	remote, local string
+}
+
+// downloadRecursive downloads a file or directory from Nucleus to the local
+// filesystem, fetching up to parallel files at once.
+//
+// Files that still fail after the client's retries are skipped (nothing is
+// written for them), reported on errOut as they happen, and summarized in the
+// returned error so the command exits non-zero. Errors that aren't per-file
+// (cancellation, listing failures, local filesystem errors) abort the whole
+// download.
+func downloadRecursive(ctx context.Context, client *nucleus.Client, remotePath, localPath string, errOut io.Writer, parallel int) error {
 	// Try as a file first.
-	data, err := client.ReadFile(ctx, remotePath)
+	err := downloadOne(ctx, client, remotePath, localPath)
 	if err == nil {
-		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
-			return fmt.Errorf("creating local directory: %w", err)
-		}
-		return os.WriteFile(localPath, data, 0644)
+		return nil
+	}
+	if ctx.Err() != nil {
+		return err
+	}
+	if nucleus.IsTransient(err) {
+		// The server identified the path as a file but could not deliver it;
+		// don't mask that by trying to treat it as a directory.
+		return fmt.Errorf("downloading %s: %w", remotePath, err)
 	}
 
-	// If ReadFile failed, treat as directory.
+	// If the read failed, treat as directory.
 	remoteDir := remotePath
 	if !strings.HasSuffix(remoteDir, "/") {
 		remoteDir += "/"
@@ -491,32 +513,133 @@ func downloadRecursive(ctx context.Context, client *nucleus.Client, remotePath, 
 		return fmt.Errorf("downloading %s: %w", remotePath, err)
 	}
 
+	// Walk the tree first (listings are cheap), creating local directories
+	// as we go, then fetch the files with a worker pool.
+	var jobs []downloadJob
+	if err := collectDownloadJobs(ctx, client, entries, localPath, &jobs); err != nil {
+		return err
+	}
+
+	failed, err := runDownloads(ctx, client, jobs, errOut, parallel)
+	if err != nil {
+		return err
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d file(s) failed to download and were skipped:\n  %s",
+			len(failed), strings.Join(failed, "\n  "))
+	}
+	return nil
+}
+
+// downloadOne fetches a single file into localPath, creating the parent
+// directory.
+func downloadOne(ctx context.Context, client *nucleus.Client, remotePath, localPath string) error {
+	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		return fmt.Errorf("creating local directory: %w", err)
+	}
+	return client.DownloadFile(ctx, remotePath, localPath)
+}
+
+// collectDownloadJobs lists entries recursively, creates the local
+// directory tree and appends one job per file.
+func collectDownloadJobs(ctx context.Context, client *nucleus.Client, entries []nucleus.Entry, localPath string, jobs *[]downloadJob) error {
 	if err := os.MkdirAll(localPath, 0755); err != nil {
 		return fmt.Errorf("creating local directory %s: %w", localPath, err)
 	}
-
 	for _, e := range entries {
 		name := gopath.Base(e.Path)
 		childLocal := filepath.Join(localPath, name)
-		if e.IsDir() {
-			childRemote := e.Path
-			if !strings.HasSuffix(childRemote, "/") {
-				childRemote += "/"
-			}
-			if err := downloadRecursive(ctx, client, childRemote, childLocal); err != nil {
-				return err
-			}
-		} else {
-			data, err := client.ReadFile(ctx, e.Path)
-			if err != nil {
-				return fmt.Errorf("downloading %s: %w", e.Path, err)
-			}
-			if err := os.WriteFile(childLocal, data, 0644); err != nil {
-				return fmt.Errorf("writing %s: %w", childLocal, err)
-			}
+		if !e.IsDir() {
+			*jobs = append(*jobs, downloadJob{remote: e.Path, local: childLocal})
+			continue
+		}
+		childRemote := e.Path
+		if !strings.HasSuffix(childRemote, "/") {
+			childRemote += "/"
+		}
+		children, err := client.List(ctx, childRemote)
+		if err != nil {
+			return fmt.Errorf("listing %s: %w", childRemote, err)
+		}
+		if err := collectDownloadJobs(ctx, client, children, childLocal, jobs); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// runDownloads fetches jobs with up to parallel workers. Per-file failures
+// are reported on errOut and returned in failed; anything else (cancellation,
+// local filesystem errors) stops all workers and is returned as err.
+func runDownloads(ctx context.Context, client *nucleus.Client, jobs []downloadJob, errOut io.Writer, parallel int) (failed []string, err error) {
+	if parallel < 1 {
+		parallel = 1
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		mu       sync.Mutex
+		firstErr error
+		wg       sync.WaitGroup
+	)
+	queue := make(chan downloadJob)
+
+	for i := 0; i < parallel; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range queue {
+				err := client.DownloadFile(ctx, job.remote, job.local)
+				if err == nil {
+					continue
+				}
+				mu.Lock()
+				switch {
+				case ctx.Err() != nil:
+					if firstErr == nil && !errors.Is(err, context.Canceled) {
+						firstErr = err
+					}
+				case isLocalWriteError(err):
+					if firstErr == nil {
+						firstErr = fmt.Errorf("writing %s: %w", job.local, err)
+					}
+					cancel()
+				default:
+					fmt.Fprintf(errOut, "warning: skipping %s: %v\n", job.remote, err)
+					failed = append(failed, job.remote)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+
+feed:
+	for _, job := range jobs {
+		select {
+		case queue <- job:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(queue)
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	sort.Strings(failed)
+	return failed, nil
+}
+
+// isLocalWriteError reports whether a download failed because of the local
+// filesystem rather than the server.
+func isLocalWriteError(err error) bool {
+	var pathErr *os.PathError
+	return errors.As(err, &pathErr)
 }
 
 // uploadFile streams a local file to Nucleus, optionally rendering progress

@@ -3,7 +3,11 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +54,8 @@ func newTestRootCmd() (*cobra.Command, *fakeserver.Server) {
 
 	cp := &cobra.Command{Use: nucleusCpCmd.Use, Args: nucleusCpCmd.Args, RunE: nucleusCpCmd.RunE}
 	cp.Flags().BoolP("parents", "p", false, "")
+	cp.Flags().BoolP("progress", "P", false, "")
+	cp.Flags().IntP("parallel", "j", 2, "")
 	nuc.AddCommand(cp)
 
 	return root, fake
@@ -421,6 +427,297 @@ func TestNucleusCpDownloadDirectory(t *testing.T) {
 	}
 	if data != "file-b" {
 		t.Errorf("sub/b.txt = %q, want %q", data, "file-b")
+	}
+}
+
+// A recursive download must never write the ingress error page (served with
+// HTTP 200 when LFT is overloaded) under the target file name — issue #41.
+// Transient failures are retried; here the first LFT fetch of b.txt fails.
+func TestNucleusCpDownloadDirectoryRetriesErrorPage(t *testing.T) {
+	root, fake := newTestRootCmd()
+	defer fake.Close()
+	fake.UseLFT(true)
+
+	fake.SetEntries("/Projects/mydir/", []nucleus.Entry{
+		{Path: "/Projects/mydir/a.txt", PathType: "file"},
+		{Path: "/Projects/mydir/b.txt", PathType: "file"},
+	})
+	fake.SetFile("/Projects/mydir/a.txt", []byte("file-a"))
+	fake.SetFile("/Projects/mydir/b.txt", []byte("file-b"))
+	fake.FailLFT("/Projects/mydir/b.txt", 1)
+
+	dstDir := t.TempDir() + "/downloaded"
+	_, _, err := run(root, "nucleus cp n:/Projects/mydir/ "+dstDir)
+	if err != nil {
+		t.Fatalf("cp download dir: %v", err)
+	}
+	for name, want := range map[string]string{"a.txt": "file-a", "b.txt": "file-b"} {
+		data, err := readTestFile(dstDir + "/" + name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if data != want {
+			t.Errorf("%s = %q, want %q", name, data, want)
+		}
+	}
+	if n := fake.LFTRequests("/Projects/mydir/b.txt"); n != 2 {
+		t.Errorf("LFT requests for b.txt = %d, want 2", n)
+	}
+}
+
+// When a file keeps failing, the rest of the tree is still downloaded, the
+// bad file is not written at all, and the command fails (non-zero exit).
+func TestNucleusCpDownloadDirectorySkipsFailedFile(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+
+	fake.SetEntries("/Projects/mydir/", []nucleus.Entry{
+		{Path: "/Projects/mydir/a.txt", PathType: "file"},
+		{Path: "/Projects/mydir/bad.png", PathType: "file"},
+		{Path: "/Projects/mydir/sub", PathType: "folder"},
+	})
+	fake.SetEntries("/Projects/mydir/sub/", []nucleus.Entry{
+		{Path: "/Projects/mydir/sub/c.txt", PathType: "file"},
+	})
+	fake.SetFile("/Projects/mydir/a.txt", []byte("file-a"))
+	fake.SetFile("/Projects/mydir/bad.png", []byte("real-png"))
+	fake.SetFile("/Projects/mydir/sub/c.txt", []byte("file-c"))
+	fake.FailLFT("/Projects/mydir/bad.png", 1000)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := nucleus.Dial(ctx, nucleus.ClientConfig{
+		Host: fake.Host(), APIToken: "fake-token", TLS: false,
+		ReadMaxAttempts: 3, ReadRetryBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer client.Close()
+
+	dstDir := t.TempDir() + "/downloaded"
+	var stderr bytes.Buffer
+	err = downloadRecursive(ctx, client, "/Projects/mydir/", dstDir, &stderr, 2)
+	if err == nil {
+		t.Fatal("expected error when a file cannot be downloaded")
+	}
+	if !strings.Contains(err.Error(), "1 file(s) failed") || !strings.Contains(err.Error(), "/Projects/mydir/bad.png") {
+		t.Errorf("error should summarize the skipped file, got: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "skipping /Projects/mydir/bad.png") {
+		t.Errorf("stderr should warn about the skipped file, got: %q", stderr.String())
+	}
+
+	if _, statErr := os.Stat(dstDir + "/bad.png"); !os.IsNotExist(statErr) {
+		data, _ := readTestFile(dstDir + "/bad.png")
+		t.Errorf("bad.png must not be written, found content %q (stat err: %v)", data, statErr)
+	}
+	if _, statErr := os.Stat(dstDir + "/bad.png.part"); !os.IsNotExist(statErr) {
+		t.Errorf("bad.png.part must be cleaned up (stat err: %v)", statErr)
+	}
+	for name, want := range map[string]string{"a.txt": "file-a", "sub/c.txt": "file-c"} {
+		data, err := readTestFile(dstDir + "/" + name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if data != want {
+			t.Errorf("%s = %q, want %q", name, data, want)
+		}
+	}
+}
+
+// A single-file download that keeps failing must not be misreported as a
+// missing directory, and must not leave a file behind.
+func TestNucleusCpDownloadSingleFileFails(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/bad.png", []byte("real-png"))
+	fake.FailLFT("/Projects/bad.png", 1000)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := nucleus.Dial(ctx, nucleus.ClientConfig{
+		Host: fake.Host(), APIToken: "fake-token", TLS: false,
+		ReadMaxAttempts: 2, ReadRetryBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer client.Close()
+
+	dst := t.TempDir() + "/bad.png"
+	err = downloadRecursive(ctx, client, "/Projects/bad.png", dst, io.Discard, 1)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "Error 503") {
+		t.Errorf("error should name the server error page, got: %v", err)
+	}
+	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+		t.Errorf("bad.png must not be written (stat err: %v)", statErr)
+	}
+	if _, statErr := os.Stat(dst + ".part"); !os.IsNotExist(statErr) {
+		t.Errorf("bad.png.part must be cleaned up (stat err: %v)", statErr)
+	}
+}
+
+// A recursive download keeps going when the server drops the API WebSocket:
+// the client reconnects and the remaining files are still fetched.
+func TestNucleusCpDownloadDirectorySurvivesConnectionDrop(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+
+	fake.SetEntries("/Projects/mydir/", []nucleus.Entry{
+		{Path: "/Projects/mydir/a.txt", PathType: "file"},
+		{Path: "/Projects/mydir/sub", PathType: "folder"},
+	})
+	fake.SetEntries("/Projects/mydir/sub/", []nucleus.Entry{
+		{Path: "/Projects/mydir/sub/b.txt", PathType: "file"},
+	})
+	fake.SetFile("/Projects/mydir/a.txt", []byte("file-a"))
+	fake.SetFile("/Projects/mydir/sub/b.txt", []byte("file-b"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := nucleus.Dial(ctx, nucleus.ClientConfig{
+		Host: fake.Host(), APIToken: "fake-token", TLS: false,
+		ReadMaxAttempts: 3, ReadRetryBackoff: 5 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer client.Close()
+
+	// Drop the connection before the download starts: the first List and
+	// every following operation must go through a fresh connection.
+	fake.DropConnections()
+	deadline := time.Now().Add(5 * time.Second)
+	for !client.Conn().Closed() {
+		if time.Now().After(deadline) {
+			t.Fatal("connection never reported closed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	dstDir := t.TempDir() + "/downloaded"
+	var stderr bytes.Buffer
+	if err := downloadRecursive(ctx, client, "/Projects/mydir/", dstDir, &stderr, 3); err != nil {
+		t.Fatalf("downloadRecursive: %v (stderr: %s)", err, stderr.String())
+	}
+	for name, want := range map[string]string{"a.txt": "file-a", "sub/b.txt": "file-b"} {
+		data, err := readTestFile(dstDir + "/" + name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if data != want {
+			t.Errorf("%s = %q, want %q", name, data, want)
+		}
+	}
+	if n := client.Reconnects(); n != 1 {
+		t.Errorf("Reconnects() = %d, want 1", n)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("unexpected warnings: %s", stderr.String())
+	}
+}
+
+// Parallel download of a wide tree: every file lands with the right content,
+// the -j flag is honoured end to end, and transient error pages on some files
+// are retried without disturbing the others.
+func TestNucleusCpDownloadDirectoryParallel(t *testing.T) {
+	root, fake := newTestRootCmd()
+	defer fake.Close()
+	fake.UseLFT(true)
+
+	const n = 40
+	var entries []nucleus.Entry
+	want := map[string]string{}
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("tex_%02d.png", i)
+		remote := "/Projects/big/" + name
+		content := strings.Repeat(fmt.Sprintf("%02d", i), 50+i) // varied sizes, multi-block with bsize 4
+		entries = append(entries, nucleus.Entry{Path: remote, PathType: "file"})
+		fake.SetFile(remote, []byte(content))
+		want[name] = content
+		if i%7 == 0 {
+			fake.FailLFT(remote, 1)
+		}
+	}
+	entries = append(entries, nucleus.Entry{Path: "/Projects/big/sub", PathType: "folder"})
+	fake.SetEntries("/Projects/big/", entries)
+	fake.SetEntries("/Projects/big/sub/", []nucleus.Entry{{Path: "/Projects/big/sub/deep.usd", PathType: "file"}})
+	fake.SetFile("/Projects/big/sub/deep.usd", []byte("deep-content"))
+	want["sub/deep.usd"] = "deep-content"
+
+	dstDir := t.TempDir() + "/downloaded"
+	_, stderr, err := run(root, "nucleus cp -j 8 n:/Projects/big/ "+dstDir)
+	if err != nil {
+		t.Fatalf("cp -j 8: %v (stderr: %s)", err, stderr)
+	}
+	for name, content := range want {
+		data, err := readTestFile(dstDir + "/" + name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if data != content {
+			t.Errorf("%s has wrong content (len %d, want %d)", name, len(data), len(content))
+		}
+	}
+	parts, _ := filepath.Glob(dstDir + "/*.part")
+	if len(parts) != 0 {
+		t.Errorf("leftover .part files: %v", parts)
+	}
+	if got := fake.LFTRequests("/Projects/big/tex_07.png"); got != 2 {
+		t.Errorf("tex_07.png LFT requests = %d, want 2 (error page + retry)", got)
+	}
+}
+
+// Cancelling the context stops the workers promptly and surfaces the
+// cancellation instead of a pile of per-file warnings.
+func TestNucleusCpDownloadDirectoryCancel(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+
+	var entries []nucleus.Entry
+	for i := 0; i < 30; i++ {
+		remote := fmt.Sprintf("/Projects/big/f%02d", i)
+		entries = append(entries, nucleus.Entry{Path: remote, PathType: "file"})
+		fake.SetFile(remote, []byte("x"))
+		fake.FailLFT(remote, 1000) // every fetch retries -> plenty of time to cancel
+	}
+	fake.SetEntries("/Projects/big/", entries)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := nucleus.Dial(ctx, nucleus.ClientConfig{
+		Host: fake.Host(), APIToken: "fake-token", TLS: false,
+		ReadMaxAttempts: 50, ReadRetryBackoff: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer client.Close()
+
+	dlCtx, dlCancel := context.WithCancel(ctx)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		dlCancel()
+	}()
+	var stderr bytes.Buffer
+	start := time.Now()
+	err = downloadRecursive(dlCtx, client, "/Projects/big/", t.TempDir()+"/dl", &stderr, 4)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Errorf("download did not stop promptly after cancel")
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("cancellation must not be reported as skipped files: %s", stderr.String())
 	}
 }
 
