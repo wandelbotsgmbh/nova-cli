@@ -18,6 +18,7 @@ require (
 	github.com/pb33f/libopenapi v0.41.7
 	github.com/schollz/progressbar/v3 v3.19.1
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/wandelbotsgmbh/nova-api-client-go/v25 v25.11.0-dev.37
 	github.com/yuin/goldmark v1.8.6
@@ -112,7 +113,6 @@ require (
 	github.com/speakeasy-api/openapi v1.24.0 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/vmware-labs/yaml-jsonpath v0.3.2 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect

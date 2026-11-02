@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/docker"
@@ -68,10 +66,6 @@ Examples:
 		projectPath := "."
 		if len(args) > 0 {
 			projectPath = args[0]
-		}
-
-		if modelTag == "" {
-			return fmt.Errorf("please provide a full image tag via --tag (e.g. myregistry.io/models/llama:1.0.0)")
 		}
 
 		rt, err := docker.Detect(viper.GetString("container-runtime"))
