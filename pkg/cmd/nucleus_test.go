@@ -3,8 +3,11 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +54,8 @@ func newTestRootCmd() (*cobra.Command, *fakeserver.Server) {
 
 	cp := &cobra.Command{Use: nucleusCpCmd.Use, Args: nucleusCpCmd.Args, RunE: nucleusCpCmd.RunE}
 	cp.Flags().BoolP("parents", "p", false, "")
+	cp.Flags().BoolP("progress", "P", false, "")
+	cp.Flags().IntP("parallel", "j", 4, "")
 	nuc.AddCommand(cp)
 
 	return root, fake
@@ -493,7 +498,7 @@ func TestNucleusCpDownloadDirectorySkipsFailedFile(t *testing.T) {
 
 	dstDir := t.TempDir() + "/downloaded"
 	var stderr bytes.Buffer
-	err = downloadRecursive(ctx, client, "/Projects/mydir/", dstDir, &stderr)
+	err = downloadRecursive(ctx, client, "/Projects/mydir/", dstDir, &stderr, 2)
 	if err == nil {
 		t.Fatal("expected error when a file cannot be downloaded")
 	}
@@ -507,6 +512,9 @@ func TestNucleusCpDownloadDirectorySkipsFailedFile(t *testing.T) {
 	if _, statErr := os.Stat(dstDir + "/bad.png"); !os.IsNotExist(statErr) {
 		data, _ := readTestFile(dstDir + "/bad.png")
 		t.Errorf("bad.png must not be written, found content %q (stat err: %v)", data, statErr)
+	}
+	if _, statErr := os.Stat(dstDir + "/bad.png.part"); !os.IsNotExist(statErr) {
+		t.Errorf("bad.png.part must be cleaned up (stat err: %v)", statErr)
 	}
 	for name, want := range map[string]string{"a.txt": "file-a", "sub/c.txt": "file-c"} {
 		data, err := readTestFile(dstDir + "/" + name)
@@ -540,7 +548,7 @@ func TestNucleusCpDownloadSingleFileFails(t *testing.T) {
 	defer client.Close()
 
 	dst := t.TempDir() + "/bad.png"
-	err = downloadRecursive(ctx, client, "/Projects/bad.png", dst, io.Discard)
+	err = downloadRecursive(ctx, client, "/Projects/bad.png", dst, io.Discard, 1)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -549,6 +557,9 @@ func TestNucleusCpDownloadSingleFileFails(t *testing.T) {
 	}
 	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
 		t.Errorf("bad.png must not be written (stat err: %v)", statErr)
+	}
+	if _, statErr := os.Stat(dst + ".part"); !os.IsNotExist(statErr) {
+		t.Errorf("bad.png.part must be cleaned up (stat err: %v)", statErr)
 	}
 }
 
@@ -593,7 +604,7 @@ func TestNucleusCpDownloadDirectorySurvivesConnectionDrop(t *testing.T) {
 
 	dstDir := t.TempDir() + "/downloaded"
 	var stderr bytes.Buffer
-	if err := downloadRecursive(ctx, client, "/Projects/mydir/", dstDir, &stderr); err != nil {
+	if err := downloadRecursive(ctx, client, "/Projects/mydir/", dstDir, &stderr, 3); err != nil {
 		t.Fatalf("downloadRecursive: %v (stderr: %s)", err, stderr.String())
 	}
 	for name, want := range map[string]string{"a.txt": "file-a", "sub/b.txt": "file-b"} {
@@ -610,6 +621,103 @@ func TestNucleusCpDownloadDirectorySurvivesConnectionDrop(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("unexpected warnings: %s", stderr.String())
+	}
+}
+
+// Parallel download of a wide tree: every file lands with the right content,
+// the -j flag is honoured end to end, and transient error pages on some files
+// are retried without disturbing the others.
+func TestNucleusCpDownloadDirectoryParallel(t *testing.T) {
+	root, fake := newTestRootCmd()
+	defer fake.Close()
+	fake.UseLFT(true)
+
+	const n = 40
+	var entries []nucleus.Entry
+	want := map[string]string{}
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("tex_%02d.png", i)
+		remote := "/Projects/big/" + name
+		content := strings.Repeat(fmt.Sprintf("%02d", i), 50+i) // varied sizes, multi-block with bsize 4
+		entries = append(entries, nucleus.Entry{Path: remote, PathType: "file"})
+		fake.SetFile(remote, []byte(content))
+		want[name] = content
+		if i%7 == 0 {
+			fake.FailLFT(remote, 1)
+		}
+	}
+	entries = append(entries, nucleus.Entry{Path: "/Projects/big/sub", PathType: "folder"})
+	fake.SetEntries("/Projects/big/", entries)
+	fake.SetEntries("/Projects/big/sub/", []nucleus.Entry{{Path: "/Projects/big/sub/deep.usd", PathType: "file"}})
+	fake.SetFile("/Projects/big/sub/deep.usd", []byte("deep-content"))
+	want["sub/deep.usd"] = "deep-content"
+
+	dstDir := t.TempDir() + "/downloaded"
+	_, stderr, err := run(root, "nucleus cp -j 8 n:/Projects/big/ "+dstDir)
+	if err != nil {
+		t.Fatalf("cp -j 8: %v (stderr: %s)", err, stderr)
+	}
+	for name, content := range want {
+		data, err := readTestFile(dstDir + "/" + name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if data != content {
+			t.Errorf("%s has wrong content (len %d, want %d)", name, len(data), len(content))
+		}
+	}
+	parts, _ := filepath.Glob(dstDir + "/*.part")
+	if len(parts) != 0 {
+		t.Errorf("leftover .part files: %v", parts)
+	}
+	if got := fake.LFTRequests("/Projects/big/tex_07.png"); got != 2 {
+		t.Errorf("tex_07.png LFT requests = %d, want 2 (error page + retry)", got)
+	}
+}
+
+// Cancelling the context stops the workers promptly and surfaces the
+// cancellation instead of a pile of per-file warnings.
+func TestNucleusCpDownloadDirectoryCancel(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+
+	var entries []nucleus.Entry
+	for i := 0; i < 30; i++ {
+		remote := fmt.Sprintf("/Projects/big/f%02d", i)
+		entries = append(entries, nucleus.Entry{Path: remote, PathType: "file"})
+		fake.SetFile(remote, []byte("x"))
+		fake.FailLFT(remote, 1000) // every fetch retries -> plenty of time to cancel
+	}
+	fake.SetEntries("/Projects/big/", entries)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := nucleus.Dial(ctx, nucleus.ClientConfig{
+		Host: fake.Host(), APIToken: "fake-token", TLS: false,
+		ReadMaxAttempts: 50, ReadRetryBackoff: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer client.Close()
+
+	dlCtx, dlCancel := context.WithCancel(ctx)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		dlCancel()
+	}()
+	var stderr bytes.Buffer
+	start := time.Now()
+	err = downloadRecursive(dlCtx, client, "/Projects/big/", t.TempDir()+"/dl", &stderr, 4)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Errorf("download did not stop promptly after cancel")
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("cancellation must not be reported as skipped files: %s", stderr.String())
 	}
 }
 

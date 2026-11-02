@@ -23,6 +23,7 @@ import (
 type Client struct {
 	cfg ClientConfig
 
+	reconnectMu sync.Mutex // serializes reconnect attempts
 	mu          sync.Mutex // guards the fields below across reconnects
 	conn        *connlib.Conn
 	cancel      context.CancelFunc // cancels the read loop
@@ -118,6 +119,10 @@ func (c *Client) connect(ctx context.Context) error {
 // reconnect re-establishes the API connection after it died. It is a no-op
 // if another caller already replaced the dead connection.
 func (c *Client) reconnect(ctx context.Context, dead *connlib.Conn) error {
+	// Parallel callers all notice the same dead connection; only the first
+	// one dials, the rest find a healthy replacement and return.
+	c.reconnectMu.Lock()
+	defer c.reconnectMu.Unlock()
 	c.mu.Lock()
 	current := c.conn
 	c.mu.Unlock()

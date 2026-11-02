@@ -102,3 +102,27 @@ func TestIsTextContent(t *testing.T) {
 		t.Error("binary / unknown content type must not be text")
 	}
 }
+
+// The streaming hasher must agree with the one-shot reference regardless of
+// how the input is chunked relative to block boundaries.
+func TestFlatHasherStreaming(t *testing.T) {
+	data := make([]byte, 10_007)
+	for i := range data {
+		data[i] = byte(i*31 + 7)
+	}
+	for _, bsize := range []int{1, 4, 1000, 1024, 10_007, 1 << 20} {
+		want := flatHashReference(data, bsize)
+		for _, chunk := range []int{1, 3, 999, 1024, 4096, len(data)} {
+			h := newFlatHasher(bsize)
+			for i := 0; i < len(data); i += chunk {
+				h.Write(data[i:min(i+chunk, len(data))])
+			}
+			if got := h.Sum(); got != want {
+				t.Errorf("bsize=%d chunk=%d: got %s, want %s", bsize, chunk, got, want)
+			}
+		}
+	}
+	if got, want := newFlatHasher(4).Sum(), hex.EncodeToString(func() []byte { s := sha256.Sum256(nil); return s[:] }()); got != want {
+		t.Errorf("empty input: got %s, want sha256(\"\") %s", got, want)
+	}
+}

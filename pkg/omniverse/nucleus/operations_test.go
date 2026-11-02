@@ -3,7 +3,10 @@ package nucleus_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -585,5 +588,109 @@ func waitForClosed(t *testing.T, client *nucleus.Client) {
 			t.Fatal("connection never reported closed")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestDownloadFile(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	content := strings.Repeat("0123456789", 1000)
+	fake.SetFile("/Projects/tex.png", []byte(content))
+	fake.FailLFT("/Projects/tex.png", 1)
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	dst := t.TempDir() + "/tex.png"
+	if err := client.DownloadFile(context.Background(), "/Projects/tex.png", dst); err != nil {
+		t.Fatalf("DownloadFile: %v", err)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("reading result: %v", err)
+	}
+	if string(data) != content {
+		t.Errorf("content mismatch (len %d, want %d)", len(data), len(content))
+	}
+	if _, err := os.Stat(dst + ".part"); !os.IsNotExist(err) {
+		t.Errorf(".part file left behind: %v", err)
+	}
+}
+
+func TestDownloadFileCleansUpOnFailure(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	fake.SetFile("/Projects/tex.png", []byte("real"))
+	fake.FailLFT("/Projects/tex.png", 1000)
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	dst := t.TempDir() + "/tex.png"
+	err := client.DownloadFile(context.Background(), "/Projects/tex.png", dst)
+	if !nucleus.IsTransient(err) {
+		t.Fatalf("err = %v, want transient", err)
+	}
+	for _, p := range []string{dst, dst + ".part"} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s must not exist after a failed download", p)
+		}
+	}
+}
+
+// Inline (non-LFT) reads go through the same path.
+func TestDownloadFileInline(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.SetFile("/Projects/small.txt", []byte("inline"))
+
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	dst := t.TempDir() + "/small.txt"
+	if err := client.DownloadFile(context.Background(), "/Projects/small.txt", dst); err != nil {
+		t.Fatalf("DownloadFile: %v", err)
+	}
+	data, _ := os.ReadFile(dst)
+	if string(data) != "inline" {
+		t.Errorf("content = %q", data)
+	}
+}
+
+// Many goroutines sharing one client must not trip the race detector or
+// corrupt each other's responses.
+func TestReadFileConcurrent(t *testing.T) {
+	fake := fakeserver.New()
+	defer fake.Close()
+	fake.UseLFT(true)
+	const n = 32
+	for i := 0; i < n; i++ {
+		fake.SetFile(fmt.Sprintf("/Projects/f%d", i), []byte(strings.Repeat(fmt.Sprint(i), 10+i)))
+	}
+	client := dialFakeFastRetry(t, fake)
+	defer client.Close()
+
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			data, err := client.ReadFile(context.Background(), fmt.Sprintf("/Projects/f%d", i))
+			if err != nil {
+				errs <- err
+				return
+			}
+			if string(data) != strings.Repeat(fmt.Sprint(i), 10+i) {
+				errs <- fmt.Errorf("f%d: wrong content %q", i, data)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
