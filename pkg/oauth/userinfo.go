@@ -18,7 +18,7 @@ type UserInfo struct {
 // FetchUserInfo calls the Auth0 /userinfo endpoint using the current access
 // token and returns the authenticated user's profile information.
 func FetchUserInfo(ctx context.Context, env AuthEnvironment) (UserInfo, error) {
-	token, err := LoadToken()
+	token, err := LoadTokenFor(env)
 	if err != nil {
 		return UserInfo{}, fmt.Errorf("load token: %w", err)
 	}

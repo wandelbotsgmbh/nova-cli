@@ -41,6 +41,8 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&instanceFlag, "instance", "",
 		"Name of the instance to work against for this invocation (overrides the selected instance; env: NOVA_INSTANCE)")
+	rootCmd.PersistentFlags().StringVar(&envFlag, "env", "",
+		"(Wandelbots internal) Portal environment for this invocation: prod, stg or dev (default: the environment of the cloud instance, else of the last 'nova login'; env: NOVA_ENV)")
 
 	rootCmd.PersistentFlags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", false,
 		"If true, the server's certificate will not be checked for validity (disables TLS verification for all requests)")

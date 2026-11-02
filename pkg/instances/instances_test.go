@@ -64,6 +64,24 @@ func TestLoadMigratesLegacyHost(t *testing.T) {
 	}
 }
 
+func TestLoadMigrationCloudEnv(t *testing.T) {
+	v, _ := newViper(t, "host: abc.instance.wandelbots.io\ntoken:\n  authEnvironment: dev\n")
+	r, _ := Load(v)
+	if got := r.Instances[0].Env; got != "dev" {
+		t.Errorf("env = %q, want the environment of the legacy login", got)
+	}
+	v, _ = newViper(t, "host: abc.instance.wandelbots.io\n")
+	r, _ = Load(v)
+	if got := r.Instances[0].Env; got != "prod" {
+		t.Errorf("env without login = %q, want prod", got)
+	}
+	v, _ = newViper(t, "host: 192.168.1.10\ntoken:\n  authEnvironment: dev\n")
+	r, _ = Load(v)
+	if got := r.Instances[0].Env; got != "" {
+		t.Errorf("host entries have no env, got %q", got)
+	}
+}
+
 func TestLoadMigrationKeepsCellAndNucleus(t *testing.T) {
 	v, _ := newViper(t, "host: 192.168.1.10\ncellname: line1\nnucleus-host: nuc:3009\nnucleus-token: secret\n")
 	r, _ := Load(v)

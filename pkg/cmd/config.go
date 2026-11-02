@@ -149,6 +149,7 @@ Tokens are redacted unless --show-secrets is given.`,
 		if t.Name != "" {
 			values["instance"] = fmt.Sprintf("%s (%s, from %s)", t.Name, t.Kind, targetSource)
 		}
+		values["env"] = fmt.Sprintf("%s (from %s)", portalEnvironment, envSource)
 
 		sorted := make([]string, 0, len(values))
 		for key := range values {

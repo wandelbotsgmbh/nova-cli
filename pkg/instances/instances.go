@@ -43,6 +43,7 @@ const (
 	legacyID        = "virtualid"
 	legacyNucHost   = "nucleus-host"
 	legacyNucToken  = "nucleus-token"
+	legacyLoginEnv  = "token.authenvironment"
 	cloudHostSuffix = "wandelbots.io"
 )
 
@@ -57,6 +58,8 @@ type Instance struct {
 	NucleusToken string `mapstructure:"nucleus-token" yaml:"nucleus-token,omitempty"`
 	Kubeconfig   string `mapstructure:"kubeconfig" yaml:"kubeconfig,omitempty"`
 	SSHUser      string `mapstructure:"ssh-user" yaml:"ssh-user,omitempty"`
+	// Env is the portal environment (prod, stg, dev) of a cloud instance.
+	Env string `mapstructure:"env" yaml:"env,omitempty"`
 }
 
 // Cell returns the configured cell or DefaultCell.
@@ -152,9 +155,19 @@ func Load(v *viper.Viper) (*Registry, error) {
 		return r, nil
 	}
 	id := v.GetString(legacyID)
+	kind := GuessKind(host, id)
+	env := ""
+	if kind == KindCloud {
+		// the environment of the legacy login, which older CLI versions used for it
+		env = v.GetString(legacyLoginEnv)
+		if env == "" {
+			env = "prod"
+		}
+	}
 	r.Instances = []Instance{{
 		Name:         DefaultName,
-		Kind:         GuessKind(host, id),
+		Kind:         kind,
+		Env:          env,
 		Host:         host,
 		CellName:     v.GetString(legacyCell),
 		ID:           id,
@@ -199,6 +212,7 @@ func toMap(i Instance) map[string]any {
 		"nucleus-token": i.NucleusToken,
 		"kubeconfig":    i.Kubeconfig,
 		"ssh-user":      i.SSHUser,
+		"env":           i.Env,
 	} {
 		if val != "" {
 			m[k] = val

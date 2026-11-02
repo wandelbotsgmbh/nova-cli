@@ -79,7 +79,7 @@ func LoginWithRefreshToken(ctx context.Context, env AuthEnvironment, force bool)
 
 	if !force {
 		// Try to load existing token
-		if oldToken, err := LoadToken(); err == nil {
+		if oldToken, err := LoadTokenFor(env); err == nil && oldToken.OAuth2Token.RefreshToken != "" {
 			tokenSource := config.TokenSource(ctx, &oldToken.OAuth2Token)
 			if newToken, err := tokenSource.Token(); err == nil {
 				return StoreToken(newToken, env)
@@ -106,7 +106,7 @@ func LoginWithRefreshToken(ctx context.Context, env AuthEnvironment, force bool)
 		return err
 	}
 
-	if _, err := LoadToken(); err != nil {
+	if _, err := LoadTokenFor(env); err != nil {
 		return err
 	}
 

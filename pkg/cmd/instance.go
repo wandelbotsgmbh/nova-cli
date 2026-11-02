@@ -192,6 +192,9 @@ Only works for cloud instances; use 'nova instance remove' to forget a host entr
 			if err := requireKind(inst, instances.KindCloud, "delete"); err != nil {
 				return err
 			}
+			if err := useInstanceEnv(inst); err != nil {
+				return err
+			}
 		}
 
 		p, err := portal.NewPortal(portalEnvironment)
@@ -258,16 +261,16 @@ With --cloud, lists the instances on portal.wandelbots.io in the previous format
 
 func printInstanceList(out io.Writer, r *instances.Registry, unregistered []portal.UserInstance) {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "\tNAME\tKIND\tHOST\tCELL")
+	fmt.Fprintln(w, "\tNAME\tKIND\tHOST\tCELL\tENV")
 	for _, i := range r.Instances {
 		mark := ""
 		if i.Name == r.Current {
 			mark = "*"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", mark, i.Name, i.Kind, i.Host, i.Cell())
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", mark, i.Name, i.Kind, i.Host, i.Cell(), i.Env)
 	}
 	for _, c := range unregistered {
-		fmt.Fprintf(w, "\t%s\t%s\t%s\t%s\n", c.InstanceId, instances.KindCloud, c.Host, "(not in local list)")
+		fmt.Fprintf(w, "\t%s\t%s\t%s\t%s\t%s\n", c.InstanceId, instances.KindCloud, c.Host, "(not in local list)", portalEnvironment)
 	}
 	w.Flush()
 }
@@ -437,6 +440,8 @@ $ nova instance info lab
 			if inst, local = lookupCloudEntry(r, name); !local {
 				// not in the local list: treat it as a cloud instance id (previous behaviour)
 				inst = instances.Instance{Name: name, Kind: instances.KindCloud, ID: name}
+			} else if err := useInstanceEnv(inst); err != nil {
+				return err
 			}
 		} else {
 			t, err := ensureTarget()
@@ -638,6 +643,7 @@ func registerCloudInstance(id, host string) error {
 		}
 	}
 	inst.Host = host
+	inst.Env = string(portalEnvironment)
 	if err := r.Put(inst); err != nil {
 		return err
 	}
@@ -674,6 +680,9 @@ func cloudTarget(args []string, verb string) (string, error) {
 			return name, nil
 		}
 		if err := requireKind(inst, instances.KindCloud, verb); err != nil {
+			return "", err
+		}
+		if err := useInstanceEnv(inst); err != nil {
 			return "", err
 		}
 		return cloudID(inst, name), nil
@@ -771,10 +780,10 @@ func completeInstance(cmd *cobra.Command, args []string, toComplete string) ([]s
 	return comp, directive
 }
 
+// setPortalEnvironment makes sure the portal environment is set when the root pre-run
+// hook didn't run (shell completion).
 func setPortalEnvironment(cmd *cobra.Command, args []string) {
-	if token, err := oauth.LoadToken(); err == nil {
-		portalEnvironment = token.AuthEnvironment
-	}
+	portalEnvironment = oauth.ActiveEnvironment()
 }
 
 func waitForInstanceRunning(p *portal.Portal, instanceId string, started time.Time) error {

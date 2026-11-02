@@ -10,6 +10,7 @@ import (
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 )
 
 // withConfig points the CLI at a temporary home with the given config file content
@@ -27,6 +28,7 @@ func withConfig(t *testing.T, content string) string {
 	}
 	t.Setenv("HOME", home)
 	t.Setenv(instances.EnvVar, "")
+	t.Setenv(envVarName, "")
 	homedir.DisableCache = true
 	// a config.yaml in the working directory would shadow the test config
 	t.Chdir(home)
@@ -39,6 +41,8 @@ func runNova(t *testing.T, args ...string) (string, string, error) {
 	viper.Reset()
 	resetTarget()
 	instanceFlag = ""
+	envFlag, envSource, authEnvironment = "", "default", ""
+	oauth.SetActiveEnvironment("")
 	showSecretsConfigView = false
 	showSecretsInstanceInfoCmd = false
 	printHostInstanceInfoCmd, printInstanceIdInstanceInfoCmd = false, false

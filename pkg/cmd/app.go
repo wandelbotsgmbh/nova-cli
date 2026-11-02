@@ -541,7 +541,8 @@ func createAppProject(appName string) error {
 		}
 	}
 
-	if token, err := oauth.LoadToken(); err == nil {
+	// the portal login only belongs to cloud instances (see oauth.SendsTokenTo)
+	if token, err := oauth.LoadToken(); err == nil && oauth.SendsTokenTo(currentHost()) {
 		spec.InstanceInformation.AccessToken = token.OAuth2Token.AccessToken
 	}
 

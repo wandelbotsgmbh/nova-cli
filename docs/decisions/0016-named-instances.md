@@ -80,9 +80,23 @@ pointed at one entry for a single invocation.
   instance without changing the selection. Only paths are printed, never the content; it
   is fetched only on these explicit commands, never as a side effect of `add` or
   `select`.
+- **Portal logins per environment** (Wandelbots-internal environments `prod`, `stg`,
+  `dev`): each environment keeps its own login under `logins.<env>`; `nova login --env X`
+  stores it there and makes X the default (`default-env`, as the single login did before);
+  token refreshes never change the default. Cloud entries record their environment
+  (`env`). The environment of an invocation is `--env`, then `NOVA_ENV`, then the cloud
+  target's, then the default, then `prod`; an explicit environment that contradicts the
+  cloud target's is an error. Commands on another cloud entry (`instance stop <name>`, …)
+  use that entry's environment.
+- **The portal login only goes to wandelbots.io hosts** (the portal and cloud
+  instances), never to `host` or `k8srun` instances (ADR-0006, "auth only to the
+  configured host"). If these ever need it for permissions, that is a new decision.
 - **Secrets:** `config view` and `instance info` redact tokens unless `--show-secrets`
   (ADR-0006).
-- **Migration:** on first run with a bare top-level `host`, the CLI adds an entry
+- **Migration:** an existing `token` counts as the login of its environment, which
+  becomes the default; it is copied to `logins.<env>` before it is ever overwritten, and
+  the legacy key keeps the default environment's login for older binaries. On first run
+  with a bare top-level `host`, the CLI adds an entry
   `default` (kind guessed: `wandelbots.io` host → `cloud`, `virtualid` set → `k8srun`,
   else `host`) and copies `cellname` and the Nucleus keys into it. Legacy keys are
   kept, and `select` mirrors `host`, `cellname` and `virtualid` back, so an older binary
@@ -113,8 +127,8 @@ pointed at one entry for a single invocation.
   it falls under ADR-0009's "credentials for a real cell are not given to an agent working
   unattended"; the kit must not fetch it on its own.
 - Follow-ups:
-  - Attach the portal token only to cloud hosts and basic auth only to its entry
-    (ADR-0006, "auth only to the configured host").
+  - Bind the deprecated basic auth (keyring) to its entry as well; it is still attached
+    to every request.
   - Write the config atomically with a lock: token refresh and `config set` rewrite the
     whole file and can still race between sessions.
   - `-o json` for `instance list/info` (ADR-0010).
