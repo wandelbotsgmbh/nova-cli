@@ -38,7 +38,7 @@ detect_os_arch() {
             OS=macos
             ;;
         *)
-            echo "Unsupported OS: $OS (on Windows, use winget or download the zip from https://github.com/${REPO}/releases)" >&2
+            echo "Unsupported OS: $OS (on Windows, download the zip from https://github.com/${REPO}/releases)" >&2
             exit 1
             ;;
     esac

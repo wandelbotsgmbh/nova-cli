@@ -37,16 +37,18 @@ Pin a version or install into a user directory without `sudo`:
 curl -fsSL https://raw.githubusercontent.com/wandelbotsgmbh/nova-cli/main/install_nova.sh | NOVA_VERSION=0.2.0 INSTALL_DIR=~/.local/bin bash
 ```
 
-### Windows: winget
+### Windows
 
-The package lives in the Wandelbots winget source (adding a source may require admin rights, done once):
+Download `novacli_win64-<version>.zip` from the [releases page](https://github.com/wandelbotsgmbh/nova-cli/releases), extract `nova.exe` and put it on your `PATH`, e.g. in PowerShell:
 
 ```powershell
-winget source add --name wandelbots --arg https://wandelbotsgmbh.github.io/winget-pkgs
-winget install --id WandelbotsGmbH.NovaCLI --source wandelbots
+$v = "0.2.1"
+Invoke-WebRequest -Uri "https://github.com/wandelbotsgmbh/nova-cli/releases/download/$v/novacli_win64-$v.zip" -OutFile "$env:TEMP\nova.zip"
+Expand-Archive "$env:TEMP\nova.zip" -DestinationPath "$env:LOCALAPPDATA\nova"
+[Environment]::SetEnvironmentVariable("Path", "$env:LOCALAPPDATA\nova;" + [Environment]::GetEnvironmentVariable("Path", "User"), "User")
 ```
 
-Alternatively, download `novacli_win64-<version>.zip` from the [releases page](https://github.com/wandelbotsgmbh/nova-cli/releases), extract `nova.exe` and put it on your `PATH`.
+Open a new terminal afterwards so the updated `PATH` is picked up.
 
 ### Manual download (all platforms)
 
