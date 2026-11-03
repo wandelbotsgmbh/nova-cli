@@ -23,7 +23,24 @@ import (
 )
 
 var simulationCmd = &cobra.Command{
-	Use:   "simulation",
+	Use: "simulation",
+	Example: `# log in once (device flow in the browser)
+nova simulation login
+
+# find an app/profile with free capacity
+nova simulation apps
+nova simulation capacity isaac-24gb
+
+# start a session and open its stream when it is ready
+nova simulation session create my-session --app nova-x-isaac --profile isaac-24gb --open
+
+# keep it running longer, suspend it to free the GPU, delete it when done
+nova simulation session extend my-session --minutes 120
+nova simulation session suspend my-session
+nova simulation session delete my-session
+
+# call the Isaac Sim extension API inside the session
+curl -H "Authorization: Bearer $(nova simulation token)" "$(nova simulation session api my-session omniservice)/status"`,
 	Short: "EXPERIMENTAL, Wandelbots internal: Manage simulation streaming sessions",
 	Long: `EXPERIMENTAL: Manage simulation streaming sessions (Isaac Sim, Blender, ...) on the streaming session broker.
 
@@ -40,7 +57,9 @@ The broker uses its own login (Microsoft Entra ID), separate from "nova login":
 var simulationLoginEnv string
 
 var simulationLoginCmd = &cobra.Command{
-	Use:   "login",
+	Use: "login",
+	Example: `# log in to the dev environment
+nova simulation login`,
 	Short: "Log in to the streaming session broker",
 	Long: `Log in to the streaming session broker with the device flow of Microsoft Entra ID.
 
@@ -71,7 +90,9 @@ var simulationLogoutCmd = &cobra.Command{
 }
 
 var simulationTokenCmd = &cobra.Command{
-	Use:   "token",
+	Use: "token",
+	Example: `# call the broker API directly
+curl -H "Authorization: Bearer $(nova simulation token)" https://broker.omni.dev.wandelbots.io/sessions`,
 	Short: "Print a valid broker access token",
 	Long:  `Print a valid broker access token, refreshing it if needed. Handy for calling the broker API directly.`,
 	Args:  cobra.NoArgs,
@@ -121,7 +142,9 @@ var simulationAppsCmd = &cobra.Command{
 }
 
 var simulationCapacityCmd = &cobra.Command{
-	Use:   "capacity <profile>",
+	Use: "capacity <profile>",
+	Example: `# profile ids come from "nova simulation apps"
+nova simulation capacity isaac-48gb`,
 	Short: "Show how many more sessions of a profile fit right now",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -147,7 +170,10 @@ var simulationCapacityCmd = &cobra.Command{
 }
 
 var simulationSessionCmd = &cobra.Command{
-	Use:     "session",
+	Use: "session",
+	Example: `nova simulation session list
+nova simulation session get my-session
+nova simulation session open my-session`,
 	Aliases: []string{"sessions"},
 	Short:   "Manage your streaming sessions",
 	Long: `Manage your streaming sessions.
@@ -181,7 +207,10 @@ var simulationSessionListCmd = &cobra.Command{
 }
 
 var simulationSessionGetCmd = &cobra.Command{
-	Use:               "get <session>",
+	Use: "get <session>",
+	Example: `# by name (if unique) or by id
+nova simulation session get my-session
+nova simulation session get 66416162-239c-4aa0-b212-02b1323102cf`,
 	Short:             "Show a session, including its stream routes",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSimulationSession,
@@ -262,7 +291,9 @@ nova simulation session create my-session --app nova-x-isaac --profile isaac-24g
 var simulationSessionExtendMinutes uint32
 
 var simulationSessionExtendCmd = &cobra.Command{
-	Use:               "extend <session>",
+	Use: "extend <session>",
+	Example: `# keep the session running for 2 more hours
+nova simulation session extend my-session --minutes 120`,
 	Short:             "Push the expiry of a session out",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSimulationSession,
@@ -278,6 +309,7 @@ var simulationSessionExtendCmd = &cobra.Command{
 
 var simulationSessionRenameCmd = &cobra.Command{
 	Use:               "rename <session> <new-name>",
+	Example:           `nova simulation session rename my-session demo-booth`,
 	Short:             "Change the display name of a session",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeSimulationSession,
@@ -295,6 +327,7 @@ var simulationSessionRenameCmd = &cobra.Command{
 func sessionActionCmd(use, short string, call func(context.Context, *simulation.Broker, uuid.UUID) (simulation.Response, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:               use + " <session>",
+		Example:           `nova simulation session ` + use + ` my-session`,
 		Short:             short,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeSimulationSession,
@@ -335,7 +368,12 @@ var (
 var simulationSessionOpenPrint bool
 
 var simulationSessionOpenCmd = &cobra.Command{
-	Use:               "open <session>",
+	Use: "open <session>",
+	Example: `# open the stream in the browser
+nova simulation session open my-session
+
+# only print the viewer URL, e.g. to share it
+nova simulation session open my-session --print`,
 	Short:             "Open the stream of a session in the browser",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSimulationSession,
@@ -442,7 +480,10 @@ nova simulation api --spec -o broker.json`,
 }
 
 var simulationConfigCmd = &cobra.Command{
-	Use:   "config",
+	Use: "config",
+	Example: `nova simulation config list
+nova simulation config get nova-x-isaac/default > isaac.json
+nova simulation config set nova-x-isaac/default -f isaac.json`,
 	Short: "Manage the saved application configs sessions load and autosave to",
 }
 
@@ -483,9 +524,10 @@ var simulationConfigListCmd = &cobra.Command{
 }
 
 var simulationConfigGetCmd = &cobra.Command{
-	Use:   "get <app>/<name>",
-	Short: "Print a saved config as JSON",
-	Args:  cobra.ExactArgs(1),
+	Use:     "get <app>/<name>",
+	Example: `nova simulation config get nova-x-isaac/default`,
+	Short:   "Print a saved config as JSON",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		app, name, err := splitConfigRef(args[0])
 		if err != nil {
@@ -545,9 +587,10 @@ nova simulation config set nova-x-isaac/default -f isaac.json`,
 }
 
 var simulationConfigDeleteCmd = &cobra.Command{
-	Use:   "delete <app>/<name>",
-	Short: "Delete a saved config",
-	Args:  cobra.ExactArgs(1),
+	Use:     "delete <app>/<name>",
+	Example: `nova simulation config delete nova-x-isaac/old-setup`,
+	Short:   "Delete a saved config",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		app, name, err := splitConfigRef(args[0])
 		if err != nil {
