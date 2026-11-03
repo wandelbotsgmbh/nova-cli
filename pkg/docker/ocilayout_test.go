@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -96,7 +97,7 @@ func TestReadImageBlobs(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			dir, want := writeLayout(t, wrap)
-			got, err := ReadImageBlobs(dir)
+			got, err := ReadImageBlobs(dir, DefaultPlatform)
 			if err != nil {
 				t.Fatalf("ReadImageBlobs: %v", err)
 			}
@@ -160,7 +161,7 @@ func TestReadImageBlobsNilPlatform(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ReadImageBlobs(dir)
+	got, err := ReadImageBlobs(dir, DefaultPlatform)
 	if err != nil {
 		t.Fatalf("ReadImageBlobs: %v", err)
 	}
@@ -228,4 +229,27 @@ func tarEntries(t *testing.T, tarGzPath string) map[string]bool {
 		entries[hdr.Name] = true
 	}
 	return entries
+}
+
+// A multi-platform index must resolve to the manifest of the requested platform.
+func TestSelectManifestPlatform(t *testing.T) {
+	manifest := func(arch string) ocispec.Descriptor {
+		d := sha256Descriptor([]byte("manifest-" + arch))
+		d.MediaType = ocispec.MediaTypeImageManifest
+		d.Platform = &ocispec.Platform{OS: "linux", Architecture: arch}
+		return d
+	}
+	amd64, arm64 := manifest("amd64"), manifest("arm64")
+
+	for _, platform := range SupportedPlatforms {
+		wantOS, wantArch, _ := strings.Cut(platform, "/")
+		var indexes []ocispec.Descriptor
+		got, err := selectManifest(t.TempDir(), wantOS, wantArch, []ocispec.Descriptor{amd64, arm64}, &indexes)
+		if err != nil {
+			t.Fatalf("%s: selectManifest: %v", platform, err)
+		}
+		if got.Platform.Architecture != wantArch {
+			t.Errorf("%s: selected %s manifest", platform, got.Platform.Architecture)
+		}
+	}
 }

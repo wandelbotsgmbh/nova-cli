@@ -47,6 +47,7 @@ var (
 	appCopyImportCmd   string
 	appCopyRemoteDir   string
 	appSetupSSHKey     bool
+	appPlatform        string
 )
 
 var appDefaultSecrets = []string{
@@ -151,6 +152,10 @@ var installAppCmd = &cobra.Command{
 			return fmt.Errorf("--setup-ssh-key only applies together with --copy-image")
 		}
 
+		if err := docker.ValidatePlatform(appPlatform); err != nil {
+			return err
+		}
+
 		if len(args) > 0 && specfile.IsSpec(args[0]) {
 			// install or update the app directly from provided json or yaml file
 			return installFromExistingFile(host, cellname, args[0])
@@ -183,7 +188,7 @@ var installAppCmd = &cobra.Command{
 			appContext.NovaApp.RegistryAuth.Password = creds.Password
 		}
 
-		err = rt.BuildImage(appContext.DockerContextPath, imageName)
+		err = rt.BuildImage(appContext.DockerContextPath, imageName, appPlatform)
 		if err != nil {
 			return err
 		}
@@ -297,11 +302,11 @@ func copyIncremental(target remote.Target, imageName string, appContext DotNovaA
 	defer os.RemoveAll(ociParent)
 	ociDir := filepath.Join(ociParent, "layout")
 
-	if err := rt.BuildImageOCI(appContext.DockerContextPath, imageName, ociDir); err != nil {
+	if err := rt.BuildImageOCI(appContext.DockerContextPath, imageName, appPlatform, ociDir); err != nil {
 		return err
 	}
 
-	blobs, err := docker.ReadImageBlobs(ociDir)
+	blobs, err := docker.ReadImageBlobs(ociDir, appPlatform)
 	if err != nil {
 		return err
 	}
@@ -362,7 +367,7 @@ func copyIncremental(target remote.Target, imageName string, appContext DotNovaA
 // copyWholeImage exports and transfers the entire image (the original,
 // dependency-free path used as a fallback).
 func copyWholeImage(target remote.Target, imageName string, appContext DotNovaAppContext, importCmd string, rt docker.Runtime) error {
-	if err := rt.BuildImage(appContext.DockerContextPath, imageName); err != nil {
+	if err := rt.BuildImage(appContext.DockerContextPath, imageName, appPlatform); err != nil {
 		return err
 	}
 
@@ -493,6 +498,8 @@ func init() {
 	installAppCmd.Flags().StringVar(&appCopyImportCmd, "import-command", "k3s ctr images import", "Remote command for --copy-image that imports an image tar from stdin. Note: plain ctr needs '-n k8s.io --address /run/k3s/containerd/containerd.sock'.")
 	installAppCmd.Flags().StringVar(&appCopyRemoteDir, "remote-dir", "/tmp", "Remote directory for --copy-image where the image archive is placed temporarily.")
 	installAppCmd.Flags().BoolVar(&appSetupSSHKey, "setup-ssh-key", false, "Before copying, set up password-free access on the instance for --copy-image: install your SSH public key and (unless --no-sudo) grant passwordless sudo for k3s via /etc/sudoers.d. Needs the SSH and one sudo password once.")
+
+	installAppCmd.Flags().StringVar(&appPlatform, "platform", docker.DefaultPlatform, "Platform to build the app image for, matching the instance's CPU architecture. Supported: "+strings.Join(docker.SupportedPlatforms, ", "))
 
 	installAppCmd.MarkFlagsMutuallyExclusive("copy-image", "registry-secret")
 	installAppCmd.MarkFlagsMutuallyExclusive("copy-image", "omit-credentials")
