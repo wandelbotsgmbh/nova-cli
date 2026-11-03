@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
@@ -52,6 +53,7 @@ func initConfig() {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
+	viper.SetConfigPermissions(configFileMode)
 
 	viper.SetDefault("host", "")
 	viper.SetDefault("createcell", "true")
@@ -73,15 +75,25 @@ func initConfig() {
 	httpx.SetInsecureSkipTLSVerify(insecureSkipTLSVerify)
 }
 
+// The config holds portal logins and nucleus tokens, so only its owner may read it.
+const (
+	configDirMode  os.FileMode = 0o700
+	configFileMode os.FileMode = 0o600
+)
+
 func createConfigFileIfMissing(configFile string, configPath string) {
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
 		// Config file not found; let's create it
-		if err := os.MkdirAll(configPath, 0755); err != nil {
+		if err := os.MkdirAll(configPath, configDirMode); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		_, err = os.Create(configFile)
+		f, err := os.OpenFile(configFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, configFileMode)
 		if err != nil {
+			fmt.Println("Can't create config:", err)
+			os.Exit(1)
+		}
+		if err := f.Close(); err != nil {
 			fmt.Println("Can't create config:", err)
 			os.Exit(1)
 		}
@@ -91,4 +103,24 @@ func createConfigFileIfMissing(configFile string, configPath string) {
 			os.Exit(1)
 		}
 	}
+	restrictPermissions(configPath, configDirMode)
+	restrictPermissions(configFile, configFileMode)
+}
+
+// restrictPermissions removes the permission bits beyond mode, e.g. from a config
+// created world-readable by older CLI versions. Windows doesn't use these bits.
+func restrictPermissions(path string, mode os.FileMode) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm()&^mode == 0 {
+		return
+	}
+	restricted := info.Mode().Perm() & mode
+	if err := os.Chmod(path, restricted); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %s is readable by other users and can't be restricted: %v\n", path, err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "note: restricted %s to mode %04o, it holds login tokens\n", path, restricted)
 }
