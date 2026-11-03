@@ -21,11 +21,17 @@ registry; if one can't be deployed, the previous version keeps running and 'nova
 The flag needs NOVA 26.4 or newer and the permission to manage cells; --version and progress reporting
 need NOVA 26.8 or newer.
 
-Do not combine this with the novaflow-installer app on the same cell: both deploy the same services.
-The command refuses to run when that app is installed, or when NovaFlow was installed another way.`
+Where the instance doesn't expose the feature flag API (e.g. cloud instances on portal.wandelbots.io,
+or NOVA before 26.4), the command installs the novaflow-installer app from the preview catalog and lets
+it deploy the NovaFlow apps instead; --installer does that everywhere. Once the novaflow-installer app is
+on the cell, install and uninstall always go through it. Without --version it installs the version the
+installer recommends.
 
-const flowUninstallLong = `Removes NovaFlow from the cell by clearing its NovaFlow feature flag, and waits until its
-apps are gone.
+The command refuses to switch between both ways, or to touch a NovaFlow installed another way (e.g.
+with helm), unless --force is given.`
+
+const flowUninstallLong = `Removes NovaFlow from the cell, the way it was installed: by clearing its NovaFlow feature
+flag, or through the novaflow-installer app (which stays installed). Waits until its apps are gone.
 
 The flows stay in the cell's object store and are back after the next 'nova flow install'.
 'nova flow backup download' keeps a copy outside the cell, e.g. before deleting the cell.`
@@ -147,6 +153,9 @@ nova flow install --version 2026.10.69
 
 # back to the version that comes with NOVA, e.g. after a version failed to deploy
 nova flow install --version default
+
+# with the novaflow-installer app from the preview catalog (automatic where NOVA can't deploy it itself)
+nova flow install --installer
 
 # don't wait (check later with 'nova flow status')
 nova flow install --no-wait`

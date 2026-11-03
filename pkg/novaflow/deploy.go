@@ -53,28 +53,9 @@ type WaitOptions struct {
 // WaitForDeployment polls until service-manager reports the requested state
 // and, when enabling, Forest answers. ctx bounds the wait.
 func (c *Client) WaitForDeployment(ctx context.Context, opts WaitOptions) error {
-	if opts.Interval == 0 {
-		opts.Interval = 3 * time.Second
-	}
-	last := ""
-	for {
-		done, state, err := c.deploymentDone(ctx, opts)
-		if err != nil {
-			return err
-		}
-		if done {
-			return nil
-		}
-		if state != last && opts.Progress != nil {
-			opts.Progress(state)
-		}
-		last = state
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("NovaFlow is still %s: %w", last, ctx.Err())
-		case <-time.After(opts.Interval):
-		}
-	}
+	return poll(ctx, opts.Interval, opts.Progress, func() (bool, string, error) {
+		return c.deploymentDone(ctx, opts)
+	})
 }
 
 func (c *Client) deploymentDone(ctx context.Context, opts WaitOptions) (bool, string, error) {

@@ -18,6 +18,7 @@ import (
 	"github.com/cli/browser"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/catalog"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/novaflow"
 	"golang.org/x/term"
@@ -26,10 +27,11 @@ import (
 var (
 	flowYes bool
 
-	flowInstallVersion string
-	flowInstallForce   bool
-	flowNoWait         bool
-	flowWaitTimeout    time.Duration
+	flowInstallVersion   string
+	flowInstallForce     bool
+	flowInstallInstaller bool
+	flowNoWait           bool
+	flowWaitTimeout      time.Duration
 
 	flowGetOutput string
 
@@ -68,7 +70,12 @@ var flowStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		printFlowStatus(cmd.OutOrStdout(), c, inst, installerAppPresent(c.Cell()))
+		installer := installerAppPresent(c.Cell())
+		var installerStatus *novaflow.InstallerStatus
+		if installer {
+			installerStatus, _ = c.InstallerStatus(cmd.Context())
+		}
+		printFlowStatus(cmd.OutOrStdout(), c, inst, installer, installerStatus)
 		if inst.Flags != nil && inst.Flags.State() == novaflow.StateFailed {
 			return errors.New("the NovaFlow deployment failed")
 		}
@@ -87,7 +94,7 @@ var flowInstallCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return installNovaflow(cmd, c, flowInstallVersion, flowInstallForce)
+		return installNovaflow(cmd, c, flowInstallVersion, flowInstallForce, flowInstallInstaller)
 	},
 }
 
@@ -102,13 +109,17 @@ var flowUninstallCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		f, err := c.FeatureFlags(cmd.Context())
+		inst, err := c.Inspect(cmd.Context())
 		if err != nil {
 			return err
 		}
-		if !f.Novaflow {
-			if installerAppPresent(c.Cell()) {
-				return fmt.Errorf("NovaFlow on cell %q was installed with the %s app, remove it there", c.Cell(), novaflow.InstallerApp)
+		viaInstaller := !inst.ViaFeatureFlag() && installerAppPresent(c.Cell())
+		if !inst.ViaFeatureFlag() && !viaInstaller {
+			if inst.Installed() {
+				return fmt.Errorf("NovaFlow on cell %q was not installed by NOVA or the %s app (e.g. with helm): remove it the way it was installed", c.Cell(), novaflow.InstallerApp)
+			}
+			if inst.Flags == nil && !errors.Is(inst.FlagsErr, novaflow.ErrUnreachable) {
+				return inst.FlagsErr
 			}
 			cmd.Printf("NovaFlow is not installed on cell %q\n", c.Cell())
 			return nil
@@ -116,17 +127,31 @@ var flowUninstallCmd = &cobra.Command{
 		if !confirm(cmd, fmt.Sprintf("Remove NovaFlow from cell %q? Its flows stay on the cell.", c.Cell()), false) {
 			return errors.New("aborted, use --yes to remove it without asking")
 		}
-		if _, err := c.SetNovaflow(cmd.Context(), false, ""); err != nil {
+		if viaInstaller {
+			if _, err := c.InstallerUninstall(cmd.Context()); err != nil {
+				return err
+			}
+		} else if _, err := c.SetNovaflow(cmd.Context(), false, ""); err != nil {
 			return err
 		}
 		if flowNoWait {
 			cmd.Printf("NovaFlow is being removed from cell %q\n", c.Cell())
 			return nil
 		}
-		if err := waitForNovaflow(cmd, c, novaflow.WaitOptions{Enabled: false}); err != nil {
+		ctx, cancel := context.WithTimeout(cmd.Context(), flowWaitTimeout)
+		defer cancel()
+		if viaInstaller {
+			err = c.WaitForRemoval(ctx, 0, waitProgress(cmd))
+		} else {
+			err = c.WaitForDeployment(ctx, novaflow.WaitOptions{Enabled: false, Progress: waitProgress(cmd)})
+		}
+		if err != nil {
 			return err
 		}
 		cmd.Printf("NovaFlow is removed from cell %q\n", c.Cell())
+		if viaInstaller {
+			cmd.Printf("The %s app stays installed, remove it with 'nova app delete %s'\n", novaflow.InstallerApp, novaflow.InstallerApp)
+		}
 		return nil
 	},
 }
@@ -462,31 +487,38 @@ func ensureNovaflow(cmd *cobra.Command, c *novaflow.Client, offerInstall bool) e
 		// Forest answered, but with an error: not a missing installation
 		return fmt.Errorf("NovaFlow on cell %q does not answer properly: %w", c.Cell(), inst.ProbeErr)
 	}
-	if inst.Flags == nil {
+	if inst.Flags == nil && !errors.Is(inst.FlagsErr, novaflow.ErrUnreachable) {
 		return fmt.Errorf("%w (%v)", notInstalled, inst.FlagsErr)
 	}
 	if !offerInstall || !confirm(cmd, fmt.Sprintf("NovaFlow is not installed on cell %q. Install it now?", c.Cell()), true) {
 		return notInstalled
 	}
-	return installNovaflow(cmd, c, "", false)
+	return installNovaflow(cmd, c, "", false, false)
 }
 
-func installNovaflow(cmd *cobra.Command, c *novaflow.Client, version string, force bool) error {
+// installNovaflow deploys NovaFlow with service-manager's feature flag, or
+// with the novaflow-installer app where that is in use, asked for
+// (useInstaller) or the instance doesn't expose the feature flag API.
+func installNovaflow(cmd *cobra.Command, c *novaflow.Client, version string, force, useInstaller bool) error {
 	ctx := cmd.Context()
 	inst, err := c.Inspect(ctx)
 	if err != nil {
 		return err
 	}
-	if inst.Flags == nil {
+	if inst.Flags == nil && !errors.Is(inst.FlagsErr, novaflow.ErrUnreachable) {
 		return inst.FlagsErr
+	}
+	installer := installerAppPresent(c.Cell())
+	if useInstaller || installer || inst.Flags == nil {
+		if inst.ViaFeatureFlag() && !force {
+			return fmt.Errorf("NovaFlow on cell %q is managed by NOVA: remove it with 'nova flow uninstall' before using the %s app (--force skips this check)", c.Cell(), novaflow.InstallerApp)
+		}
+		return installWithInstaller(cmd, c, inst, installer, version, force)
 	}
 	if version != "" && inst.Flags.Status == nil {
 		return errors.New("--version needs NOVA 26.8 or newer, older versions install the NovaFlow version they ship with")
 	}
 	if !force {
-		if installerAppPresent(c.Cell()) {
-			return fmt.Errorf("NovaFlow on cell %q is managed by the %s app: update it there, or remove that app first (--force skips this check)", c.Cell(), novaflow.InstallerApp)
-		}
 		if inst.Installed() && !inst.Flags.Novaflow {
 			return fmt.Errorf("NovaFlow already runs on cell %q, but was not installed by NOVA (e.g. with helm): remove that installation first (--force skips this check)", c.Cell())
 		}
@@ -522,8 +554,68 @@ func installNovaflow(cmd *cobra.Command, c *novaflow.Client, version string, for
 func waitForNovaflow(cmd *cobra.Command, c *novaflow.Client, opts novaflow.WaitOptions) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), flowWaitTimeout)
 	defer cancel()
-	opts.Progress = func(state string) { fmt.Fprintf(cmd.ErrOrStderr(), "NovaFlow is %s…\n", state) }
+	opts.Progress = waitProgress(cmd)
 	return c.WaitForDeployment(ctx, opts)
+}
+
+func waitProgress(cmd *cobra.Command) func(string) {
+	return func(state string) { fmt.Fprintf(cmd.ErrOrStderr(), "NovaFlow is %s…\n", state) }
+}
+
+// installWithInstaller installs the novaflow-installer app from the preview
+// catalog if needed and lets it deploy NovaFlow.
+func installWithInstaller(cmd *cobra.Command, c *novaflow.Client, inst *novaflow.Installation, installerPresent bool, version string, force bool) error {
+	ctx, cancel := context.WithTimeout(cmd.Context(), flowWaitTimeout)
+	defer cancel()
+	if !installerPresent {
+		if inst.Installed() && !force {
+			return fmt.Errorf("NovaFlow already runs on cell %q, but was not installed by NOVA or the %s app (e.g. with helm): remove that installation first (--force skips this check)", c.Cell(), novaflow.InstallerApp)
+		}
+		if err := installInstallerApp(c.Cell()); err != nil {
+			return fmt.Errorf("installing the %s app: %w", novaflow.InstallerApp, err)
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(), "Waiting for the %s app…\n", novaflow.InstallerApp)
+		if err := c.WaitForInstaller(ctx, 0); err != nil {
+			return fmt.Errorf("the %s app does not start: %w", novaflow.InstallerApp, err)
+		}
+	}
+	status, err := c.InstallerStatus(ctx)
+	if err != nil {
+		return err
+	}
+	if version == "" || version == novaflow.DefaultVersion {
+		version = status.RecommendedVersion
+	}
+	if inst.Installed() && status.InstalledVersion == version {
+		cmd.Printf("NovaFlow %s is already installed on cell %q\n", version, c.Cell())
+		return nil
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "Installing NovaFlow %s with the %s app…\n", version, novaflow.InstallerApp)
+	if _, err := c.InstallerInstall(ctx, version); err != nil {
+		return err
+	}
+	if flowNoWait {
+		cmd.Printf("NovaFlow %s is being installed on cell %q, see 'nova flow status'\n", version, c.Cell())
+		return nil
+	}
+	if err := c.WaitForInstallerDeployment(ctx, version, 0, waitProgress(cmd)); err != nil {
+		return err
+	}
+	cmd.Printf("NovaFlow %s is installed on cell %q: %s/\n", version, c.Cell(), c.AppURL(novaflow.EditorApp))
+	return nil
+}
+
+// installInstallerApp installs the novaflow-installer app from the preview catalog.
+func installInstallerApp(cell string) error {
+	cat, err := catalog.NewDefault(true)
+	if err != nil {
+		return err
+	}
+	entry, _, err := cat.GetManifest(novaflow.InstallerApp)
+	if err != nil {
+		return err
+	}
+	return installFromCatalog(viper.GetString("host"), cell, novaflow.InstallerApp, entry)
 }
 
 func installerAppPresent(cell string) bool {
@@ -531,7 +623,7 @@ func installerAppPresent(cell string) bool {
 	return err == nil && slices.Contains(apps, novaflow.InstallerApp)
 }
 
-func printFlowStatus(out io.Writer, c *novaflow.Client, inst *novaflow.Installation, installerApp bool) {
+func printFlowStatus(out io.Writer, c *novaflow.Client, inst *novaflow.Installation, installerApp bool, installerStatus *novaflow.InstallerStatus) {
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	defer w.Flush()
 	fmt.Fprintf(w, "Cell:\t%s\n", c.Cell())
@@ -540,7 +632,7 @@ func printFlowStatus(out io.Writer, c *novaflow.Client, inst *novaflow.Installat
 	switch {
 	case inst.ViaFeatureFlag():
 		how = " (managed by NOVA)"
-	case installerApp:
+	case installerApp && inst.Installed():
 		how = " (managed by the " + novaflow.InstallerApp + " app)"
 	case inst.Installed():
 		how = " (not managed by NOVA)"
@@ -566,8 +658,18 @@ func printFlowStatus(out io.Writer, c *novaflow.Client, inst *novaflow.Installat
 		if f.NovaflowVersion != "" {
 			fmt.Fprintf(w, "Requested version:\t%s\n", f.NovaflowVersion)
 		}
-	} else if inst.FlagsErr != nil {
+	} else if installerStatus == nil && errors.Is(inst.FlagsErr, novaflow.ErrUnreachable) {
+		fmt.Fprintf(w, "Installs with:\tthe %s app, the instance doesn't expose NOVA's NovaFlow feature flag\n", novaflow.InstallerApp)
+	} else if installerStatus == nil && inst.FlagsErr != nil {
 		fmt.Fprintf(w, "Feature flags:\tunavailable: %v\n", inst.FlagsErr)
+	}
+	if s := installerStatus; s != nil && !inst.ViaFeatureFlag() {
+		if s.InstalledVersion != "" {
+			fmt.Fprintf(w, "Version:\t%s\n", s.InstalledVersion)
+		}
+		if s.RecommendedVersion != "" && s.RecommendedVersion != s.InstalledVersion {
+			fmt.Fprintf(w, "Available version:\t%s\n", s.RecommendedVersion)
+		}
 	}
 	if inst.Installed() {
 		fmt.Fprintf(w, "Editor:\t%s/\n", c.AppURL(novaflow.EditorApp))
@@ -654,6 +756,7 @@ func init() {
 	}
 	flowInstallCmd.Flags().StringVar(&flowInstallVersion, "version", "", "NovaFlow chart version, or 'default' for the one the NOVA version ships with (default: keep the version selected before)")
 	flowInstallCmd.Flags().BoolVar(&flowInstallForce, "force", false, "Install even if NovaFlow was installed another way")
+	flowInstallCmd.Flags().BoolVar(&flowInstallInstaller, "installer", false, "Install with the "+novaflow.InstallerApp+" app (preview catalog) even if NOVA can deploy NovaFlow itself")
 
 	flowGetCmd.Flags().StringVarP(&flowGetOutput, "output", "o", "", "Write to this file instead of stdout")
 
