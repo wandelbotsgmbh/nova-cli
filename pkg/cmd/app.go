@@ -17,6 +17,7 @@ import (
 	"github.com/wandelbotsgmbh/nova-cli/pkg/docker"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/editor"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/generator"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/remote"
@@ -480,7 +481,7 @@ func init() {
 	appCmd.AddCommand(deleteAppCmd)
 	appCmd.AddCommand(editAppCmd)
 	appCmd.AddCommand(updateEnvAppCmd)
-	updateEnvAppCmd.Flags().BoolVar(&appEnvReset, "reset", false, "Also replace NOVA_API, CELL_NAME and BASE_PATH (or the project type's equivalents) with the values of the configured instance, e.g. after 'nova config set host'.")
+	updateEnvAppCmd.Flags().BoolVar(&appEnvReset, "reset", false, "Also replace NOVA_API, CELL_NAME and BASE_PATH (or the project type's equivalents) with the values of the targeted instance, e.g. after 'nova instance select'.")
 
 	// TODO generate this flag somehow, with the available generators?
 	// Otherwise possible apps needs to be put into the readme by hand.
@@ -584,18 +585,16 @@ func writeAppEnv(cmd *cobra.Command, dir string, reset bool) error {
 		return fmt.Errorf("invalid .nova file: %w", err)
 	}
 
-	host := viper.GetString("host")
+	host := currentHost()
 	if host == "" {
-		return fmt.Errorf("no host configured, set it with 'nova config set host <host>'")
+		return fmt.Errorf("%w: select one with 'nova instance select <name>' or pass --instance <name>", instances.ErrNoTarget)
 	}
-	cell := viper.GetString("cellname")
-	if cell == "" {
-		cell = "cell"
-	}
+	cell := currentCell()
 
-	// only portal instances need a token; refresh it so the file holds a valid one
+	// only portal instances need a token (see oauth.SendsTokenTo); refresh it so the file
+	// holds a valid one
 	accessToken := ""
-	if layout.TokenKey != "" && strings.Contains(host, oauth.WABO_CLOUD_HOST) {
+	if layout.TokenKey != "" && oauth.SendsTokenTo(host) {
 		if err := oauth.RefreshTokenOrLogin(host); err != nil {
 			return err
 		}

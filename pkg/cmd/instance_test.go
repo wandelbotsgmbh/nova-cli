@@ -18,7 +18,7 @@ func withConfig(t *testing.T, content string) string {
 	t.Helper()
 	home := t.TempDir()
 	dir := filepath.Join(home, ".nova")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "config.yaml")

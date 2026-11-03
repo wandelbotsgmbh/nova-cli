@@ -98,13 +98,13 @@ What gets written:
   - the access token: always replaced. For portal instances (*.wandelbots.io) it is refreshed first,
     like 'nova login token' does (starts a login if needed). Other hosts need no token, it is left empty.
   - the instance settings (instance url, cell, base path): only added if missing, so values you
-    edited by hand are kept. --reset replaces them with the configured instance ('nova config view').
+    edited by hand are kept. --reset replaces them with the targeted instance ('nova config view').
   - everything else in the file (comments, your own variables) stays untouched.
 
 When to run it:
   - the app gets "Error 401: Unauthorized" from the instance (portal tokens are valid for 24h).
     The python and nextjs apps may only hang or retry instead, run it first if they don't connect.
-  - with --reset after switching the instance or cell ('nova config set host|cellname').
+  - with --reset after switching the instance or cell ('nova instance select', 'nova config set cellname').
   'nova app create' already runs it (with --reset) for a new project.
 
 File and variables per project type (detected by Cargo.toml, go.mod, package.json, pyproject.toml):
@@ -114,13 +114,16 @@ File and variables per project type (detected by Cargo.toml, go.mod, package.jso
 
 The apps read the file on startup: restart the app after updating (nextjs dev reloads it by itself).
 The token is never printed. The output lists the instance settings in effect and notes the ones that
-differ from the configured instance.`
+differ from the targeted instance.`
 
 const updateEnvAppTxtExample = `# refresh the access token of the app project in the current directory
 nova app update-env
 
-# after 'nova config set host <other-instance>': point the app to the configured instance
+# after 'nova instance select <other-instance>': point the app to the selected instance
 nova app update-env --reset
+
+# point the app to another registered instance without selecting it
+nova --instance lab-ipc app update-env --reset
 
 # app project in another directory
 nova app update-env path/to/your-nova-app`

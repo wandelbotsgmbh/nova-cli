@@ -17,7 +17,6 @@ import (
 
 	"github.com/cli/browser"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/catalog"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/novaflow"
@@ -458,7 +457,7 @@ var flowBackupRestoreCmd = &cobra.Command{
 }
 
 func newFlowClient() (*novaflow.Client, error) {
-	return novaflow.NewClient(viper.GetString("host"), viper.GetString("cellname"))
+	return novaflow.NewClient(currentHost(), currentCell())
 }
 
 // ensureNovaflow returns nil when NovaFlow answers on the cell. Otherwise it
@@ -615,11 +614,11 @@ func installInstallerApp(cell string) error {
 	if err != nil {
 		return err
 	}
-	return installFromCatalog(viper.GetString("host"), cell, novaflow.InstallerApp, entry)
+	return installFromCatalog(currentHost(), cell, novaflow.InstallerApp, entry)
 }
 
 func installerAppPresent(cell string) bool {
-	apps, err := nova.ListApps(viper.GetString("host"), cell)
+	apps, err := nova.ListApps(currentHost(), cell)
 	return err == nil && slices.Contains(apps, novaflow.InstallerApp)
 }
 
