@@ -1,0 +1,22 @@
+{
+  "version": "3.0",
+  "root": {
+    "id": "root-sequence",
+    "kind": "sequence",
+    "children": [
+      {
+        "id": "noop",
+        "kind": "compute",
+        "left": {
+          "ref": "value",
+          "data": 0
+        },
+        "operator": "+",
+        "right": {
+          "ref": "value",
+          "data": 0
+        }
+      }
+    ]
+  }
+}

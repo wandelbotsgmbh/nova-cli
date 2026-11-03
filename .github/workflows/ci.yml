@@ -175,7 +175,9 @@ jobs:
   # cell, create an app and install it. The app image goes to a private GHCR
   # package; `nova app install` hands the docker login to the instance as pull
   # secret. Needs secrets, so it's skipped for fork and Dependabot PRs, and for
-  # PRs that only change docs (see changes).
+  # PRs that only change docs (see changes). It builds its own CLI, so it waits
+  # only for lint and test (not the slower release build) before it creates an
+  # instance.
   e2e:
     runs-on: ubuntu-latest
     if: >-
@@ -184,7 +186,7 @@ jobs:
         || (github.event_name == 'pull_request'
           && github.event.pull_request.head.repo.full_name == github.repository
           && github.actor != 'dependabot[bot]'))
-    needs: [build, changes]
+    needs: [lint, test, changes]
     timeout-minutes: 45
     permissions:
       contents: read
@@ -241,6 +243,56 @@ jobs:
         if: failure()
         with:
           name: diagnosis-${{ github.run_id }}
+          path: diagnosis.zip
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Delete cloud instance
+        if: always()
+        run: |
+          INSTANCE_ID=$(nova instance info --instanceId) || exit 0
+          nova instance delete "$INSTANCE_ID"
+
+  # NovaFlow end-to-end test on its own temporary instance, in parallel to e2e:
+  # install NovaFlow (portal instances don't expose service-manager's feature
+  # flag API, so this goes through the novaflow-installer app from the preview
+  # catalog), round-trip a flow through
+  # push/get/backup/delete/restore, uninstall and reinstall
+  # (testdata/novaflow/e2e.sh). Same conditions as e2e.
+  e2e-novaflow:
+    runs-on: ubuntu-latest
+    if: >-
+      needs.changes.outputs.e2e == 'true'
+      && (github.event_name == 'workflow_dispatch'
+        || (github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && github.actor != 'dependabot[bot]'))
+    needs: [lint, test, changes]
+    timeout-minutes: 45
+    env:
+      PORTAL_PROD_REFRESH_TOKEN: ${{ secrets.PORTAL_PROD_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build nova
+        run: |
+          CGO_ENABLED=0 go build -o bin/nova .
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+      - name: Create cloud instance
+        run: |
+          nova login --token "$PORTAL_PROD_REFRESH_TOKEN"
+          nova instance create --name "nova-cli-ci-flow-${{ github.run_id }}-${{ github.run_attempt }}" --timeout 900
+          nova version -v
+      - name: Test nova flow
+        run: testdata/novaflow/e2e.sh
+      - name: Download diagnosis package
+        if: failure()
+        run: nova diagnosis download || true
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: diagnosis-novaflow-${{ github.run_id }}
           path: diagnosis.zip
           if-no-files-found: ignore
           retention-days: 7
