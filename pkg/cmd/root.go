@@ -93,7 +93,10 @@ func createConfigFileIfMissing(configFile string, configPath string) {
 			fmt.Println("Can't create config:", err)
 			os.Exit(1)
 		}
-		f.Close()
+		if err := f.Close(); err != nil {
+			fmt.Println("Can't create config:", err)
+			os.Exit(1)
+		}
 		err = viper.WriteConfig()
 		if err != nil {
 			fmt.Println("Can't write config:", err)
