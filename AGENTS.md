@@ -37,6 +37,13 @@
 * The LFT service of a typical deployment is small: more than ~2–4 parallel large downloads push it into 5xx. Keep `-j` modest and don't load-test against a shared server.
 * `hash_type: sha-256-flat` is **not** a plain SHA-256: split the file into `hash_bsize` blocks (1 MiB), SHA-256 each, then SHA-256 the concatenated raw digests (`nucleus.FlatHash`). A one-block file hashes to sha256(sha256(data)). Verified live; `protocol.md` in `wb-int/nucleus-api` doesn't document this yet.
 
+## Simulation streaming (`nova simulation`, Wandelbots internal)
+
+* Manages GPU streaming sessions (Isaac Sim, Blender) on the streaming session broker (dev: `https://broker.omni.dev.wandelbots.io`, viewer: `https://viewer.omni.dev.wandelbots.io/omniverse-stream`).
+* The broker only accepts tokens of the viewer's **Microsoft Entra ID** app, not portal/Auth0 tokens from `nova login` (even though its spec says "NOVA access token"). `nova simulation login` runs the Entra device flow (public client, no secret) and stores the token under `simulation-token`, separate from the portal `token`.
+* The same token authorizes the APIs inside a session: `https://<route host>:<kit port, default 8080>/wandelbots-stream/api/v1` and `/omniservice/api/v2`, each with an `openapi.json` (no hosted docs page; the viewer renders them itself).
+* Code: `pkg/simulation` (client generated from the broker's `openapi.json`; `overlay.yaml` adds `type: string` to `LeaseStatus`, which the broker emits as `oneOf` + `const` without a type), commands in `pkg/cmd/simulation.go`. Only dev is configured in `environments`.
+
 ## Repository
 
 * Go module: `github.com/wandelbotsgmbh/nova-cli` (public repo)

@@ -21,6 +21,7 @@ var keys = map[string]struct{}{
 	"nucleus-host":      {},
 	"nucleus-token":     {},
 	"container-runtime": {},
+	"simulation-broker": {},
 }
 
 var configCmd = &cobra.Command{
