@@ -1,11 +1,14 @@
 // Package httpx provides shared HTTP client construction for the CLI so that
 // TLS verification behaviour can be controlled globally (e.g. via the
-// --insecure-skip-tls-verify flag).
+// --insecure-skip-tls-verify flag) and every request carries the CLI's
+// User-Agent.
 package httpx
 
 import (
 	"crypto/tls"
 	"net/http"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
 )
 
 // insecureSkipTLSVerify controls whether HTTP clients created via this package
@@ -35,12 +38,13 @@ func InsecureSkipTLSVerify() bool {
 	return insecureSkipTLSVerify
 }
 
-// Transport returns an http.RoundTripper honouring the global TLS setting. It
-// clones http.DefaultTransport so that connection pooling defaults are kept.
+// Transport returns an http.RoundTripper honouring the global TLS setting and
+// setting the CLI's User-Agent. It clones http.DefaultTransport so that
+// connection pooling defaults are kept.
 func Transport() http.RoundTripper {
 	dt, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
-		return http.DefaultTransport
+		return WithUserAgent(http.DefaultTransport)
 	}
 	t := dt.Clone()
 	if insecureSkipTLSVerify {
@@ -49,7 +53,27 @@ func Transport() http.RoundTripper {
 		}
 		t.TLSClientConfig.InsecureSkipVerify = true
 	}
-	return t
+	return WithUserAgent(t)
+}
+
+// WithUserAgent wraps rt so that requests without a User-Agent get the CLI's.
+// A User-Agent set by the caller is kept.
+func WithUserAgent(rt http.RoundTripper) http.RoundTripper {
+	return userAgentTransport{rt}
+}
+
+type userAgentTransport struct {
+	next http.RoundTripper
+}
+
+func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Header.Get("User-Agent") != "" {
+		return t.next.RoundTrip(req)
+	}
+	// a RoundTripper must not modify the caller's request
+	r := req.Clone(req.Context())
+	r.Header.Set("User-Agent", version.UserAgent())
+	return t.next.RoundTrip(r)
 }
 
 // Client returns a new *http.Client honouring the global TLS setting.

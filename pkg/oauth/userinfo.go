@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 )
 
 // UserInfo holds the fields returned by the Auth0 /userinfo endpoint.
@@ -33,7 +35,7 @@ func FetchUserInfo(ctx context.Context, env AuthEnvironment) (UserInfo, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+token.OAuth2Token.AccessToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpx.Client().Do(req)
 	if err != nil {
 		return UserInfo{}, err
 	}

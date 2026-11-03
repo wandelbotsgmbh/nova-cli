@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 )
 
 var virtualNovaVersion string
@@ -61,7 +62,7 @@ var createVirtualCmd = &cobra.Command{
 		baseUrl.RawQuery = params.Encode()
 
 		// create new instance
-		resp, err := http.Get(baseUrl.String())
+		resp, err := httpx.Client().Get(baseUrl.String())
 		if err != nil {
 			return err
 		}
@@ -144,7 +145,7 @@ func destroyVirtual(instanceId string) error {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpx.Client().Do(req)
 	if err != nil {
 		return err
 	}
