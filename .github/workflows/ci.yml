@@ -279,6 +279,18 @@ jobs:
         run: |
           nova login --token "$PORTAL_PROD_REFRESH_TOKEN"
           nova instance create --name "nova-cli-ci-flow-${{ github.run_id }}-${{ github.run_attempt }}" --timeout 900
+      - name: Show NOVA version and the NovaFlow feature flag API
+        run: |
+          nova version -v
+          INSTANCE_HOST=$(nova instance info --host)
+          INSTANCE_TOKEN=$(nova login token)
+          echo "::add-mask::$INSTANCE_TOKEN"
+          for path in api/v2/system/version api/v2/internal/cells/cell/feature-flags api/v2/cells; do
+            echo "== /$path"
+            curl -s -m 30 -w '\nHTTP %{http_code} %{content_type}\n' \
+              -H "Authorization: Bearer $INSTANCE_TOKEN" -H 'Accept: application/json' \
+              "https://$INSTANCE_HOST/$path" | head -c 2000
+          done
       - name: Test nova flow
         run: testdata/novaflow/e2e.sh
       - name: Download diagnosis package
