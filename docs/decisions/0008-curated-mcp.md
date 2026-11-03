@@ -60,3 +60,24 @@ so a generated mirror mostly adds noise.
   (README roadmap).
 - Open: whether any curated tools should live in the CLI (e.g. for local workflows), or
   whether shell commands cover them (ADR-0005).
+
+## Addendum 2026-11-03: scope of the instance MCP service
+
+The instance MCP service is no longer limited to commissioning. Its planned surface is
+16 toolsets (about 100 curated tools) over the NOVA v2 API, following the rules above:
+
+- Default toolsets, mostly reads: `context`, `cells`, `controllers`, `virtual-controllers`,
+  `motion-group-models`, `system`, `apps`, `diagnosis`, `guides`, `kinematics`,
+  `datasets`.
+- Opt-in: `planning`, `stores`, `motion`, `programs`, `maintenance`. Motion on physical
+  controllers follows the ADR-0009 addendum; maintenance (backup, restore, update) needs an
+  approval or confirmation per call.
+- Continuous streams (jogging, free drive, state streams) are not tools. A `guides`
+  toolset returns how to use them from a script instead, plus search and schema lookup
+  over the public API description, which covers the long tail for clients without
+  `nova api`.
+- Not exposed: operations that would carry secrets through the model (license keys, cloud
+  connect), bulk deletes, binary downloads.
+
+Toolsets land one at a time in any order; there is no phase plan. The gateway scope of the
+MCP route drops from cell management to system access so read-only users can connect.

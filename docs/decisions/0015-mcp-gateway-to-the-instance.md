@@ -33,7 +33,7 @@ agent ──stdio──> nova mcp ──HTTP──> instance: MCP service       
 | | Gateway to app servers | Generated locally (today) |
 |---|---|---|
 | Version match | Each app serves its own tools | Reads the instance's OpenAPI; drift possible |
-| Motion on real robots | Apps own preview and approval (ADR-0009) | Refused |
+| Motion on real robots | Apps and the instance MCP service own preview and approval (ADR-0009 and its addendum) | Refused |
 | Clients without a shell | Can connect to app endpoints directly | Not possible |
 | Rollout | Needs app discovery on the instance | Works now (once fixed) |
 

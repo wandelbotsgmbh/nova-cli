@@ -124,3 +124,39 @@ Not the CLI. Physical safety at the cell:
 - Virtual and real cells should share the same cell setup, so a motion verified virtually
   is meaningful for the real robot. Differences (calibration, tools, collision scene) are
   why the preview on the real robot stays.
+
+## Addendum 2026-11-03: motion requests through the instance MCP service
+
+The decision above said MCP tools refuse motion on physical controllers outright. The
+instance MCP service now plans to offer motion tools (`execute_trajectory`,
+`start_program`, output writes) for physical controllers as well. The rule is relaxed to
+**agents may request motion; only a human may approve it**, under the five points of "How
+a motion on a real robot is approved", mapped to the service like this:
+
+| Point | In the instance MCP service |
+|---|---|
+| 1. NOVA plans | `plan_trajectory` / `plan_collision_free` return a trajectory id, duration and sample count, never joint control. |
+| 2. A human sees a preview and approves | On a physical target the tool does not execute. It records a pending approval on the instance and answers `APPROVAL_REQUIRED` with the approval id and the URL of the approval page in the NOVA UI. The page shows that plan (start, target, duration, speed) and the human approves or rejects it there. Not through an MCP argument, an elicitation the agent's own client could answer, or a CLI flag. |
+| 3. The approved plan runs | The approval is bound to one trajectory id and motion group, expires after a few minutes and is used once. A new plan needs a new approval. |
+| 4. Reduced speed | Motion requested through MCP runs with a velocity override the human can raise on the approval page, not the model. Start value is low (e.g. 10 %). |
+| 5. A stop that always works | `stop_execution` and `stop_program` are in every toolset and never gated. |
+
+Before requesting, the agent renders the plan on the developer's machine (Rerun through
+the Python SDK, or a plot) so the conversation about the motion happens on a preview, not
+on numbers. That local preview informs the human; the approval still happens on the
+instance, on the same trajectory id, so what was shown and what runs are the same plan.
+
+Deployment-side switches stay in front of all this: the motion toolsets are opt-in, and a
+Helm value (`allowPhysicalMotion`, default off) keeps physical targets refused unless an
+operator enables them. Jogging and other continuous streams stay out: there is no plan to
+preview, so nothing to approve.
+
+What this changes elsewhere:
+
+- The kit's motion rule becomes "never move a physical robot from a script, and never
+  answer an approval yourself"; the agent's sequence is plan, preview locally, describe
+  what will move, request, wait.
+- The shared approval page in NOVA (an open question in the README) becomes a prerequisite
+  for the motion toolsets of the instance MCP service. Until it exists, the service keeps
+  refusing physical targets.
+- Protection against deliberate misuse is unchanged: physical safety at the cell.

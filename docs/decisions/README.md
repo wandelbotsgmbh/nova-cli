@@ -66,8 +66,10 @@ distributes it.**
   `nova login token` prints the access token.
 - Stored auth is attached to requests regardless of host, and non-`wandelbots.io` hosts
   use plain `http://`.
-- Other MCP work exists: an instance MCP service for commissioning (experimental,
-  planned for a NOVA release; curated tools, no motion) and MCP servers inside apps.
+- Other MCP work exists: an instance MCP service (experimental, planned for a NOVA
+  release) with curated toolsets over the v2 API, read-heavy by default, motion on physical
+  controllers behind a human approval on the instance (ADR-0008 and ADR-0009 addenda),
+  and MCP servers inside apps.
 
 ## Threat model
 
@@ -85,7 +87,8 @@ Everything the CLI does to restrict agents (`--read-only`, confirmation flags) i
 So the goal for software is narrower: an agent that makes a mistake or follows injected
 instructions never moves a real robot unexpectedly. Virtual robots move freely; real
 robots move only after a human approved a previewed plan in an app or UI the agent can't
-operate. Deliberate misuse is covered by physical safety at the cell. See ADR-0009.
+operate. An agent may plan and request such a motion, but never approve it. Deliberate
+misuse is covered by physical safety at the cell. See ADR-0009.
 
 ## Roadmap
 
@@ -98,10 +101,13 @@ operate. Deliberate misuse is covered by physical safety at the cell. See ADR-00
    connect, app dev loop incl. the content removed from the NovaX template, catalog incl.
    cameras, Nucleus files), `.mcp.json`, Claude plugin plus `.agents/skills/`, CI against
    the latest stable `nova`.
-5. **Align with the MCP owners:** the instance MCP service (curated tools), app teams
-   (app MCP servers), platform team (`x-nova-agent` classification,
-   controller type in the API, MCP discovery on the instance, possibly a shared approval
-   UI for motions on real robots).
+5. **Align with the MCP owners:** the instance MCP service (curated toolsets, see the
+   ADR-0008 addendum), app teams (app MCP servers), platform team (`x-nova-agent`
+   classification, controller type in the API, MCP discovery on the instance, the shared
+   approval page for motions on real robots).
+6. **Point the kit at the instance MCP service** once it is released: it is curated v2,
+   never wraps a stream and speaks HTTP, which removes the three known problems of
+   `nova mcp` (v1 description, hanging streams, corrupted stdio).
 
 Deferred: `nova agent install/update/check`, further adapters, multi-plugin marketplace,
 the gateway (ADR-0015).
@@ -109,7 +115,9 @@ the gateway (ADR-0015).
 ## Open questions
 
 - **Approval UI for real robots (ADR-0009):** does every app build its own preview and
-  approval, or does NOVA offer a shared one?
+  approval, or does NOVA offer a shared one? The instance MCP service needs the shared
+  one before its motion toolsets can serve physical controllers (ADR-0009 addendum), so
+  this is now a platform prerequisite rather than a nice-to-have.
 
 - **Where do curated tools live?** The instance MCP service for general NOVA tools, or tools in the
   CLI for things only the CLI can do? (ADR-0008)
