@@ -841,12 +841,13 @@ func getAppContext(args []string) (DotNovaAppContext, error) {
 		projectPath = args[0]
 	}
 
-	dockerfile, err := os.Stat(projectPath + "/Dockerfile")
-	if os.IsNotExist(err) || dockerfile.IsDir() {
-		if projectPath == "." {
-			projectPath = "current directory"
-		}
-		return DotNovaAppContext{}, fmt.Errorf("%s is no nova app project folder", projectPath)
+	// accept the .nova file itself as well, it's an easy mix-up with its project folder
+	if filepath.Base(projectPath) == ".nova" && isRegularFile(projectPath) {
+		projectPath = filepath.Dir(projectPath)
+	}
+
+	if !isRegularFile(filepath.Join(projectPath, "Dockerfile")) {
+		return DotNovaAppContext{}, noProjectFolderError(projectPath)
 	}
 
 	novaFile, err := readNovaApp(projectPath)
@@ -862,16 +863,28 @@ func getAppContext(args []string) (DotNovaAppContext, error) {
 	return appContext, nil
 }
 
+// isRegularFile reports whether path exists and is not a directory. Any stat
+// error (not found, "not a directory" for a path below a file, permissions)
+// counts as missing.
+func isRegularFile(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
+}
+
+func noProjectFolderError(path string) error {
+	if path == "." {
+		path = "current directory"
+	}
+	return fmt.Errorf("%s is no nova app project folder (expected a Dockerfile and a .nova file in it)", path)
+}
+
 func readNovaApp(path string) (*DotNovaApp, error) {
-	novaFile, err := os.Stat(path + "/.nova")
-	if os.IsNotExist(err) || novaFile.IsDir() {
-		if path == "." {
-			path = "current directory"
-		}
-		return nil, fmt.Errorf("%s is no nova app project folder", path)
+	novaFile := filepath.Join(path, ".nova")
+	if !isRegularFile(novaFile) {
+		return nil, noProjectFolderError(path)
 	}
 
-	data, err := os.ReadFile(path + "/.nova")
+	data, err := os.ReadFile(novaFile)
 	if err != nil {
 		return nil, err
 	}
