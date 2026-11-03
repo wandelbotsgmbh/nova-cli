@@ -31,7 +31,7 @@ type KV struct {
 type Layout struct {
 	// File relative to the project root
 	File string
-	// Variable holding the access token, refreshed on every write
+	// Variable holding the access token, refreshed on every write (empty: no token)
 	TokenKey string
 	// Instance settings (url, cell, base path): only written if missing, unless reset
 	Instance func(s Settings) []KV
@@ -80,6 +80,32 @@ var pythonLayout = Layout{
 	},
 }
 
+// NovaFlow action services (novaflow-action-template) connect to the cell's NATS
+// and don't use an access token. NOVA_API is the bare instance url: the SDK
+// appends /api/v2 itself.
+var novaflowActionLayout = Layout{
+	File: ".env",
+	Instance: func(s Settings) []KV {
+		return []KV{
+			{"NOVA_API", s.NovaApi},
+			{"CELL_NAME", s.Cell},
+			{"NATS_BROKER", NatsBroker(s.NovaApi)},
+		}
+	},
+}
+
+// NatsBroker returns the websocket url of the instance's NATS for a NOVA API url.
+func NatsBroker(novaApi string) string {
+	u := strings.TrimSuffix(novaApi, "/")
+	switch {
+	case strings.HasPrefix(u, "https://"):
+		u = "wss://" + strings.TrimPrefix(u, "https://")
+	case strings.HasPrefix(u, "http://"):
+		u = "ws://" + strings.TrimPrefix(u, "http://")
+	}
+	return u + "/api/nats"
+}
+
 // DetectLayout returns the env layout for the app project in dir, based on its build files.
 func DetectLayout(dir string) (Layout, error) {
 	exists := func(name string) bool {
@@ -92,6 +118,9 @@ func DetectLayout(dir string) (Layout, error) {
 	case exists("package.json"):
 		return nextJsLayout, nil
 	case exists("pyproject.toml"):
+		if b, err := os.ReadFile(filepath.Join(dir, "pyproject.toml")); err == nil && strings.Contains(string(b), "wandelbots-novaflow") {
+			return novaflowActionLayout, nil
+		}
 		return pythonLayout, nil
 	}
 	return Layout{}, fmt.Errorf("unknown app project type in %s: expected Cargo.toml, go.mod, package.json or pyproject.toml", dir)
@@ -103,7 +132,10 @@ func DetectLayout(dir string) (Layout, error) {
 // Everything else in the file (comments, other variables) is kept.
 func Write(dir string, layout Layout, s Settings, reset bool) (string, error) {
 	path := filepath.Join(dir, layout.File)
-	values := []KV{{layout.TokenKey, s.AccessToken}}
+	var values []KV
+	if layout.TokenKey != "" {
+		values = append(values, KV{layout.TokenKey, s.AccessToken})
+	}
 	defaults := layout.Instance(s)
 	if reset {
 		values = append(defaults, values...)
@@ -124,7 +156,7 @@ func Update(path string, values, defaults []KV) error {
 	if len(content) > 0 {
 		lines = strings.Split(strings.TrimRight(string(content), "\n"), "\n")
 	} else {
-		lines = []string{"# Local development settings, updated by `nova app update-env`.", "# Contains an access token: keep this file out of git."}
+		lines = []string{"# Local development settings, updated by `nova app update-env`.", "# May contain an access token: keep this file out of git."}
 	}
 
 	set := func(kv KV, overwrite bool) {

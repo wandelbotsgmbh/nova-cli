@@ -40,7 +40,7 @@ func TestUpdateCreatesPrivateFile(t *testing.T) {
 		t.Errorf("mode = %v, want 0600", info.Mode().Perm())
 	}
 	got, _ := os.ReadFile(path)
-	if want := "# Local development settings, updated by `nova app update-env`.\n# Contains an access token: keep this file out of git.\nACCESS_TOKEN=\"secret\"\nLOG_LEVEL=\"debug\"\n"; string(got) != want {
+	if want := "# Local development settings, updated by `nova app update-env`.\n# May contain an access token: keep this file out of git.\nACCESS_TOKEN=\"secret\"\nLOG_LEVEL=\"debug\"\n"; string(got) != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
@@ -84,6 +84,31 @@ func TestDetectLayout(t *testing.T) {
 	}
 	if _, err := DetectLayout(t.TempDir()); err == nil {
 		t.Error("expected error for unknown project")
+	}
+}
+
+func TestNovaflowActionLayout(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "pyproject.toml"), []byte("dependencies = [\"wandelbots-novaflow==0.1.5\"]\n"), 0644)
+	layout, err := DetectLayout(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Write(dir, layout, Settings{NovaApi: "http://172.31.13.182", Cell: "cell", AppName: "x-service"}, true); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := Read(filepath.Join(dir, ".env"))
+	want := map[string]string{"NOVA_API": "http://172.31.13.182", "CELL_NAME": "cell", "NATS_BROKER": "ws://172.31.13.182/api/nats"}
+	if len(got) != len(want) {
+		t.Errorf("got %v, want %v (no token variable)", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+	if b := NatsBroker("https://abc.instance.wandelbots.io/"); b != "wss://abc.instance.wandelbots.io/api/nats" {
+		t.Errorf("NatsBroker = %s", b)
 	}
 }
 

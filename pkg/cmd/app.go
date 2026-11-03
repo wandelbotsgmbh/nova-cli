@@ -594,7 +594,7 @@ func writeAppEnv(cmd *cobra.Command, dir string, reset bool) error {
 
 	// only portal instances need a token; refresh it so the file holds a valid one
 	accessToken := ""
-	if strings.Contains(host, oauth.WABO_CLOUD_HOST) {
+	if layout.TokenKey != "" && strings.Contains(host, oauth.WABO_CLOUD_HOST) {
 		if err := oauth.RefreshTokenOrLogin(host); err != nil {
 			return err
 		}
@@ -617,9 +617,12 @@ func writeAppEnv(cmd *cobra.Command, dir string, reset bool) error {
 		return err
 	}
 
-	if accessToken != "" {
+	switch {
+	case layout.TokenKey == "":
+		cmd.Printf("Updated %s\n", path)
+	case accessToken != "":
 		cmd.Printf("Updated %s: access token refreshed\n", path)
-	} else {
+	default:
 		cmd.Printf("Updated %s: no access token needed for %s\n", path, novaApi)
 	}
 
