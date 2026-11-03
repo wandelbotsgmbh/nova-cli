@@ -136,7 +136,7 @@ a motion on a real robot is approved", mapped to the service like this:
 | Point | In the instance MCP service |
 |---|---|
 | 1. NOVA plans | `plan_trajectory` / `plan_collision_free` return a trajectory id, duration and sample count, never joint control. |
-| 2. A human sees a preview and approves | Before requesting, the agent renders the plan on the developer's machine (Rerun through the Python SDK, or a plot). On a physical target the tool does not execute: it asks the human through **MCP elicitation**. The agent's client shows a dialog with the facts of that plan (cell, motion group, controller, trajectory id, duration, maximum speed, velocity override) and the human accepts or declines it there. The model has no argument to set and never sees a field it could fill in. |
+| 2. A human sees a preview and approves | Before requesting, the agent renders the plan on the developer's machine (Rerun through the Python SDK, or a plot). On a physical target the tool does not execute: it asks the human through **MCP elicitation**. The agent's client shows a dialog with the facts of that plan (cell, motion group, controller, trajectory id, duration, maximum speed, velocity override) and the human accepts or declines it there. The dialog text starts with the precondition: stand at the cell with the emergency stop in reach, and accept only if you have seen the preview of this plan. The model has no argument to set and never sees a field it could fill in. |
 | 3. The approved plan runs | The answer is bound to one trajectory id and motion group, expires after a few minutes and is used once; the binding travels in the signed request state of the round trip, so the service stays stateless. A new plan needs a new dialog. |
 | 4. Reduced speed | Motion requested through MCP runs with a velocity override the human sets in the dialog, not the model. Start value is low (e.g. 10 %). |
 | 5. A stop that always works | `stop_execution` and `stop_program` are in every toolset and never gated. |
@@ -145,8 +145,8 @@ Elicitation in MCP 2026-07-28 is a multi round-trip: the tool call returns
 `input_required`, the client collects the answer from the user, then retries the call with
 the answer and the server's opaque state [S5]. The official Go SDK implements it. A client
 that has not declared the elicitation capability gets `APPROVAL_REQUIRED` with the facts of
-the plan and a pointer to an app or the NOVA UI instead; a shared approval page there is
-useful for such clients, but no longer a prerequisite.
+the plan, the same precondition sentence, and a pointer to an app or the NOVA UI instead;
+a shared approval page there is useful for such clients, but no longer a prerequisite.
 
 Why the dialog is acceptable now, although the decision above rejected it: the threat
 model in the README is mistakes and prompt injection. A dialog the model cannot answer
@@ -165,7 +165,8 @@ What this changes elsewhere:
 
 - The kit's motion rule becomes "never move a physical robot from a script, and never
   answer an approval yourself"; the agent's sequence is plan, preview locally, describe
-  what will move, request, wait for the human's answer.
+  what will move, remind the user to have the emergency stop in hand, request, wait for
+  the human's answer.
 - The prototype's reason for avoiding elicitation (its own agent is the client) still
   holds for that prototype. It does not apply to a coding agent whose client is the
   developer's tool, and the local preview covers the "shows no preview" objection.
