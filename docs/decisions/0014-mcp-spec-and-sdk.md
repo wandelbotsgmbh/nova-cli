@@ -27,3 +27,11 @@ elicitation with multi round-trip requests [S5]. The official SDKs already speak
 
 - The tasks extension (`resultType: "task"`) for long-running jobs requires a server on
   2026-07-28.
+
+## Addendum 2026-11-03
+
+"Old-style elicitation" above means the server-initiated `elicitation/create` request.
+Elicitation itself stays: on 2026-07-28 a tool call returns `resultType: "input_required"`
+with the question and an opaque `requestState`, and the client retries the call with the
+user's answer [S5]. The ADR-0009 addendum builds the motion approval on this form; the
+official Go SDK (used by the instance MCP service) implements it.

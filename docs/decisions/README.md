@@ -68,7 +68,7 @@ distributes it.**
   use plain `http://`.
 - Other MCP work exists: an instance MCP service (experimental, planned for a NOVA
   release) with curated toolsets over the v2 API, read-heavy by default, motion on physical
-  controllers behind a human approval on the instance (ADR-0008 and ADR-0009 addenda),
+  controllers behind a dialog only the human can answer (ADR-0008 and ADR-0009 addenda),
   and MCP servers inside apps.
 
 ## Threat model
@@ -103,8 +103,8 @@ misuse is covered by physical safety at the cell. See ADR-0009.
    the latest stable `nova`.
 5. **Align with the MCP owners:** the instance MCP service (curated toolsets, see the
    ADR-0008 addendum), app teams (app MCP servers), platform team (`x-nova-agent`
-   classification, controller type in the API, MCP discovery on the instance, the shared
-   approval page for motions on real robots).
+   classification, controller type in the API, MCP discovery on the instance, possibly a
+   shared approval page for clients without elicitation).
 6. **Point the kit at the instance MCP service** once it is released: it is curated v2,
    never wraps a stream and speaks HTTP, which removes the three known problems of
    `nova mcp` (v1 description, hanging streams, corrupted stdio).
@@ -115,9 +115,9 @@ the gateway (ADR-0015).
 ## Open questions
 
 - **Approval UI for real robots (ADR-0009):** does every app build its own preview and
-  approval, or does NOVA offer a shared one? The instance MCP service needs the shared
-  one before its motion toolsets can serve physical controllers (ADR-0009 addendum), so
-  this is now a platform prerequisite rather than a nice-to-have.
+  approval, or does NOVA offer a shared one? For coding agents the instance MCP service
+  asks through the agent's client instead (ADR-0009 addendum); a shared page would serve
+  clients without that capability and apps with their own agent.
 
 - **Where do curated tools live?** The instance MCP service for general NOVA tools, or tools in the
   CLI for things only the CLI can do? (ADR-0008)

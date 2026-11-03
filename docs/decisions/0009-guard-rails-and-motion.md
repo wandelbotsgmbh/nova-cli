@@ -136,15 +136,25 @@ a motion on a real robot is approved", mapped to the service like this:
 | Point | In the instance MCP service |
 |---|---|
 | 1. NOVA plans | `plan_trajectory` / `plan_collision_free` return a trajectory id, duration and sample count, never joint control. |
-| 2. A human sees a preview and approves | On a physical target the tool does not execute. It records a pending approval on the instance and answers `APPROVAL_REQUIRED` with the approval id and the URL of the approval page in the NOVA UI. The page shows that plan (start, target, duration, speed) and the human approves or rejects it there. Not through an MCP argument, an elicitation the agent's own client could answer, or a CLI flag. |
-| 3. The approved plan runs | The approval is bound to one trajectory id and motion group, expires after a few minutes and is used once. A new plan needs a new approval. |
-| 4. Reduced speed | Motion requested through MCP runs with a velocity override the human can raise on the approval page, not the model. Start value is low (e.g. 10 %). |
+| 2. A human sees a preview and approves | Before requesting, the agent renders the plan on the developer's machine (Rerun through the Python SDK, or a plot). On a physical target the tool does not execute: it asks the human through **MCP elicitation**. The agent's client shows a dialog with the facts of that plan (cell, motion group, controller, trajectory id, duration, maximum speed, velocity override) and the human accepts or declines it there. The model has no argument to set and never sees a field it could fill in. |
+| 3. The approved plan runs | The answer is bound to one trajectory id and motion group, expires after a few minutes and is used once; the binding travels in the signed request state of the round trip, so the service stays stateless. A new plan needs a new dialog. |
+| 4. Reduced speed | Motion requested through MCP runs with a velocity override the human sets in the dialog, not the model. Start value is low (e.g. 10 %). |
 | 5. A stop that always works | `stop_execution` and `stop_program` are in every toolset and never gated. |
 
-Before requesting, the agent renders the plan on the developer's machine (Rerun through
-the Python SDK, or a plot) so the conversation about the motion happens on a preview, not
-on numbers. That local preview informs the human; the approval still happens on the
-instance, on the same trajectory id, so what was shown and what runs are the same plan.
+Elicitation in MCP 2026-07-28 is a multi round-trip: the tool call returns
+`input_required`, the client collects the answer from the user, then retries the call with
+the answer and the server's opaque state [S5]. The official Go SDK implements it. A client
+that has not declared the elicitation capability gets `APPROVAL_REQUIRED` with the facts of
+the plan and a pointer to an app or the NOVA UI instead; a shared approval page there is
+useful for such clients, but no longer a prerequisite.
+
+Why the dialog is acceptable now, although the decision above rejected it: the threat
+model in the README is mistakes and prompt injection. A dialog the model cannot answer
+covers both. The remaining gap, a user who configures the client to auto-accept
+elicitations or lets the agent run its own client, is deliberate and therefore in the
+same class as handing an agent credentials for a real cell: covered by physical safety,
+not by software. In development the operator stands at the cell with the emergency stop in
+hand; that is the setting this addendum assumes.
 
 Deployment-side switches stay in front of all this: the motion toolsets are opt-in, and a
 Helm value (`allowPhysicalMotion`, default off) keeps physical targets refused unless an
@@ -155,8 +165,8 @@ What this changes elsewhere:
 
 - The kit's motion rule becomes "never move a physical robot from a script, and never
   answer an approval yourself"; the agent's sequence is plan, preview locally, describe
-  what will move, request, wait.
-- The shared approval page in NOVA (an open question in the README) becomes a prerequisite
-  for the motion toolsets of the instance MCP service. Until it exists, the service keeps
-  refusing physical targets.
+  what will move, request, wait for the human's answer.
+- The prototype's reason for avoiding elicitation (its own agent is the client) still
+  holds for that prototype. It does not apply to a coding agent whose client is the
+  developer's tool, and the local preview covers the "shows no preview" objection.
 - Protection against deliberate misuse is unchanged: physical safety at the cell.
