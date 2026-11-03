@@ -41,12 +41,14 @@ func lastCall(t *testing.T, logFile string) string {
 
 func TestDockerBuildImage(t *testing.T) {
 	log := fakeDocker(t, true)
-	if err := (dockerRuntime{}).BuildImage("ctx", "img"); err != nil {
-		t.Fatalf("BuildImage: %v", err)
-	}
-	want := "buildx build --load -t img --platform linux/amd64 ctx"
-	if got := lastCall(t, log); got != want {
-		t.Errorf("docker called with %q, want %q", got, want)
+	for _, platform := range SupportedPlatforms {
+		if err := (dockerRuntime{}).BuildImage("ctx", "img", platform); err != nil {
+			t.Fatalf("BuildImage: %v", err)
+		}
+		want := "buildx build --load -t img --platform " + platform + " ctx"
+		if got := lastCall(t, log); got != want {
+			t.Errorf("docker called with %q, want %q", got, want)
+		}
 	}
 }
 
@@ -54,8 +56,8 @@ func TestDockerBuildsWithoutBuildx(t *testing.T) {
 	log := fakeDocker(t, false)
 	rt := dockerRuntime{}
 	builds := map[string]func() error{
-		"BuildImage":                func() error { return rt.BuildImage("ctx", "img") },
-		"BuildImageOCI":             func() error { return rt.BuildImageOCI("ctx", "img", "oci") },
+		"BuildImage":                func() error { return rt.BuildImage("ctx", "img", DefaultPlatform) },
+		"BuildImageOCI":             func() error { return rt.BuildImageOCI("ctx", "img", DefaultPlatform, "oci") },
 		"BuildAndPushMultiPlatform": func() error { return rt.BuildAndPushMultiPlatform("Dockerfile", "ctx", "img") },
 	}
 	for name, build := range builds {

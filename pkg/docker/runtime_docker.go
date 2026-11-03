@@ -35,27 +35,26 @@ func requireBuildx() error {
 	return nil
 }
 
-func (dockerRuntime) BuildImage(pathToDockerFile string, image string) error {
+func (dockerRuntime) BuildImage(pathToDockerFile string, image string, platform string) error {
 	if err := requireBuildx(); err != nil {
 		return err
 	}
-	// TODO for now we assume our nova platform is linux/amd64
 	// --load is needed for non-default builders (e.g. docker-container driver),
 	// otherwise the image only stays in the build cache and the push fails
-	cmd := exec.Command("docker", "buildx", "build", "--load", "-t", image, "--platform", "linux/amd64", pathToDockerFile)
+	cmd := exec.Command("docker", "buildx", "build", "--load", "-t", image, "--platform", platform, pathToDockerFile)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
-func (dockerRuntime) BuildImageOCI(pathToDockerFile string, image string, ociDir string) error {
+func (dockerRuntime) BuildImageOCI(pathToDockerFile string, image string, platform string, ociDir string) error {
 	// buildx writes a canonical OCI layout to ociDir and does not load the image
 	// into the local image store (not needed for copy-image)
 	if err := requireBuildx(); err != nil {
 		return err
 	}
 	output := fmt.Sprintf("type=oci,dest=%s,tar=false,name=%s", ociDir, image)
-	cmd := exec.Command("docker", "buildx", "build", "--platform", "linux/amd64", "--output", output, pathToDockerFile)
+	cmd := exec.Command("docker", "buildx", "build", "--platform", platform, "--output", output, pathToDockerFile)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

@@ -54,8 +54,8 @@ func (podmanRuntime) Name() string {
 	return RuntimeNamePodman
 }
 
-func (podmanRuntime) BuildImage(pathToDockerFile string, image string) error {
-	cmd := exec.Command("podman", "build", "--platform", "linux/amd64", "-t", image, pathToDockerFile)
+func (podmanRuntime) BuildImage(pathToDockerFile string, image string, platform string) error {
+	cmd := exec.Command("podman", "build", "--platform", platform, "-t", image, pathToDockerFile)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -64,9 +64,9 @@ func (podmanRuntime) BuildImage(pathToDockerFile string, image string) error {
 	return nil
 }
 
-func (podmanRuntime) BuildImageOCI(pathToDockerFile string, image string, ociDir string) error {
+func (podmanRuntime) BuildImageOCI(pathToDockerFile string, image string, platform string, ociDir string) error {
 	// build into podman's local storage, then export it as an OCI layout dir
-	build := exec.Command("podman", "build", "--platform", "linux/amd64", "-t", image, pathToDockerFile)
+	build := exec.Command("podman", "build", "--platform", platform, "-t", image, pathToDockerFile)
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {

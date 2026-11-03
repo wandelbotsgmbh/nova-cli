@@ -20,13 +20,14 @@ type ImageRegistryCredentials struct {
 type Runtime interface {
 	// Name returns the CLI binary name of the runtime ("docker" or "podman").
 	Name() string
-	// BuildImage finds the dockerfile in the given path and builds the image for linux/amd64.
+	// BuildImage finds the dockerfile in the given path and builds the image for
+	// platform (e.g. linux/amd64, see SupportedPlatforms).
 	// Provide the image in format e.g. registry.example.com/team/servicename (one could use CreateImageName() method)
-	BuildImage(pathToDockerFile string, image string) error
-	// BuildImageOCI builds the image for linux/amd64 and writes it as an OCI
+	BuildImage(pathToDockerFile string, image string, platform string) error
+	// BuildImageOCI builds the image for platform and writes it as an OCI
 	// layout directory at ociDir (with per-layer blobs under blobs/sha256), used
 	// by the --copy-image path to transfer only the layers a target is missing.
-	BuildImageOCI(pathToDockerFile string, image string, ociDir string) error
+	BuildImageOCI(pathToDockerFile string, image string, platform string, ociDir string) error
 	// PushImage pushes the image to its registry.
 	// Returns the image digest sha256:<hash>
 	PushImage(image string) (string, error)

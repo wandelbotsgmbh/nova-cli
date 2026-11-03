@@ -72,7 +72,7 @@ func TestPodmanBuildAndPushImage(t *testing.T) {
 	image := testRegistry() + "/nova-cli-test/app:latest"
 	rt := podmanRuntime{}
 
-	if err := rt.BuildImage(dir, image); err != nil {
+	if err := rt.BuildImage(dir, image, DefaultPlatform); err != nil {
 		t.Fatalf("BuildImage() failed: %v", err)
 	}
 

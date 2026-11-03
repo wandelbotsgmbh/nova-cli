@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/utils"
@@ -25,18 +26,20 @@ type ImageBlobs struct {
 	Indexes  []ocispec.Descriptor
 }
 
-// Reads an OCI layout directory and resolves the blobs of its single
-// linux/amd64 image (config + layers). An index that wraps platform-specific
-// manifests is descended into; a layout that points straight at a manifest is
-// used directly.
-func ReadImageBlobs(ociDir string) (ImageBlobs, error) {
+// Reads an OCI layout directory and resolves the blobs of its single image for
+// platform (e.g. linux/amd64): config + layers. An index that wraps
+// platform-specific manifests is descended into; a layout that points straight
+// at a manifest is used directly.
+func ReadImageBlobs(ociDir string, platform string) (ImageBlobs, error) {
+	wantOS, wantArch, _ := strings.Cut(platform, "/")
+
 	var index ocispec.Index
 	if err := readJSONBlob(filepath.Join(ociDir, "index.json"), &index); err != nil {
 		return ImageBlobs{}, err
 	}
 
 	var indexes []ocispec.Descriptor
-	manifestDesc, err := selectManifest(ociDir, index.Manifests, &indexes)
+	manifestDesc, err := selectManifest(ociDir, wantOS, wantArch, index.Manifests, &indexes)
 	if err != nil {
 		return ImageBlobs{}, err
 	}
@@ -55,17 +58,17 @@ func ReadImageBlobs(ociDir string) (ImageBlobs, error) {
 }
 
 // selectManifest resolves a list of descriptors (from index.json) to the single
-// image manifest we want. It descends nested indexes and prefers a linux/amd64
-// platform when descriptors carry platform info. Each intermediate index blob it
+// image manifest we want. It descends nested indexes and prefers wantOS/wantArch
+// when descriptors carry platform info. Each intermediate index blob it
 // descends through is appended to *indexes so callers can ship the full graph.
-func selectManifest(ociDir string, descriptors []ocispec.Descriptor, indexes *[]ocispec.Descriptor) (ocispec.Descriptor, error) {
+func selectManifest(ociDir, wantOS, wantArch string, descriptors []ocispec.Descriptor, indexes *[]ocispec.Descriptor) (ocispec.Descriptor, error) {
 	var fallback *ocispec.Descriptor
 
 	for i := range descriptors {
 		d := descriptors[i]
 		switch d.MediaType {
 		case ocispec.MediaTypeImageManifest, "application/vnd.docker.distribution.manifest.v2+json":
-			if d.Platform != nil && d.Platform.OS == "linux" && d.Platform.Architecture == "amd64" {
+			if d.Platform != nil && d.Platform.OS == wantOS && d.Platform.Architecture == wantArch {
 				return d, nil
 			}
 			if fallback == nil {
@@ -78,7 +81,7 @@ func selectManifest(ociDir string, descriptors []ocispec.Descriptor, indexes *[]
 				return ocispec.Descriptor{}, err
 			}
 			*indexes = append(*indexes, d)
-			return selectManifest(ociDir, nested.Manifests, indexes)
+			return selectManifest(ociDir, wantOS, wantArch, nested.Manifests, indexes)
 		}
 	}
 
