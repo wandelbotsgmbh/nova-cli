@@ -1,0 +1,10 @@
+overlay: 1.0.0
+info:
+  title: Broker spec fixes for oapi-codegen
+  version: 1.0.0
+actions:
+  # The broker declares the enum as oneOf + const without a type, which
+  # generates a union per value instead of a string.
+  - target: $.components.schemas.LeaseStatus
+    update:
+      type: string

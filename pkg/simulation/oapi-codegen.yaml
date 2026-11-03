@@ -1,0 +1,8 @@
+package: simulation
+generate:
+  models: true
+  client: true
+output: gen.simulation.go
+output-options:
+  overlay:
+    path: overlay.yaml

@@ -7,6 +7,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/docker/cli v29.9.2+incompatible
 	github.com/google/go-containerregistry v0.22.1
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-version v1.9.0
 	github.com/mark3labs/mcp-go v1.4.0
 	github.com/mitchellh/go-homedir v1.1.0
@@ -79,7 +80,6 @@ require (
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/s2a-go v0.1.8 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

@@ -1,0 +1,1171 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "streaming-session-broker",
+    "description": "Hands out time-based leases for GPU streaming sessions.",
+    "version": "1.27.0"
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/applications": {
+      "get": {
+        "operationId": "listApplications",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Page size; default 50, clamped to 1..=200.",
+            "schema": {
+              "description": "Page size; default 50, clamped to 1..=200.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 0
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "description": "Items to skip; default 0.",
+            "schema": {
+              "description": "Items to skip; default 0.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 0
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list envelope; `nextLink` only present when more items remain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collection_for_ApplicationInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/capacity/{profile}": {
+      "get": {
+        "operationId": "getCapacity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapacityResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Page size; default 50, clamped to 1..=200.",
+            "schema": {
+              "description": "Page size; default 50, clamped to 1..=200.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 0
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "description": "Items to skip; default 0.",
+            "schema": {
+              "description": "Items to skip; default 0.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 0
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list envelope; `nextLink` only present when more items remain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collection_for_Lease"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createSession",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/sessions/{id}": {
+      "get": {
+        "operationId": "getSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "renameSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Lease"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/sessions/{id}/extend": {
+      "post": {
+        "operationId": "extendSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Lease"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/sessions/{id}/suspend": {
+      "post": {
+        "operationId": "suspendSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Lease"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/sessions/{id}/resume": {
+      "post": {
+        "operationId": "resumeSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Lease"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/sessions/{id}/restart": {
+      "post": {
+        "operationId": "restartSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/configs": {
+      "get": {
+        "operationId": "listConfigs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "app",
+            "description": "Only configs of this application.",
+            "schema": {
+              "description": "Only configs of this application.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Page size; default 50, clamped to 1..=200.",
+            "schema": {
+              "description": "Page size; default 50, clamped to 1..=200.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 0
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "description": "Items to skip; default 0.",
+            "schema": {
+              "description": "Items to skip; default 0.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 0
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list envelope; `nextLink` only present when more items remain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collection_for_ConfigRef"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/configs/{app}/{name}": {
+      "get": {
+        "operationId": "getConfig",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "putConfig",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteConfig",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "A NOVA access token or session token."
+      }
+    },
+    "schemas": {
+      "ApplicationInfo": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VersionInfo"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "versions"
+        ]
+      },
+      "CapacityResponse": {
+        "type": "object",
+        "properties": {
+          "free": {
+            "description": "How many more sessions of this profile the GPU quota holds right now\n (`0` when it is full). A snapshot shared with other teams' workloads,\n not a reservation. `null` where the broker counts no quota.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0
+          },
+          "gpu": {
+            "description": "The GPU a session of this profile gets, from its ApplicationProfile:\n the MIG slice's memory (`24GB`, see `GPU_SIZE_PATTERN`) or `GPU` for a\n whole one. `null` when\n the profile requests none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profile": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile"
+        ]
+      },
+      "Collection_for_ApplicationInfo": {
+        "description": "Paginated list envelope; `nextLink` only present when more items remain.",
+        "type": "object",
+        "properties": {
+          "nextLink": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApplicationInfo"
+            }
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "Collection_for_ConfigRef": {
+        "description": "Paginated list envelope; `nextLink` only present when more items remain.",
+        "type": "object",
+        "properties": {
+          "nextLink": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigRef"
+            }
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "Collection_for_Lease": {
+        "description": "Paginated list envelope; `nextLink` only present when more items remain.",
+        "type": "object",
+        "properties": {
+          "nextLink": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Lease"
+            }
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "ConfigFilter": {
+        "type": "object",
+        "properties": {
+          "app": {
+            "description": "Only configs of this application.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ConfigPath": {
+        "description": "Path `{app}/{name}` — a named struct so the OpenAPI spec documents both\n parameters (a `Path<(String, String)>` tuple gives aide no names).",
+        "type": "object",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "app",
+          "name"
+        ]
+      },
+      "ConfigRef": {
+        "description": "One saved config in the caller's list.",
+        "type": "object",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "app",
+          "name"
+        ]
+      },
+      "CreateSessionRequest": {
+        "type": "object",
+        "properties": {
+          "app": {
+            "description": "Application id as listed by the Applications API (e.g. `nova-x-isaac`).",
+            "type": "string"
+          },
+          "configName": {
+            "description": "Which of the user's saved configs to load into this session (and\n autosave back to). Defaults to `default`.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "minutes": {
+            "description": "Lease length in minutes; defaults to the configured initial length\n (120). Capped by config — handy for short test leases (`1`).",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint32",
+            "default": null,
+            "minimum": 0
+          },
+          "name": {
+            "description": "Display name for the session — cosmetic only, not unique; the id\n stays the identity.",
+            "type": "string"
+          },
+          "profile": {
+            "description": "Runtime profile (e.g. `isaac`).",
+            "type": "string"
+          },
+          "usdStageUri": {
+            "description": "Optional USD stage to load (`omniverse://…`).",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "version": {
+            "description": "Application version; defaults to the Streaming API's `default`.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "app",
+          "profile",
+          "name"
+        ]
+      },
+      "ExtendRequest": {
+        "type": "object",
+        "properties": {
+          "minutes": {
+            "description": "How many minutes to push the expiry out (e.g. `2880` = 48 h).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "minutes"
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "Lease": {
+        "type": "object",
+        "properties": {
+          "configName": {
+            "description": "Which of the user's saved configs this session loads and autosaves to.",
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "description": "When the lease runs out. Reaching it suspends the session; it does not\n delete anything.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "description": "Same as the streaming session id.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "Display name — cosmetic, not unique; the id stays the identity.",
+            "type": "string"
+          },
+          "startedAt": {
+            "description": "When the session's pod last started: its creation, a resume or a\n restart. How long the current start has been running.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LeaseStatus"
+          },
+          "suspendedAt": {
+            "description": "Set while the session is suspended. Also the clock for removal: a\n session suspended longer than the retention window is reaped for good.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "userId": {
+            "description": "Owner, from the token's `sub` claim.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "userId",
+          "name",
+          "configName",
+          "createdAt",
+          "startedAt",
+          "expiresAt",
+          "status"
+        ]
+      },
+      "LeaseStatus": {
+        "description": "A lease lives on its session's Deployment as annotations — it can't\n outlive the Deployment (removed on session teardown) and can't exist\n without one.",
+        "oneOf": [
+          {
+            "description": "The Deployment has no ready replicas yet.",
+            "type": "string",
+            "const": "pending"
+          },
+          {
+            "description": "The Deployment has at least one ready replica.",
+            "type": "string",
+            "const": "active"
+          },
+          {
+            "description": "Scaled to zero deliberately, by the owner or by the reaper when the\n lease ran out. The lease, its id and its annotations survive; only the\n pod is gone, so the GPU is free. Deliberately not\n \"paused\": `DeploymentSpec.paused` already means a halted rollout whose\n pods keep running, while `JobSpec.suspend` means exactly this.",
+            "type": "string",
+            "const": "suspended"
+          }
+        ]
+      },
+      "PageParams": {
+        "description": "Pagination query params, accepted by every list endpoint.",
+        "type": "object",
+        "properties": {
+          "limit": {
+            "description": "Page size; default 50, clamped to 1..=200.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint",
+            "minimum": 0
+          },
+          "offset": {
+            "description": "Items to skip; default 0.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint",
+            "minimum": 0
+          }
+        }
+      },
+      "ProfileInfo": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ]
+      },
+      "ProfilePath": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile"
+        ]
+      },
+      "RenameRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "New display name — cosmetic, not unique.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "RouteInfo": {
+        "type": "object",
+        "properties": {
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StreamRoute"
+            }
+          }
+        },
+        "required": [
+          "routes"
+        ]
+      },
+      "SessionPath": {
+        "description": "Path `{id}` — a named struct so the OpenAPI spec documents the parameter\n (a bare `Path<Uuid>` can't tell aide the parameter is named `id`).",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "SessionResponse": {
+        "type": "object",
+        "properties": {
+          "condition": {
+            "description": "Upstream session condition, e.g. `ready`, `reconciling`, `failed`.",
+            "type": "string"
+          },
+          "configName": {
+            "description": "Which of the user's saved configs this session loads and autosaves to.",
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "description": "When the lease runs out. Reaching it suspends the session; it does not\n delete anything.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "description": "Same as the streaming session id.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "Display name — cosmetic, not unique; the id stays the identity.",
+            "type": "string"
+          },
+          "ready": {
+            "description": "Whether the streaming pod is up; `false` while it is still starting.",
+            "type": "boolean"
+          },
+          "routes": {
+            "description": "WebRTC connection routes (host → signaling/media/health ports).",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RouteInfo"
+            }
+          },
+          "startedAt": {
+            "description": "When the session's pod last started: its creation, a resume or a\n restart. How long the current start has been running.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LeaseStatus"
+          },
+          "suspendedAt": {
+            "description": "Set while the session is suspended. Also the clock for removal: a\n session suspended longer than the retention window is reaped for good.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "userId": {
+            "description": "Owner, from the token's `sub` claim.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "userId",
+          "name",
+          "configName",
+          "createdAt",
+          "startedAt",
+          "expiresAt",
+          "status",
+          "routes",
+          "condition",
+          "ready"
+        ]
+      },
+      "StreamRoute": {
+        "description": "One host route of a session (signaling/media/health).",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "destinationPort": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "sourcePort": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "description",
+          "protocol",
+          "sourcePort",
+          "destinationPort"
+        ]
+      },
+      "VersionInfo": {
+        "type": "object",
+        "properties": {
+          "profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProfileInfo"
+            }
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "profiles"
+        ]
+      }
+    }
+  }
+}
