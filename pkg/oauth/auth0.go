@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/cli/browser"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"golang.org/x/oauth2"
 )
 
@@ -73,6 +74,7 @@ func createConfig(clientId, auth0Domain string) *oauth2.Config {
 }
 
 func LoginWithRefreshToken(ctx context.Context, env AuthEnvironment, force bool) error {
+	ctx = withHTTPClient(ctx)
 	config := NewAuth0Config(env)
 
 	if !force {
@@ -112,6 +114,7 @@ func LoginWithRefreshToken(ctx context.Context, env AuthEnvironment, force bool)
 }
 
 func LoginWithProvidedRefreshToken(ctx context.Context, env AuthEnvironment, refreshToken string) error {
+	ctx = withHTTPClient(ctx)
 	config := NewAuth0Config(env)
 
 	// Create a token with the provided refresh token
@@ -127,4 +130,10 @@ func LoginWithProvidedRefreshToken(ctx context.Context, env AuthEnvironment, ref
 	}
 
 	return StoreToken(newToken, env)
+}
+
+// withHTTPClient makes the oauth2 library use the CLI's HTTP client (TLS setting,
+// User-Agent) for the device flow and token refreshes.
+func withHTTPClient(ctx context.Context) context.Context {
+	return context.WithValue(ctx, oauth2.HTTPClient, httpx.Client())
 }

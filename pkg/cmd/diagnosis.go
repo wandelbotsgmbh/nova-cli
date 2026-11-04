@@ -1,10 +1,9 @@
 package cmd
 
 import (
-	"net/http"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 )
 
@@ -22,7 +21,7 @@ var sendSlackCmd = &cobra.Command{
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		host := viper.GetString("host")
-		resp, err := http.Post("http://"+host+"/diagnose/sendslack", "application/json", nil)
+		resp, err := httpx.Client().Post("http://"+host+"/diagnose/sendslack", "application/json", nil)
 		if err != nil {
 			return err
 		}

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/omniverse/nucleus/connlib"
 )
 
@@ -808,10 +809,10 @@ func (c *Client) readFileOnce(ctx context.Context, path string, sink func() (io.
 // timeout, so large downloads aren't killed mid-stream. Idle connections
 // are kept per host so parallel downloads reuse them.
 var lftHTTPClient = &http.Client{
-	Transport: &http.Transport{
+	Transport: httpx.WithUserAgent(&http.Transport{
 		ResponseHeaderTimeout: 60 * time.Second,
 		MaxIdleConnsPerHost:   32,
-	},
+	}),
 }
 
 // maxErrorPageBytes bounds how much of a text/* response we read to report
@@ -920,9 +921,9 @@ func (c *Client) uploadLFT(ctx context.Context, path string, body io.Reader, siz
 	// Use a transport with dial/TLS/response-header timeouts but no overall timeout,
 	// so large file transfers aren't killed mid-stream.
 	httpClient := &http.Client{
-		Transport: &http.Transport{
+		Transport: httpx.WithUserAgent(&http.Transport{
 			ResponseHeaderTimeout: 60 * time.Second,
-		},
+		}),
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {

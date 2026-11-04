@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
 )
 
 // reset restores global TLS state so tests don't leak into each other.
@@ -40,9 +42,13 @@ func TestTransportTLSConfig(t *testing.T) {
 			reset(t)
 			SetInsecureSkipTLSVerify(tt.insecure)
 
-			tr, ok := Transport().(*http.Transport)
+			ua, ok := Transport().(userAgentTransport)
 			if !ok {
-				t.Fatalf("Transport() is not *http.Transport")
+				t.Fatalf("Transport() doesn't set the User-Agent")
+			}
+			tr, ok := ua.next.(*http.Transport)
+			if !ok {
+				t.Fatalf("Transport() doesn't wrap an *http.Transport")
 			}
 
 			got := tr.TLSClientConfig != nil && tr.TLSClientConfig.InsecureSkipVerify
@@ -106,3 +112,55 @@ func TestSetInsecurePatchesDefaultTransport(t *testing.T) {
 		t.Error("expected http.DefaultTransport to skip TLS verification")
 	}
 }
+
+func TestClientSetsUserAgent(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("User-Agent"))
+	}))
+	defer srv.Close()
+
+	resp, err := Client().Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req.Header.Set("User-Agent", "custom/1.0")
+	resp, err = Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	want := []string{version.UserAgent(), "custom/1.0"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("User-Agent = %q, want %q", got, want)
+	}
+	if req.Header.Get("User-Agent") != "custom/1.0" {
+		t.Error("the caller's request must not be modified")
+	}
+}
+
+func TestWithUserAgentDoesNotModifyRequest(t *testing.T) {
+	var seen string
+	rt := WithUserAgent(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		seen = r.Header.Get("User-Agent")
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+	}))
+	req, _ := http.NewRequest(http.MethodGet, "http://example.invalid", nil)
+	if _, err := rt.RoundTrip(req); err != nil {
+		t.Fatal(err)
+	}
+	if seen != version.UserAgent() {
+		t.Errorf("User-Agent = %q, want %q", seen, version.UserAgent())
+	}
+	if req.Header.Get("User-Agent") != "" {
+		t.Error("the caller's request must not be modified")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

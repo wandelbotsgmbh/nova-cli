@@ -12,11 +12,16 @@ func GetCliVersion() string {
 	return cliVersion
 }
 
+// UserAgent is the User-Agent the CLI sends with its HTTP requests.
+func UserAgent() string {
+	return "Wandelbots-Nova-CLI/" + cliVersion
+}
+
 // SetUserAgent sets the User-Agent header for the request.
 func SetUserAgent(ctx context.Context, req *http.Request) error {
 	if req == nil {
 		return nil
 	}
-	req.Header.Set("User-Agent", "Wandelbots-Nova-CLI/"+cliVersion)
+	req.Header.Set("User-Agent", UserAgent())
 	return nil
 }
