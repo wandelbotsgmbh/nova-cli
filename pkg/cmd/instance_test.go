@@ -233,3 +233,35 @@ func TestInstanceInfoRedacts(t *testing.T) {
 		t.Errorf("--show-secrets must print the token:\n%s", out)
 	}
 }
+
+func TestRegisterCloudInstanceNameTaken(t *testing.T) {
+	withConfig(t, "")
+	mustRun(t, "instance", "add", "abc", "--host", "192.168.1.10")
+	mustRun(t, "instance", "add", "abc-2", "--host", "192.168.1.11")
+
+	var errOut strings.Builder
+	if err := registerCloudInstance(&errOut, "abc", "abc.instance.wandelbots.io"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut.String(), `added cloud instance abc as "abc-3"`) {
+		t.Errorf("expected a note about the name, got %q", errOut.String())
+	}
+	r, _ := instances.Load(viper.GetViper())
+	got, ok := r.Get("abc-3")
+	if !ok || got.Kind != instances.KindCloud || got.ID != "abc" || r.Current != "abc-3" {
+		t.Fatalf("unexpected registry: %+v", r)
+	}
+	if h, _ := r.Get("abc"); h.Kind != instances.KindHost || h.Host != "192.168.1.10" {
+		t.Errorf("the host entry must stay untouched: %+v", h)
+	}
+
+	// registering the same cloud instance again updates its entry instead of adding abc-4
+	errOut.Reset()
+	if err := registerCloudInstance(&errOut, "abc", "new.instance.wandelbots.io"); err != nil {
+		t.Fatal(err)
+	}
+	r, _ = instances.Load(viper.GetViper())
+	if got, _ := r.Get("abc-3"); got.Host != "new.instance.wandelbots.io" || len(r.Instances) != 3 || errOut.Len() != 0 {
+		t.Errorf("unexpected registry after re-register: %+v (note %q)", r, errOut.String())
+	}
+}

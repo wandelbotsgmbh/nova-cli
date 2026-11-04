@@ -345,7 +345,7 @@ $ nova instance create --name my-instance --ttl 10
 			return err
 		}
 
-		err = registerCloudInstance(instance.InstanceId, instance.Host)
+		err = registerCloudInstance(cmd.ErrOrStderr(), instance.InstanceId, instance.Host)
 
 		fmt.Println("InstanceId:", instance.InstanceId, "\nHost:", instance.Host)
 
@@ -405,7 +405,7 @@ global --instance flag or the NOVA_INSTANCE environment variable instead.`,
 		if err != nil {
 			return err
 		}
-		return registerCloudInstance(instance.InstanceId, instance.Host)
+		return registerCloudInstance(cmd.ErrOrStderr(), instance.InstanceId, instance.Host)
 	},
 }
 
@@ -628,18 +628,20 @@ func saveRegistry(r *instances.Registry) error {
 	return r.Save(viper.GetViper())
 }
 
-// registerCloudInstance adds (or updates) a cloud instance in the local list under its
-// instance id and selects it.
-func registerCloudInstance(id, host string) error {
+// registerCloudInstance adds (or updates) a cloud instance in the local list and
+// selects it. A new entry is named after the instance id; if a local entry already has
+// that name, the first free name of <id>-2, <id>-3, … is used, so a created instance
+// always ends up in the list.
+func registerCloudInstance(errOut io.Writer, id, host string) error {
 	r, err := loadRegistry()
 	if err != nil {
 		return err
 	}
 	inst, ok := r.FindByID(instances.KindCloud, id)
 	if !ok {
-		inst = instances.Instance{Name: id, Kind: instances.KindCloud, ID: id}
-		if existing, taken := r.Get(id); taken {
-			return fmt.Errorf("%w: %q is a %s instance; remove it first with 'nova instance remove %s'", instances.ErrExists, id, existing.Kind, id)
+		inst = instances.Instance{Name: r.FreeName(id), Kind: instances.KindCloud, ID: id}
+		if inst.Name != id {
+			fmt.Fprintf(errOut, "the name %q is already used by another instance, added cloud instance %s as %q\n", id, id, inst.Name)
 		}
 	}
 	inst.Host = host

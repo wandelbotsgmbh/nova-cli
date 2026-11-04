@@ -287,6 +287,18 @@ func (r *Registry) Select(name string) error {
 	return nil
 }
 
+// FreeName returns base if no entry has that name, otherwise the first free name of
+// base-2, base-3, …
+func (r *Registry) FreeName(base string) string {
+	name := base
+	for n := 2; ; n++ {
+		if _, taken := r.Get(name); !taken {
+			return name
+		}
+		name = fmt.Sprintf("%s-%d", base, n)
+	}
+}
+
 // FindByID returns the entry of the given kind with the given remote ID.
 func (r *Registry) FindByID(kind Kind, id string) (Instance, bool) {
 	for _, i := range r.Instances {

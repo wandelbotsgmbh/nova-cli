@@ -251,3 +251,18 @@ func TestRedacted(t *testing.T) {
 		t.Error("empty token must stay empty")
 	}
 }
+
+func TestFreeName(t *testing.T) {
+	r := &Registry{}
+	if got := r.FreeName("abc"); got != "abc" {
+		t.Errorf("free name: got %q", got)
+	}
+	r.Instances = []Instance{{Name: "abc"}}
+	if got := r.FreeName("abc"); got != "abc-2" {
+		t.Errorf("taken once: got %q", got)
+	}
+	r.Instances = append(r.Instances, Instance{Name: "abc-2"})
+	if got := r.FreeName("abc"); got != "abc-3" {
+		t.Errorf("taken twice: got %q", got)
+	}
+}

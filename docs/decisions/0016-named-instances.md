@@ -39,6 +39,12 @@ pointed at one entry for a single invocation.
   | `host` | any reachable NOVA host (on-prem IPC, own server) | `nova instance add <name> --host <url>` |
   | `k8srun` | Kubernetes cluster with NOVA from a Wandelbots-internal service (Wandelbots network only), comes with a kubeconfig: for workflows that need the Kubernetes API (skaffold, helm, kubectl) when no device is at hand | `nova k8srun create` |
 
+  Cloud entries are named after their instance id; if a local entry already has that
+  name, the first free `<id>-2`, `<id>-3`, … is used, so a created instance always ends
+  up in the list and no existing entry is touched. `nova k8srun create` names its entry
+  `k8srun` (replacing the previous unnamed cluster) or `--name`; `nova k8srun prune`
+  removes entries whose cluster the service no longer knows.
+
   The kind says **where the instance runs**, never whether its robots are real; that
   stays a per-controller lookup (ADR-0009).
 - **Per-entry settings:** `host`, `cellname`, `id` (cloud/k8srun ID), `nucleus-host`,
