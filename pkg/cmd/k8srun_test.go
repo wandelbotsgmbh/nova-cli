@@ -16,27 +16,41 @@ import (
 )
 
 // fakeK8sRunService hands out clusters with increasing ids and records destroyed ones.
+// Lookups of ids in gone answer 404, ids in broken 500.
 type fakeK8sRunService struct {
 	mu        sync.Mutex
 	next      int
 	destroyed []string
+	gone      map[string]bool
+	broken    map[string]bool
 }
 
 func newFakeK8sRunService(t *testing.T) *fakeK8sRunService {
 	t.Helper()
-	f := &fakeK8sRunService{}
+	f := &fakeK8sRunService{gone: map[string]bool{}, broken: map[string]bool{}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		switch r.Method {
-		case http.MethodGet:
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/kubeconfig"):
+			id := strings.Split(strings.Trim(r.URL.Path, "/"), "/")[0]
+			switch {
+			case f.broken[id]:
+				w.WriteHeader(http.StatusInternalServerError)
+			case f.gone[id]:
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"msg":"The provided id is not assigned."}`))
+			default:
+				_, _ = w.Write([]byte(`"a2ViZWNvbmZpZw=="`))
+			}
+		case r.Method == http.MethodGet:
 			f.next++
 			_ = json.NewEncoder(w).Encode(virtualInstance{
 				Id:         fmt.Sprintf("id-%d", f.next),
 				Ip:         fmt.Sprintf("10.0.0.%d", f.next),
 				Kubeconfig: base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("kubeconfig-%d", f.next))),
 			})
-		case http.MethodPut:
+		case r.Method == http.MethodPut:
 			f.destroyed = append(f.destroyed, r.URL.Query().Get("instance_id"))
 		}
 	}))
@@ -135,5 +149,52 @@ func TestVirtualAlias(t *testing.T) {
 	}
 	if out, errOut, _ := runWithConfig(t, "k8srun", "list"); strings.Contains(out+errOut, "deprecated") {
 		t.Error("no deprecation note for 'nova k8srun'")
+	}
+}
+
+func TestK8sRunPrune(t *testing.T) {
+	withConfig(t, "")
+	fake := newFakeK8sRunService(t)
+	mustRun(t, "instance", "add", "lab", "--host", "192.168.1.10")
+	mustRun(t, "k8srun", "create", "--name", "alive")   // id-1
+	mustRun(t, "k8srun", "create", "--name", "expired") // id-2
+	mustRun(t, "k8srun", "create", "--name", "unknown") // id-3
+	fake.gone["id-2"] = true
+	fake.broken["id-3"] = true
+	mustRun(t, "instance", "select", "expired")
+	expiredDir, _ := instanceDir("expired")
+
+	out, _, err := runWithConfig(t, "k8srun", "prune", "--dry-run")
+	if err == nil || !strings.Contains(out, "would remove expired") {
+		t.Fatalf("dry run: out=%q err=%v", out, err)
+	}
+	if r, _ := instances.Load(viper.GetViper()); len(r.Instances) != 4 {
+		t.Fatalf("--dry-run must not change the list: %+v", r.Instances)
+	}
+
+	out, errOut, err := runWithConfig(t, "k8srun", "prune")
+	if err == nil || !strings.Contains(err.Error(), "could not be checked") {
+		t.Errorf("an unchecked cluster must fail the command, err = %v", err)
+	}
+	if !strings.Contains(out, "removed expired") || !strings.Contains(errOut, `keeping "unknown"`) {
+		t.Errorf("out=%q errOut=%q", out, errOut)
+	}
+	if !strings.Contains(errOut, `selected instance "expired" was removed`) {
+		t.Errorf("expected a note about the removed selection, got %q", errOut)
+	}
+	r, _ := instances.Load(viper.GetViper())
+	for _, name := range []string{"lab", "alive", "unknown"} {
+		if _, ok := r.Get(name); !ok {
+			t.Errorf("%q must be kept", name)
+		}
+	}
+	if _, ok := r.Get("expired"); ok || r.Current != "" {
+		t.Errorf("expired must be removed and unselected: %+v", r)
+	}
+	if _, err := os.Stat(expiredDir); !os.IsNotExist(err) {
+		t.Errorf("kubeconfig dir of expired must be removed, stat err = %v", err)
+	}
+	if len(fake.destroyed) != 0 {
+		t.Errorf("prune must not destroy clusters, destroyed %v", fake.destroyed)
 	}
 }

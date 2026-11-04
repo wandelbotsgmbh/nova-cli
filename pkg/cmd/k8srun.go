@@ -26,6 +26,7 @@ var (
 	virtualNovaVersion string
 	k8srunName         string
 	k8srunReplace      bool
+	k8srunPruneDryRun  bool
 )
 
 type virtualInstance struct {
@@ -226,11 +227,85 @@ Without a name, the targeted instance is destroyed; it must be a cluster.`,
 		},
 	}
 
+	prune := &cobra.Command{
+		Use:         "prune",
+		Args:        cobra.NoArgs,
+		Annotations: noTarget,
+		Short:       "Remove clusters that no longer exist from the local instance list",
+		Long: `Remove clusters that no longer exist (expired after 12 hours, or destroyed elsewhere)
+from the local instance list, together with their stored kubeconfig.
+
+Each cluster is looked up on the cluster service; an entry is only removed if the service
+answers that the cluster id is unknown. Entries that can't be checked (network error, any
+other answer) are kept.`,
+		Example: `$ nova k8srun prune --dry-run
+$ nova k8srun prune`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := loadRegistry()
+			if err != nil {
+				return err
+			}
+			errOut := cmd.ErrOrStderr()
+			var gone []string
+			unchecked := 0
+			for _, i := range r.Instances {
+				if i.Kind != instances.KindK8sRun {
+					continue
+				}
+				if i.ID == "" {
+					fmt.Fprintf(errOut, "skipping %q: no cluster id (use 'nova instance remove %s' to forget it)\n", i.Name, i.Name)
+					continue
+				}
+				exists, err := clusterExists(i.ID)
+				if err != nil {
+					fmt.Fprintf(errOut, "keeping %q: %v\n", i.Name, err)
+					unchecked++
+					continue
+				}
+				if !exists {
+					gone = append(gone, i.Name)
+				}
+			}
+
+			verb := "removed"
+			if k8srunPruneDryRun {
+				verb = "would remove"
+			}
+			for _, name := range gone {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", verb, name)
+			}
+			if len(gone) > 0 && !k8srunPruneDryRun {
+				selected := r.Current
+				for _, name := range gone {
+					if err := r.Remove(name); err != nil {
+						return err
+					}
+				}
+				if err := saveRegistry(r); err != nil {
+					return err
+				}
+				for _, name := range gone {
+					if dir, err := instanceDir(name); err == nil {
+						_ = os.RemoveAll(dir)
+					}
+				}
+				if selected != "" && r.Current == "" {
+					fmt.Fprintf(errOut, "the selected instance %q was removed; select another with 'nova instance select <name>'\n", selected)
+				}
+			}
+			if unchecked > 0 {
+				return fmt.Errorf("%d cluster(s) could not be checked and were kept", unchecked)
+			}
+			return nil
+		},
+	}
+
 	create.Flags().StringVarP(&virtualNovaVersion, "version", "v", "x.x.x", "Version of the service manager to install.")
 	create.Flags().StringVarP(&k8srunName, "name", "n", "", "Name of the cluster in the local instance list (default \"k8srun\", replacing the previous unnamed one)")
 	create.Flags().BoolVar(&k8srunReplace, "replace", false, "Destroy an existing cluster with the same name first")
+	prune.Flags().BoolVar(&k8srunPruneDryRun, "dry-run", false, "Only print the entries that would be removed")
 
-	for _, c := range []*cobra.Command{create, destroy, list} {
+	for _, c := range []*cobra.Command{create, destroy, list, prune} {
 		c.Deprecated = deprecated
 		group.AddCommand(c)
 	}
@@ -280,6 +355,25 @@ func requestCluster(version string) (virtualInstance, error) {
 		return instance, errors.New("no instance kubeconfig returned")
 	}
 	return instance, nil
+}
+
+// clusterExists asks the cluster service whether the cluster id is still assigned. Only
+// a 404 counts as gone; any other answer is an error, so callers never drop an entry
+// they couldn't verify. The kubeconfig in the answer is discarded.
+func clusterExists(id string) (bool, error) {
+	resp, err := httpx.Client().Get(clusterServiceURL + "/" + url.PathEscape(id) + "/kubeconfig")
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	}
+	return false, fmt.Errorf("cluster service answered with status code %d", resp.StatusCode)
 }
 
 func destroyVirtual(instanceId string) error {
