@@ -116,6 +116,7 @@ func LoginWithRefreshToken(ctx context.Context, env AuthEnvironment, force bool)
 // RefreshToken refreshes the stored login of env without any interaction; it fails if
 // there is none or it can't be refreshed.
 func RefreshToken(ctx context.Context, env AuthEnvironment) error {
+	ctx = withHTTPClient(ctx)
 	old, err := LoadTokenFor(env)
 	if err != nil {
 		return err
