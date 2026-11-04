@@ -15,8 +15,14 @@ var licenseCmd = &cobra.Command{
 var licenseActivateCmd = &cobra.Command{
 	Use:   "activate",
 	Short: "Activate the license",
-	Long:  `Activate the license for the current instance`,
-	Args:  cobra.NoArgs,
+	Long: `Activate the license for the current instance.
+
+The instance fetches the license with your portal login, which is sent to it as the
+owner. A cloud instance uses the login of its environment; for other instances it is
+the environment of your last 'nova login', unless --env or NOVA_ENV picks another.`,
+	Example: `$ nova login --env prod
+$ nova --instance lab-ipc --env prod license activate`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		host := currentHost()
 		return nova.ActivateLicense(host)

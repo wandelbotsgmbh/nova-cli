@@ -494,11 +494,11 @@ func ActivateLicenseV2Impl(host string) error {
 
 	token, err := oauth.LoadToken()
 	if err != nil {
-		return errNoTokenFound
+		return errNoLogin()
 	}
 
 	if token.OAuth2Token.RefreshToken == "" {
-		return errNoTokenFound
+		return errNoLogin()
 	}
 
 	body := apiv2.ActivateLicenseJSONRequestBody{

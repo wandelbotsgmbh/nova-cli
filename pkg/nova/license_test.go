@@ -63,3 +63,20 @@ func TestCapabilityErrorKeepsTheCause(t *testing.T) {
 		t.Errorf("expected the host's answer in the error, got %v", err)
 	}
 }
+
+func TestActivateLicenseWithoutLoginNamesTheEnvironment(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	oauth.SetActiveEnvironment(oauth.AuthStg)
+	t.Cleanup(func() { oauth.SetActiveEnvironment("") })
+	var activated bool
+	srv := unlicensedHost(t, &activated)
+
+	err := ActivateLicense(srv.URL)
+	if err == nil || !strings.Contains(err.Error(), "nova login --env stg") {
+		t.Errorf("expected a hint for the stg login, got %v", err)
+	}
+	if activated {
+		t.Error("no activation without a login")
+	}
+}
