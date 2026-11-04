@@ -42,9 +42,10 @@ archives:
     files:
       - none*
 
-# not published before; keep the asset list unchanged
+# sha256 of all archives; also the subject list for the build provenance
+# attestation (see .github/workflows/release.yml)
 checksum:
-  disable: true
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
 
 changelog:
   disable: true
