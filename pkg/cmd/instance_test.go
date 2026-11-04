@@ -265,3 +265,24 @@ func TestRegisterCloudInstanceNameTaken(t *testing.T) {
 		t.Errorf("unexpected registry after re-register: %+v (note %q)", r, errOut.String())
 	}
 }
+
+func TestInstanceFlagCompletion(t *testing.T) {
+	withConfig(t, "")
+	mustRun(t, "instance", "add", "lab-a", "--host", "192.168.1.10")
+	mustRun(t, "instance", "add", "lab-b", "--host", "192.168.1.11")
+	mustRun(t, "instance", "add", "other", "--host", "192.168.1.12")
+
+	for _, args := range [][]string{
+		{"__complete", "--instance", "lab"},
+		{"__complete", "app", "list", "--instance", "lab"},
+		{"__complete", "app", "list", "--instance=lab"},
+	} {
+		out := mustRun(t, args...)
+		if !strings.Contains(out, "lab-a") || !strings.Contains(out, "lab-b") || strings.Contains(out, "other") {
+			t.Errorf("%v: unexpected completion:\n%s", args, out)
+		}
+	}
+	if out := mustRun(t, "__complete", "cell", "list", "--env", ""); !strings.Contains(out, "stg") {
+		t.Errorf("--env completion:\n%s", out)
+	}
+}
