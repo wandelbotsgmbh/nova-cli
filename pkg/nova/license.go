@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	apiv1 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
@@ -17,6 +18,13 @@ var (
 	errNoTokenFound          = errors.New("no token found. please login first with 'nova login'")
 	errLicenseFeatureVersion = errors.New("license feature is only available with nova version starting from " + licenseSinceVersion)
 )
+
+// isLicenseNotInstalled reports whether a request failed because the host has no
+// license: it then answers every API request, the version too, with
+// 403 {"code":403,"message":"license not installed"}.
+func isLicenseNotInstalled(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "403") && strings.Contains(err.Error(), "license not installed")
+}
 
 func activateLicenseV1Impl(host string) error {
 	client, err := NewClientWithToken(host)

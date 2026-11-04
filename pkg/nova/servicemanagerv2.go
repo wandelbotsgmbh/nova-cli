@@ -481,8 +481,10 @@ func ActivateLicenseV2Impl(host string) error {
 		return err
 	}
 
+	// a host without a license doesn't tell its version, but answering like that means
+	// it has the license API
 	licenseNotSupported, err := IsCurrentVersionLessThan(host, licenseSinceVersion)
-	if err != nil {
+	if err != nil && !isLicenseNotInstalled(err) {
 		return err
 	}
 

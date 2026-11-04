@@ -426,7 +426,10 @@ var listAppsCmd = &cobra.Command{
 		cell := currentCell()
 
 		cellExists, err := nova.CellExists(host, cell)
-		if err != nil || !cellExists {
+		if err != nil {
+			return err
+		}
+		if !cellExists {
 			return fmt.Errorf("default cell '%s' not found", cell)
 		}
 
