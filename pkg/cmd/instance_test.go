@@ -197,6 +197,22 @@ func TestCloudOnlyCommandsRejectOtherKinds(t *testing.T) {
 	}
 }
 
+func TestLifetimeCommandsRejectHosts(t *testing.T) {
+	withConfig(t, "")
+	mustRun(t, "instance", "add", "lab", "--host", "10.0.0.1")
+	for _, args := range [][]string{
+		{"instance", "extend", "lab"},
+		{"instance", "keep-alive", "lab"},
+		{"instance", "keep-alive", "lab", "--", "true"},
+		{"instance", "keep-alive"},
+	} {
+		_, _, err := runWithConfig(t, args...)
+		if err == nil || !strings.Contains(err.Error(), "only works for cloud and k8srun instances") {
+			t.Errorf("nova %s: err = %v", strings.Join(args, " "), err)
+		}
+	}
+}
+
 func TestSelectAndRemove(t *testing.T) {
 	withConfig(t, "")
 	mustRun(t, "instance", "add", "lab", "--host", "10.0.0.1")

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
@@ -18,6 +19,9 @@ import (
 
 // name used by 'nova k8srun create' without --name
 const defaultK8sRunName = "k8srun"
+
+// k8srunMaxMinutes is the longest lifetime the cluster service grants (12 hours).
+const k8srunMaxMinutes = 720
 
 // clusterServiceURL is a variable so tests can point it to a fake service.
 var clusterServiceURL = "http://k8s.wabo.run/instance"
@@ -323,8 +327,7 @@ func requestCluster(version string) (virtualInstance, error) {
 	}
 
 	params := url.Values{}
-	// duration in minutes
-	params.Add("duration", "720")
+	params.Add("duration", strconv.Itoa(k8srunMaxMinutes))
 	params.Add("comment", "created by nova-cli")
 	// TODO in future we need some possibility to configure the version of the SM
 	params.Add("install_service_manager", "true")
@@ -377,7 +380,13 @@ func clusterExists(id string) (bool, error) {
 }
 
 func destroyVirtual(instanceId string) error {
-	content := fmt.Sprintf(`{"instance_id": "%s", "duration": %d}`, instanceId, 0)
+	return setClusterExpiry(instanceId, 0)
+}
+
+// setClusterExpiry lets the cluster expire in minutes (at most k8srunMaxMinutes) from
+// now; 0 releases it immediately.
+func setClusterExpiry(instanceId string, minutes int) error {
+	content := fmt.Sprintf(`{"instance_id": "%s", "duration": %d}`, instanceId, minutes)
 
 	baseUrl, err := url.Parse(clusterServiceURL)
 	if err != nil {
@@ -385,8 +394,7 @@ func destroyVirtual(instanceId string) error {
 	}
 
 	params := url.Values{}
-	// duration in minutes
-	params.Add("duration", "0")
+	params.Add("duration", strconv.Itoa(minutes))
 	params.Add("instance_id", instanceId)
 	baseUrl.RawQuery = params.Encode()
 
@@ -403,7 +411,7 @@ func destroyVirtual(instanceId string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("destroying cluster failed with status code %d", resp.StatusCode)
+		return fmt.Errorf("setting the cluster's expiry failed with status code %d", resp.StatusCode)
 	}
 
 	return nil

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -35,15 +36,25 @@ var argsAccepted bool
 func Execute() {
 	rejectUnknownSubcommands(rootCmd)
 	if err := executeRoot(); err != nil {
+		var exit exitCodeError
+		if errors.As(err, &exit) {
+			os.Exit(exit.code)
+		}
 		os.Exit(1)
 	}
 }
+
+// exitCodeError ends nova with the exit code of a command it ran, which has reported
+// its failure itself.
+type exitCodeError struct{ code int }
+
+func (e exitCodeError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
 
 // executeRoot runs the root command and prints its error, if any.
 func executeRoot() error {
 	argsAccepted = false
 	cmd, err := rootCmd.ExecuteC()
-	if err != nil {
+	if err != nil && !errors.As(err, new(exitCodeError)) {
 		cmd.PrintErrln(cmd.ErrPrefix(), err.Error())
 		if !argsAccepted {
 			cmd.PrintErrf("Run '%s --help' for usage.\n", cmd.CommandPath())
