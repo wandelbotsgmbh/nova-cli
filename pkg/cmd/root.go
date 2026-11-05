@@ -13,20 +13,43 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:               "nova",
-	Short:             "CLI for interacting with Wandelbots NOVA OS",
-	Long:              `CLI for interacting with Wandelbots NOVA OS, such as creating and installing apps.`,
-	PersistentPreRunE: resolveTarget,
+	Use:   "nova",
+	Short: "CLI for interacting with Wandelbots NOVA OS",
+	Long:  `CLI for interacting with Wandelbots NOVA OS, such as creating and installing apps.`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		argsAccepted = true
+		return resolveTarget(cmd, args)
+	},
+	// Execute prints errors without the usage, which would push the message out
+	// of view, and adds a hint to --help for invocation errors.
+	SilenceErrors: true,
+	SilenceUsage:  true,
 }
+
+// argsAccepted is set once flags and arguments were parsed and validated, so an
+// error after that comes from the command itself, not from how it was invoked.
+var argsAccepted bool
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	rejectUnknownSubcommands(rootCmd)
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := executeRoot(); err != nil {
 		os.Exit(1)
 	}
+}
+
+// executeRoot runs the root command and prints its error, if any.
+func executeRoot() error {
+	argsAccepted = false
+	cmd, err := rootCmd.ExecuteC()
+	if err != nil {
+		cmd.PrintErrln(cmd.ErrPrefix(), err.Error())
+		if !argsAccepted {
+			cmd.PrintErrf("Run '%s --help' for usage.\n", cmd.CommandPath())
+		}
+	}
+	return err
 }
 
 // insecureSkipTLSVerify is bound to the --insecure-skip-tls-verify flag only.
