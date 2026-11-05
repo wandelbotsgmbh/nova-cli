@@ -41,7 +41,7 @@ type Client struct {
 // the given host and cell.
 func NewClient(host, cell string) (*Client, error) {
 	if host == "" {
-		return nil, errors.New("host is not configured, set it with 'nova config set host <host>'")
+		return nil, errors.New("no instance selected: select one with 'nova instance select <name>' or pass --instance <name>")
 	}
 	if cell == "" {
 		cell = "cell"

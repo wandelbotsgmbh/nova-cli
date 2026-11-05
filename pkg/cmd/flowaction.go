@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/utils"
 	"golang.org/x/term"
 )
@@ -188,9 +188,8 @@ func createNovaflowActionProject(cmd *cobra.Command, name string) error {
 		cmd.Printf("Could not write the local development settings: %v\nRun 'nova app update-env' in %s once that is fixed.\n", err, outpath)
 	}
 
-	host := viper.GetString("host")
 	cmd.Printf("\nNext steps:\n  cd %s\n  uv sync\n  uv run pytest\n", name)
-	if strings.Contains(host, oauth.WABO_CLOUD_HOST) {
+	if currentTarget().Kind == instances.KindCloud {
 		cmd.Println("  nova app install .   # cloud instances don't accept NATS connections from outside, so deploy to run it")
 	} else {
 		cmd.Println("  uv run run.py        # registers the actions on the instance, they show up in 'nova flow open'")

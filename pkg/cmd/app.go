@@ -17,6 +17,7 @@ import (
 	"github.com/wandelbotsgmbh/nova-cli/pkg/docker"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/editor"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/generator"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/remote"
@@ -141,12 +142,12 @@ var installAppCmd = &cobra.Command{
 	Long:    installAppTxtLong,
 	Example: installAppTxtExample,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
+		host := currentHost()
 		if host == "" {
 			return fmt.Errorf("please provide the nova host via `nova config set host <host>`")
 		}
 
-		cellname := viper.GetString("cellname")
+		cellname := currentCell()
 
 		if appSetupSSHKey && !appCopyImage {
 			return fmt.Errorf("--setup-ssh-key only applies together with --copy-image")
@@ -404,8 +405,8 @@ var deleteAppCmd = &cobra.Command{
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeApp,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		cell := viper.GetString("cellname")
+		host := currentHost()
+		cell := currentCell()
 
 		appName := args[0]
 		err := nova.DeleteApp(host, cell, appName)
@@ -421,11 +422,14 @@ var listAppsCmd = &cobra.Command{
 	Short: "Lists all installed apps",
 	Long:  `Lists all installed apps."`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		cell := viper.GetString("cellname")
+		host := currentHost()
+		cell := currentCell()
 
 		cellExists, err := nova.CellExists(host, cell)
-		if err != nil || !cellExists {
+		if err != nil {
+			return err
+		}
+		if !cellExists {
 			return fmt.Errorf("default cell '%s' not found", cell)
 		}
 
@@ -447,8 +451,8 @@ var editAppCmd = &cobra.Command{
 	Short:             "edit an app configuration",
 	Long:              editAppTxtLong,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
-		cell := viper.GetString("cellname")
+		host := currentHost()
+		cell := currentCell()
 		appName := args[0]
 
 		app, err := nova.GetAppYaml(host, cell, appName)
@@ -480,7 +484,7 @@ func init() {
 	appCmd.AddCommand(deleteAppCmd)
 	appCmd.AddCommand(editAppCmd)
 	appCmd.AddCommand(updateEnvAppCmd)
-	updateEnvAppCmd.Flags().BoolVar(&appEnvReset, "reset", false, "Also replace NOVA_API, CELL_NAME and BASE_PATH (or the project type's equivalents) with the values of the configured instance, e.g. after 'nova config set host'.")
+	updateEnvAppCmd.Flags().BoolVar(&appEnvReset, "reset", false, "Also replace NOVA_API, CELL_NAME and BASE_PATH (or the project type's equivalents) with the values of the targeted instance, e.g. after 'nova instance select'.")
 
 	// TODO generate this flag somehow, with the available generators?
 	// Otherwise possible apps needs to be put into the readme by hand.
@@ -529,8 +533,8 @@ func createAppProject(appName string) error {
 		Timestamp:        fmt.Sprintf("%d", time.Now().UnixMilli()),
 		GeneratorVersion: cliVersion,
 		InstanceInformation: generator.InstanceInformation{
-			NovaApiHost: viper.GetString("host"),
-			CellName:    viper.GetString("cellname"),
+			NovaApiHost: currentHost(),
+			CellName:    currentCell(),
 		},
 	}
 
@@ -541,7 +545,8 @@ func createAppProject(appName string) error {
 		}
 	}
 
-	if token, err := oauth.LoadToken(); err == nil {
+	// the portal login only belongs to cloud instances (see oauth.SendsTokenTo)
+	if token, err := oauth.LoadToken(); err == nil && oauth.SendsTokenTo(currentHost()) {
 		spec.InstanceInformation.AccessToken = token.OAuth2Token.AccessToken
 	}
 
@@ -583,18 +588,16 @@ func writeAppEnv(cmd *cobra.Command, dir string, reset bool) error {
 		return fmt.Errorf("invalid .nova file: %w", err)
 	}
 
-	host := viper.GetString("host")
+	host := currentHost()
 	if host == "" {
-		return fmt.Errorf("no host configured, set it with 'nova config set host <host>'")
+		return fmt.Errorf("%w: select one with 'nova instance select <name>' or pass --instance <name>", instances.ErrNoTarget)
 	}
-	cell := viper.GetString("cellname")
-	if cell == "" {
-		cell = "cell"
-	}
+	cell := currentCell()
 
-	// only portal instances need a token; refresh it so the file holds a valid one
+	// only portal instances need a token (see oauth.SendsTokenTo); refresh it so the file
+	// holds a valid one
 	accessToken := ""
-	if layout.TokenKey != "" && strings.Contains(host, oauth.WABO_CLOUD_HOST) {
+	if layout.TokenKey != "" && oauth.SendsTokenTo(host) {
 		if err := oauth.RefreshTokenOrLogin(host); err != nil {
 			return err
 		}
@@ -926,7 +929,7 @@ func (app *DotNovaApp) verify() error {
 }
 
 func completeApp(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	apps, err := nova.ListApps(viper.GetString("host"), viper.GetString("cellname"))
+	apps, err := nova.ListApps(currentHost(), currentCell())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

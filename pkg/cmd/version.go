@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
 )
@@ -21,7 +20,7 @@ var versionCmd = &cobra.Command{
 		fmt.Println("cli version:", cliVersion)
 
 		if printVersionVerbose {
-			host := viper.GetString("host")
+			host := currentHost()
 			if novaVersion, err := nova.GetNovaVersion(host); err == nil {
 				updateAvailable := getUpdateAvailable(host)
 				cmd.Println("nova version:", novaVersion, updateAvailable)
@@ -36,7 +35,7 @@ var versionSetCmd = &cobra.Command{
 	Long:  `Sets the version of the NOVA OS instance (stable, next or a specific version)`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
+		host := currentHost()
 		return nova.SetNovaVersion(host, strings.TrimSpace(args[0]))
 	},
 }

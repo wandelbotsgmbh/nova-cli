@@ -7,7 +7,6 @@ import (
 
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 )
 
@@ -58,7 +57,7 @@ var downloadBackupCmd = &cobra.Command{
 			wg.Done()
 		}()
 
-		go nova.DownloadBackupWithProgress(viper.GetString("host"), outname, progress)
+		go nova.DownloadBackupWithProgress(currentHost(), outname, progress)
 
 		wg.Wait()
 
@@ -75,7 +74,7 @@ var restoreBackupCmd = &cobra.Command{
 	Long:  `Restore a backup for the current instance.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return nova.RestoreBackup(viper.GetString("host"), args[0])
+		return nova.RestoreBackup(currentHost(), args[0])
 	},
 }
 

@@ -24,6 +24,8 @@ import (
 
 var simulationCmd = &cobra.Command{
 	Use: "simulation",
+	// the broker is not an instance; --instance / NOVA_INSTANCE don't apply
+	Annotations: noTarget,
 	Example: `# log in once (device flow in the browser)
 nova simulation login
 

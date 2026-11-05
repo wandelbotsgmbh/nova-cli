@@ -3,13 +3,18 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/credentials"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/docker"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
 )
+
+var showSecretsConfigView bool
 
 var keys = map[string]struct{}{
 	"host":              {},
@@ -50,9 +55,62 @@ var setCmd = &cobra.Command{
 			return fmt.Errorf("invalid value %q for container-runtime: must be \"docker\" or \"podman\"", args[1])
 		}
 
+		if field := instanceField(args[0]); field != nil {
+			return setInstanceValue(cmd, args[0], args[1])
+		}
+
 		viper.Set(args[0], args[1])
 		return viper.WriteConfig()
 	},
+}
+
+// secretKeys are redacted by 'config view' unless --show-secrets is given.
+var secretKeys = map[string]struct{}{"nucleus-token": {}}
+
+// instanceField returns the entry field for a key stored per instance, or nil.
+func instanceField(key string) func(*instances.Instance) *string {
+	switch key {
+	case "host":
+		return func(i *instances.Instance) *string { return &i.Host }
+	case "cellname":
+		return func(i *instances.Instance) *string { return &i.CellName }
+	case "virtualid":
+		return func(i *instances.Instance) *string { return &i.ID }
+	case "nucleus-host":
+		return func(i *instances.Instance) *string { return &i.NucleusHost }
+	case "nucleus-token":
+		return func(i *instances.Instance) *string { return &i.NucleusToken }
+	}
+	return nil
+}
+
+// setInstanceValue writes a per-instance key to the targeted entry (honouring
+// --instance / NOVA_INSTANCE), or creates the entry "default" if there is none.
+func setInstanceValue(cmd *cobra.Command, key, value string) error {
+	r, err := loadRegistry()
+	if err != nil {
+		return err
+	}
+	t, _, err := r.Resolve(instanceFlag, os.Getenv(instances.EnvVar))
+	if err != nil {
+		return err
+	}
+	if t.Name == "" {
+		if len(r.Instances) > 0 {
+			return fmt.Errorf("%w: select one with 'nova instance select <name>' or pass --instance <name>", instances.ErrNoTarget)
+		}
+		t = instances.Instance{Name: instances.DefaultName, Kind: instances.KindHost}
+		if key == "host" {
+			t.Kind = instances.GuessKind(value, "")
+		}
+		r.Current = t.Name
+		fmt.Fprintf(cmd.ErrOrStderr(), "created instance %q\n", t.Name)
+	}
+	*instanceField(key)(&t) = value
+	if err := r.Put(t); err != nil {
+		return err
+	}
+	return saveRegistry(r)
 }
 
 var setRegistryAuthCmd = &cobra.Command{
@@ -69,15 +127,44 @@ var setRegistryAuthCmd = &cobra.Command{
 
 var viewCmd = &cobra.Command{
 	Use:   "view",
-	Short: "Modify the configuration of the Wandelbots NOVA CLI",
-	Long:  ``,
-	Run: func(cmd *cobra.Command, args []string) {
-		settings := viper.AllSettings()
-		for key, value := range settings {
-			if _, ok := keys[key]; ok {
-				cmd.Printf("%s: %v\n", key, value)
+	Short: "Shows the configuration of the Wandelbots NOVA CLI",
+	Long: `Shows the configuration of the Wandelbots NOVA CLI: global settings plus the settings
+of the targeted instance (selected, or set via --instance / NOVA_INSTANCE).
+Tokens are redacted unless --show-secrets is given.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		t, err := ensureTarget()
+		if err != nil {
+			return err
+		}
+		values := map[string]string{}
+		for key := range keys {
+			if key == "cellname" {
+				values[key] = t.Cell()
+			} else if field := instanceField(key); field != nil {
+				values[key] = *field(&t)
+			} else if viper.IsSet(key) {
+				values[key] = viper.GetString(key)
 			}
 		}
+		if t.Name != "" {
+			values["instance"] = fmt.Sprintf("%s (%s, from %s)", t.Name, t.Kind, targetSource)
+		}
+		values["env"] = fmt.Sprintf("%s (from %s)", portalEnvironment, envSource)
+
+		sorted := make([]string, 0, len(values))
+		for key := range values {
+			sorted = append(sorted, key)
+		}
+		sort.Strings(sorted)
+		out := cmd.OutOrStdout()
+		for _, key := range sorted {
+			value := values[key]
+			if _, secret := secretKeys[key]; secret && value != "" && !showSecretsConfigView {
+				value = instances.Redact
+			}
+			fmt.Fprintf(out, "%s: %v\n", key, value)
+		}
+		return nil
 	},
 }
 
@@ -86,6 +173,8 @@ func init() {
 	configCmd.AddCommand(setCmd)
 	configCmd.AddCommand(viewCmd)
 	configCmd.AddCommand(setRegistryAuthCmd)
+
+	viewCmd.Flags().BoolVar(&showSecretsConfigView, "show-secrets", false, "Print tokens instead of redacting them.")
 }
 
 func completeConfig(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

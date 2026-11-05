@@ -21,10 +21,14 @@ func shouldRetryAfterCapabilityRefresh(host string, previous apiCapability) (boo
 }
 
 func requireHostCapability(host string) (apiCapability, error) {
-	cap := getHostCapability(host)
-	if cap == capUnknown {
-		return capUnknown, fmt.Errorf("failed to detect API capability for host %s", host)
+	if val, ok := hostCapabilities.Load(host); ok {
+		return val.(apiCapability), nil
 	}
+	cap, err := detectHostCapability(host)
+	if err != nil {
+		return capUnknown, fmt.Errorf("failed to detect API capability for host %s: %w", host, err)
+	}
+	cacheHostCapability(host, cap)
 	return cap, nil
 }
 
@@ -604,6 +608,11 @@ func ListControllers(host string, cell string) ([]string, error) {
 // ActivateLicense activates a license, automatically trying V2 first, then V1
 func ActivateLicense(host string) error {
 	cap, err := requireHostCapability(host)
+	if isLicenseNotInstalled(err) {
+		// without a license the host refuses even the version request; only v2 hosts
+		// recent enough for the license API answer like that
+		return ActivateLicenseV2Impl(host)
+	}
 	if err != nil {
 		return err
 	}

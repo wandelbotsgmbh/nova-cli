@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 )
@@ -20,7 +19,7 @@ var sendSlackCmd = &cobra.Command{
 	// TODO slack is not available for the normal customers right now
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
+		host := currentHost()
 		resp, err := httpx.Client().Post("http://"+host+"/diagnose/sendslack", "application/json", nil)
 		if err != nil {
 			return err
@@ -36,7 +35,7 @@ var downloadZipCmd = &cobra.Command{
 	Short: "Download diagnostic information from Wandelbots NOVA OS",
 	Long:  `Download diagnostic information from Wandelbots NOVA OS`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		host := viper.GetString("host")
+		host := currentHost()
 		return nova.DownloadDiagnosisPackage(host)
 	},
 }

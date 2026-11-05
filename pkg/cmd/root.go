@@ -13,9 +13,10 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "nova",
-	Short: "CLI for interacting with Wandelbots NOVA OS",
-	Long:  `CLI for interacting with Wandelbots NOVA OS, such as creating and installing apps.`,
+	Use:               "nova",
+	Short:             "CLI for interacting with Wandelbots NOVA OS",
+	Long:              `CLI for interacting with Wandelbots NOVA OS, such as creating and installing apps.`,
+	PersistentPreRunE: resolveTarget,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -35,6 +36,19 @@ var insecureSkipTLSVerify bool
 
 func init() {
 	cobra.OnInitialize(initConfig)
+	// run the root's target resolution in addition to the pre-run hooks of subcommands
+	cobra.EnableTraverseRunHooks = true
+
+	rootCmd.PersistentFlags().StringVar(&instanceFlag, "instance", "",
+		"Name of the instance to work against for this invocation (overrides the selected instance; env: NOVA_INSTANCE)")
+	rootCmd.PersistentFlags().StringVar(&envFlag, "env", "",
+		"(Wandelbots internal) Portal environment for this invocation: prod, stg or dev (default: the environment of the cloud instance, else of the last 'nova login'; env: NOVA_ENV)")
+
+	// --instance only takes local entries (an unknown name is an error), so no portal lookup
+	_ = rootCmd.RegisterFlagCompletionFunc("instance", func(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return completeLocalInstance(cmd, nil, toComplete)
+	})
+	_ = rootCmd.RegisterFlagCompletionFunc("env", cobra.FixedCompletions([]string{"prod", "stg", "dev"}, cobra.ShellCompDirectiveNoFileComp))
 
 	rootCmd.PersistentFlags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", false,
 		"If true, the server's certificate will not be checked for validity (disables TLS verification for all requests)")

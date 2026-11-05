@@ -4,9 +4,20 @@
 
 * On mac, build with `./build.sh` — produces `./bin/nova`
 * After building, use `nova` in terminal for testing
-* Use `nova config view` for getting configured values (host, nucleus-token, etc.)
+* Use `nova config view` for getting configured values (host, nucleus-host, etc.); tokens are redacted, add `--show-secrets` only when you really need one
+* Test with a throwaway `HOME` (e.g. `HOME=$(mktemp -d) ./bin/nova …`) when a command writes the config, so the user's `~/.nova/config.yaml` stays untouched
 * The command reference is not committed: it lives on the CLI reference site (GitHub Pages, deployed by the release workflow for stable releases). Look up commands with `nova <command> --help`.
 * Site build: `hack/docsite/build.sh [version]` → `_site/`. Generates markdown into a temp dir (`go run . gendoc` alone writes to the gitignored `_docs/`) and renders it with `hack/docsite` (goldmark + template styled with `@wandelbots/design-tokens` / `@wandelbots/fonts`, vendored from npm at build time — bump the pinned versions in `build.sh`).
+
+## Instances (ADR `docs/decisions/0016-named-instances.md`)
+
+* `~/.nova/config.yaml` holds a list `instances` (name, `kind`: `cloud` | `host` | `k8srun`, host, cellname, id, nucleus-host, nucleus-token, kubeconfig) plus `current-instance`. Global settings (editor, image-registry, container-runtime, catalogs, portal login `token`) stay top-level.
+* Target resolution: `--instance <name>` → `NOVA_INSTANCE` → `current-instance`. An unknown name is an error, never a fallback. Resolving never writes the config. Use `--instance` instead of `nova instance select` when working in parallel with other sessions.
+* Code reads the target via `currentHost()` / `currentCell()` / `currentTarget()` (`pkg/cmd/target.go`), never `viper.GetString("host")`. Registry logic: `pkg/instances`. Commands that manage the registry themselves or don't talk to an instance (`nova simulation`) carry the `annotationNoTarget` annotation.
+* Legacy configs (bare top-level `host`) are migrated in memory into an entry `default` and persisted on the next write; legacy keys are kept and `host`/`cellname`/`virtualid` are mirrored from the selected entry for older CLI versions.
+* Portal logins are per environment (`logins.<env>`, `default-env`; legacy `token` mirrors the default). The environment of an invocation: `--env` → `NOVA_ENV` → cloud target's `env` → default → `prod`, set once via `oauth.SetActiveEnvironment` (`pkg/cmd/target.go`); `oauth.LoadToken()` returns that environment's login. The bearer token is only attached to `*.wandelbots.io` hosts (`oauth.SendsTokenTo`), never to `host`/`k8srun` instances.
+* `nova instance kubeconfig [name]` prints the kubeconfig path (k8srun: stored; host: fetched once over ssh via `pkg/remote`, or imported with `--kubeconfig <file|->`; a loopback server is rewritten to the host); `nova instance env [name]` prints `NOVA_INSTANCE`/`KUBECONFIG` exports for `eval`, in the syntax of the calling shell (parent process, then `$SHELL`; `--shell` overrides). Never print kubeconfig contents. Code: `pkg/cmd/kubeconfig.go`.
+* `nova instance add/remove` manage local entries; `create/delete/start/stop` are cloud-only. `nova k8srun` (formerly `nova virtual`) creates named Kubernetes clusters with a kubeconfig. It is public in the CLI but the service is Wandelbots-internal (Wandelbots network only); its purpose is workflows that need the Kubernetes API (skaffold, helm, kubectl) when no device is at hand — keep that framing in help texts. `nova k8srun prune` drops entries whose cluster is gone: only a 404 from `GET /instance/{id}/kubeconfig` counts (the service's OpenAPI is at `/openapi.json`), any other answer keeps the entry.
 
 ## App install: `--copy-image` (registry-less)
 

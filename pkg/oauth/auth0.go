@@ -79,7 +79,7 @@ func LoginWithRefreshToken(ctx context.Context, env AuthEnvironment, force bool)
 
 	if !force {
 		// Try to load existing token
-		if oldToken, err := LoadToken(); err == nil {
+		if oldToken, err := LoadTokenFor(env); err == nil && oldToken.OAuth2Token.RefreshToken != "" {
 			tokenSource := config.TokenSource(ctx, &oldToken.OAuth2Token)
 			if newToken, err := tokenSource.Token(); err == nil {
 				return StoreToken(newToken, env)
@@ -106,11 +106,32 @@ func LoginWithRefreshToken(ctx context.Context, env AuthEnvironment, force bool)
 		return err
 	}
 
-	if _, err := LoadToken(); err != nil {
+	if _, err := LoadTokenFor(env); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// RefreshToken refreshes the stored login of env without any interaction; it fails if
+// there is none or it can't be refreshed.
+func RefreshToken(ctx context.Context, env AuthEnvironment) error {
+	ctx = withHTTPClient(ctx)
+	old, err := LoadTokenFor(env)
+	if err != nil {
+		return err
+	}
+	if old.OAuth2Token.AccessToken == "" && old.OAuth2Token.RefreshToken == "" {
+		return fmt.Errorf("not logged in to the %s environment", env)
+	}
+	if old.OAuth2Token.Valid() {
+		return nil
+	}
+	newToken, err := NewAuth0Config(env).TokenSource(ctx, &old.OAuth2Token).Token()
+	if err != nil {
+		return fmt.Errorf("login of the %s environment expired, run 'nova login --env %s': %w", env, env, err)
+	}
+	return StoreToken(newToken, env)
 }
 
 func LoginWithProvidedRefreshToken(ctx context.Context, env AuthEnvironment, refreshToken string) error {
