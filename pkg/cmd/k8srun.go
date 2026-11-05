@@ -32,6 +32,7 @@ var (
 	virtualNovaVersion string
 	k8srunName         string
 	k8srunReplace      bool
+	k8srunNoSelect     bool
 	k8srunPruneDryRun  bool
 )
 
@@ -75,7 +76,8 @@ $ skaffold dev`,
 		Annotations: noTarget,
 		Short:       "Create a Kubernetes cluster with Wandelbots NOVA OS",
 		Long: `Create a Kubernetes cluster with Wandelbots NOVA OS, add it to the local instance list
-and select it.
+and select it (--no-select keeps the current selection, e.g. while other sessions or agents
+work against it).
 
 With --name, the cluster is added under that name; if the name is taken, the command
 fails unless --replace is given, which destroys the existing cluster of that name first.
@@ -140,7 +142,9 @@ $ nova k8srun create`,
 			}); err != nil {
 				return err
 			}
-			r.Current = name
+			if !k8srunNoSelect {
+				r.Current = name
+			}
 			if err := saveRegistry(r); err != nil {
 				return err
 			}
@@ -309,6 +313,7 @@ $ nova k8srun prune`,
 	create.Flags().StringVarP(&virtualNovaVersion, "version", "v", "x.x.x", "Version of the service manager to install.")
 	create.Flags().StringVarP(&k8srunName, "name", "n", "", "Name of the cluster in the local instance list (default \"k8srun\", replacing the previous unnamed one)")
 	create.Flags().BoolVar(&k8srunReplace, "replace", false, "Destroy an existing cluster with the same name first")
+	create.Flags().BoolVar(&k8srunNoSelect, "no-select", false, "Add the cluster to the local list without selecting it (target it with --instance)")
 	prune.Flags().BoolVar(&k8srunPruneDryRun, "dry-run", false, "Only print the entries that would be removed")
 
 	for _, c := range []*cobra.Command{create, destroy, list, prune} {
