@@ -21,6 +21,7 @@ type fakeK8sRunService struct {
 	mu        sync.Mutex
 	next      int
 	destroyed []string
+	comments  []string
 	gone      map[string]bool
 	broken    map[string]bool
 }
@@ -44,6 +45,7 @@ func newFakeK8sRunService(t *testing.T) *fakeK8sRunService {
 				_, _ = w.Write([]byte(`"a2ViZWNvbmZpZw=="`))
 			}
 		case r.Method == http.MethodGet:
+			f.comments = append(f.comments, r.URL.Query().Get("comment"))
 			f.next++
 			_ = json.NewEncoder(w).Encode(virtualInstance{
 				Id:         fmt.Sprintf("id-%d", f.next),
@@ -95,6 +97,20 @@ func TestK8sRunNamedSideBySide(t *testing.T) {
 	mustRun(t, "k8srun", "destroy", "sim-b")
 	if out := mustRun(t, "k8srun", "list"); strings.Contains(out, "sim-b") || !strings.Contains(out, "sim-a") {
 		t.Errorf("unexpected list:\n%s", out)
+	}
+}
+
+func TestK8sRunCommentNamesTheUser(t *testing.T) {
+	withConfig(t, "")
+	fake := newFakeK8sRunService(t)
+	mustRun(t, "k8srun", "create", "--name", "sim-a")
+
+	want := "created by nova-cli for " + localUser()
+	if len(fake.comments) != 1 || fake.comments[0] != want {
+		t.Errorf("comments %q, want [%q]", fake.comments, want)
+	}
+	if strings.HasPrefix(localUser(), "@") {
+		t.Errorf("no user name in %q", localUser())
 	}
 }
 

@@ -5,8 +5,7 @@ Nucleus servers over WebSocket — **no C++ library required**.
 
 ## Protocol
 
-The full wire protocol documentation (reverse-engineered from the Navigator JS
-bundles) lives in the internal repo
+The full wire protocol documentation lives in the internal repo
 [wb-int/nucleus-api](https://github.com/wb-int/nucleus-api) (Wandelbots access only).
 
 The client implements two wire protocols:
