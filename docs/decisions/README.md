@@ -41,6 +41,7 @@ distributes it.**
 | [0015](0015-mcp-gateway-to-the-instance.md) | `nova mcp` as gateway to MCP servers on the instance | proposed |
 | [0016](0016-named-instances.md) | Named instances and a per-invocation target (`--instance`, `NOVA_INSTANCE`) | proposed |
 | [0017](0017-instance-keep-alive.md) | `nova instance keep-alive` keeps an instance from expiring | proposed |
+| [0018](0018-nucleus-servers.md) | Nucleus servers are their own target (`--nucleus`, `NOVA_NUCLEUS`) | proposed |
 
 ## Glossary
 

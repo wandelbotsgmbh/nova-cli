@@ -138,3 +138,16 @@ pointed at one entry for a single invocation.
   - Write the config atomically with a lock: token refresh and `config set` rewrite the
     whole file and can still race between sessions.
   - `-o json` for `instance list/info` (ADR-0010).
+
+## Addendum 2026-11-05
+
+- **Nucleus settings move out of instance entries** into their own registry (ADR-0018).
+  `nucleus-host` and `nucleus-token` are no longer per-entry settings; the migration
+  above no longer copies them into `default`.
+- **`nova instance prune [--dry-run]`** removes entries whose instance is gone, as
+  `nova k8srun prune` does for clusters. Only a definite answer counts: for `cloud`
+  entries the portal's "instance not found" in the entry's environment, for `k8srun`
+  entries a 404 from the cluster service. Any other answer (no login for that
+  environment, network error, 5xx) keeps the entry. `host` entries are never pruned: an
+  unreachable host can't be told apart from one that is switched off. If the selected
+  entry is removed, no instance is selected. No prompts (ADR-0010).
