@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
@@ -23,6 +22,10 @@ For wandelbots internal development purposes, you can also specify the environme
 Each environment keeps its own login; the last one you log in to becomes the default for
 commands that don't target a cloud instance. Cloud instances remember their environment,
 and --env / NOVA_ENV override it for a single command.
+
+Without --env, 'nova login' logs in to the current environment: NOVA_ENV, else the one of
+the targeted cloud instance, else the default (prod on a fresh configuration). So logging
+in again never switches the default to another environment.
 `,
 	Example: `
 # Login via interactive device auth flow
@@ -39,27 +42,18 @@ nova login --env dev
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		name := authEnvironment
-		if name == "" {
-			name = os.Getenv(envVarName)
-		}
-		if name == "" {
-			name = string(oauth.AuthProd)
-		}
-		env, err := oauth.ParseEnvironment(name)
-		if err != nil {
-			return err
+		// the root's pre-run resolved the current environment (NOVA_ENV, the targeted
+		// cloud instance's, the default); login's own --env isn't the global flag
+		env := portalEnvironment
+		if authEnvironment != "" {
+			var err error
+			if env, err = oauth.ParseEnvironment(authEnvironment); err != nil {
+				return err
+			}
 		}
 		oauth.SetActiveEnvironment(env)
 
-		if len(authRefreshToken) > 0 {
-			// login via provided refresh token
-			err = oauth.LoginWithProvidedRefreshToken(ctx, env, authRefreshToken)
-		} else {
-			// login via device auth flow or refresh existing token if token already exists
-			err = oauth.LoginWithRefreshToken(ctx, env, true)
-		}
-		if err != nil {
+		if err := portalLogin(ctx, env, authRefreshToken); err != nil {
 			return err
 		}
 
@@ -71,6 +65,15 @@ nova login --env dev
 		cmd.Printf("Login successful (%s)\n", env)
 		return nil
 	},
+}
+
+// portalLogin logs in to env, with refreshToken if given, else with the stored login or
+// the device flow. Replaced in tests.
+var portalLogin = func(ctx context.Context, env oauth.AuthEnvironment, refreshToken string) error {
+	if refreshToken != "" {
+		return oauth.LoginWithProvidedRefreshToken(ctx, env, refreshToken)
+	}
+	return oauth.LoginWithRefreshToken(ctx, env, true)
 }
 
 var viewTokenCmd = &cobra.Command{
@@ -99,6 +102,6 @@ func init() {
 	loginCmd.AddCommand(viewTokenCmd)
 	rootCmd.AddCommand(loginCmd)
 
-	loginCmd.Flags().StringVarP(&authEnvironment, "env", "e", "", "For wandelbots internal development purposes. Environment to login into: dev, stg, prod (default: NOVA_ENV, else prod)")
+	loginCmd.Flags().StringVarP(&authEnvironment, "env", "e", "", "For wandelbots internal development purposes. Environment to login into: dev, stg, prod (default: NOVA_ENV, else the targeted cloud instance's, else the current default)")
 	loginCmd.Flags().StringVarP(&authRefreshToken, "token", "t", "", "Provide a refreshtoken to login with. This will skip the interactive login process and will optain a new access token using the provided refresh token. This is useful for CI/CD pipelines or other non-interactive environments.")
 }
