@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 )
@@ -25,7 +27,7 @@ var controllerListCmd = &cobra.Command{
 		}
 
 		for _, controller := range controllers {
-			cmd.Println(controller)
+			fmt.Fprintln(cmd.OutOrStdout(), controller)
 		}
 		return nil
 	},

@@ -73,7 +73,7 @@ var listCmd = &cobra.Command{
 			return err
 		}
 		for _, cell := range cells {
-			cmd.Println(cell)
+			fmt.Fprintln(cmd.OutOrStdout(), cell)
 		}
 		return nil
 	},

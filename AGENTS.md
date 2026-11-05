@@ -9,6 +9,13 @@
 * The command reference is not committed: it lives on the CLI reference site (GitHub Pages, deployed by the release workflow for stable releases). Look up commands with `nova <command> --help`.
 * Site build: `hack/docsite/build.sh [version]` → `_site/`. Generates markdown into a temp dir (`go run . gendoc` alone writes to the gitignored `_docs/`) and renders it with `hack/docsite` (goldmark + template styled with `@wandelbots/design-tokens` / `@wandelbots/fonts`, vendored from npm at build time — bump the pinned versions in `build.sh`).
 
+## Output (ADR `docs/decisions/0010-cli-contract.md`)
+
+* stdout carries only a command's data; progress, warnings and child-process output go to stderr. Write data with `fmt.Fprint*(cmd.OutOrStdout(), …)`: cobra's `cmd.Print*` writes to **stderr** (only use it for messages). Library packages write messages to `os.Stderr`.
+* `--debug` / `NOVA_DEBUG=1` (`pkg/debug`): logs target resolution, HTTP traffic (in `httpx`'s transport, so build HTTP clients with `httpx.Client()`/`httpx.Transport()`) and external commands (use `debug.Command` instead of `exec.Command`). Everything is redacted with `debug.Redact*`; never log a secret through `debug.Logf` unredacted.
+* Long-running tools whose progress the user should see (docker/podman build and push, ssh import) run through `execx.Run` (`pkg/execx`): output streams to stderr, and when stderr is no terminal (agents, CI) the error carries the last 20 lines, e.g. the failing build step. On a terminal the tool keeps its TTY.
+* Contract tests: `runAsProcess` in `pkg/cmd/output_contract_test.go` captures the real stdout/stderr (`runWithConfig` sets both writers and can't tell them apart).
+
 ## Instances (ADR `docs/decisions/0016-named-instances.md`)
 
 * `~/.nova/config.yaml` holds a list `instances` (name, `kind`: `cloud` | `host` | `k8srun`, host, cellname, id, nucleus-host, nucleus-token, kubeconfig) plus `current-instance`. Global settings (editor, image-registry, container-runtime, catalogs, portal login `token`) stay top-level.

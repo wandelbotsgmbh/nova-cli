@@ -5,9 +5,10 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 )
 
 const (
@@ -204,7 +205,7 @@ func waitForMutatingWebhookPods(timeout time.Duration) error {
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		out, err := exec.Command("kubectl", "get",
+		out, err := debug.Command("kubectl", "get",
 			"mutatingwebhookconfigurations.admissionregistration.k8s.io",
 			"kyverno-resource-mutating-webhook-cfg",
 			"-o", "jsonpath={.webhooks[*].rules[*].resources}").Output()
@@ -227,9 +228,9 @@ func waitForCRD(name string, timeout time.Duration) error {
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		if err := exec.Command("kubectl", "get", "crd", name).Run(); err == nil {
+		if err := debug.Command("kubectl", "get", "crd", name).Run(); err == nil {
 			// CRD exists; give the webhook a moment to register.
-			_ = exec.Command("kubectl", "-n", "kyverno", "wait", "--for=condition=Available",
+			_ = debug.Command("kubectl", "-n", "kyverno", "wait", "--for=condition=Available",
 				"deployment", "--all", "--timeout=600s").Run()
 			return nil
 		}

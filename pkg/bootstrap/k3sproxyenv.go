@@ -2,9 +2,10 @@ package bootstrap
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 )
 
 const (
@@ -149,17 +150,17 @@ func readK3sEnvFile(pullSecretNames []string) (string, error) {
 
 	// Remove any leftover pod from a previous interrupted run so the apply
 	// (fixed name) starts from a clean Succeeded/Failed phase.
-	_ = exec.Command("kubectl", "-n", k3sEnvReaderNamespace, "delete", "pod",
+	_ = debug.Command("kubectl", "-n", k3sEnvReaderNamespace, "delete", "pod",
 		k3sEnvReaderPodName, "--ignore-not-found").Run()
 
-	applyCmd := exec.Command("kubectl", "apply", "-f", "-")
+	applyCmd := debug.Command("kubectl", "apply", "-f", "-")
 	applyCmd.Stdin = strings.NewReader(manifest)
 	if out, err := applyCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("create k3s-env reader pod: %w\n%s", err, out)
 	}
 	// Best-effort cleanup regardless of the outcome below.
 	defer func() {
-		_ = exec.Command("kubectl", "-n", k3sEnvReaderNamespace, "delete", "pod",
+		_ = debug.Command("kubectl", "-n", k3sEnvReaderNamespace, "delete", "pod",
 			k3sEnvReaderPodName, "--ignore-not-found", "--wait=false").Run()
 	}()
 
@@ -167,7 +168,7 @@ func readK3sEnvFile(pullSecretNames []string) (string, error) {
 		return "", err
 	}
 
-	out, err := exec.Command("kubectl", "-n", k3sEnvReaderNamespace, "logs",
+	out, err := debug.Command("kubectl", "-n", k3sEnvReaderNamespace, "logs",
 		k3sEnvReaderPodName).Output()
 	if err != nil {
 		return "", fmt.Errorf("read k3s-env reader pod logs: %w", err)
@@ -184,7 +185,7 @@ func readK3sEnvFile(pullSecretNames []string) (string, error) {
 func waitForPodTerminal(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		out, err := exec.Command("kubectl", "-n", k3sEnvReaderNamespace, "get", "pod",
+		out, err := debug.Command("kubectl", "-n", k3sEnvReaderNamespace, "get", "pod",
 			k3sEnvReaderPodName, "-o", "jsonpath={.status.phase}").Output()
 		phase := strings.TrimSpace(string(out))
 		if err == nil {

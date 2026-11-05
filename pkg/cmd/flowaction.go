@@ -10,6 +10,8 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
@@ -168,7 +170,7 @@ func createNovaflowActionProject(cmd *cobra.Command, name string) error {
 	if err != nil {
 		return errors.New("creating action services needs git")
 	}
-	check := exec.Command(git, "ls-remote", "--exit-code", "-q", novaflowActionRepo, "HEAD")
+	check := debug.Command(git, "ls-remote", "--exit-code", "-q", novaflowActionRepo, "HEAD")
 	check.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := check.CombinedOutput(); err != nil {
 		return fmt.Errorf("can't read the NovaFlow action template %s: %s\n"+
@@ -178,7 +180,7 @@ func createNovaflowActionProject(cmd *cobra.Command, name string) error {
 	// copier asks for everything not given as flag, unless there is no
 	// terminal (agents, CI) or actions were given: then defaults apply
 	interactive := len(actions) == 0 && term.IsTerminal(int(os.Stdin.Fd()))
-	c := exec.Command(uvx, copierArgs(outpath, serviceName(name), appName, viper.GetString("image-registry"), actions, interactive)...)
+	c := debug.Command(uvx, copierArgs(outpath, serviceName(name), appName, viper.GetString("image-registry"), actions, interactive)...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("creating the project from %s failed: %w", novaflowActionTemplate, err)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/olekukonko/tablewriter"
@@ -62,7 +63,7 @@ nova catalog list mycatalog
 				return err
 			}
 			for _, entry := range e {
-				cmd.Println(entry.Name)
+				fmt.Fprintln(cmd.OutOrStdout(), entry.Name)
 			}
 			return nil
 		}
@@ -77,7 +78,7 @@ nova catalog list mycatalog
 			return err
 		}
 		for _, entry := range e {
-			cmd.Println(entry.Name)
+			fmt.Fprintln(cmd.OutOrStdout(), entry.Name)
 		}
 
 		// list entries from all catalogs
@@ -93,7 +94,7 @@ nova catalog list mycatalog
 					return err
 				}
 				for _, catEntry := range catEntries {
-					cmd.Println(entry.Name + "/" + catEntry.Name)
+					fmt.Fprintln(cmd.OutOrStdout(), entry.Name+"/"+catEntry.Name)
 				}
 			}
 		}
@@ -137,7 +138,7 @@ var catalogInstallCmd = &cobra.Command{
 
 		appName := m.App.Name
 		if m.App.Name == "" {
-			fmt.Println("WARN: no app name found in app manifest, using entry name as app name")
+			fmt.Fprintln(os.Stderr, "WARN: no app name found in app manifest, using entry name as app name")
 			appName = entryName
 		}
 
@@ -177,7 +178,7 @@ var catalogInfoCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Println(m.Description)
+		fmt.Fprintln(cmd.OutOrStdout(), m.Description)
 		return nil
 	},
 }
@@ -287,10 +288,10 @@ func installFromCatalog(host, cell, appName string, entry catalog.CatalogEntry) 
 	}
 
 	if updateApp {
-		fmt.Printf("App '%s' already installed. Updating it...\n", appName)
+		fmt.Fprintf(os.Stderr, "App '%s' already installed. Updating it...\n", appName)
 		return nova.UpdateAppConfigurationFromJson(host, cell, appName, appConfigRaw)
 	} else {
-		fmt.Printf("Installing app '%s'...\n", appName)
+		fmt.Fprintf(os.Stderr, "Installing app '%s'...\n", appName)
 		return nova.AddAppFromJson(host, cell, appName, appConfigRaw)
 	}
 }
@@ -349,7 +350,7 @@ func mapCatalogEntryToApiV1App(catalogApp catalog.CatalogEntryApp) ([]byte, erro
 		}
 
 		if catalogApp.Resources.MemoryLimit != nil {
-			fmt.Printf("WARN: MemoryLimit is not supported in NOVA API v1, "+
+			fmt.Fprintf(os.Stderr, "WARN: MemoryLimit is not supported in NOVA API v1, "+
 				"skipping this setting. If you need this feature, consider upgrade to nova >=%s\n", appUseNovaV2SinceVersion)
 		}
 	}

@@ -7,8 +7,11 @@ package bootstrap
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 )
@@ -154,7 +157,7 @@ func applyManifest(description, content string) error {
 	if err := ensureKubectl(); err != nil {
 		return err
 	}
-	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd := debug.Command("kubectl", "apply", "-f", "-")
 	cmd.Stdin = strings.NewReader(content)
 
 	var stderr bytes.Buffer
@@ -164,6 +167,6 @@ func applyManifest(description, content string) error {
 	if err != nil {
 		return fmt.Errorf("kubectl apply (%s): %w\n%s", description, err, stderr.String())
 	}
-	fmt.Print(string(output))
+	fmt.Fprint(os.Stderr, string(output))
 	return nil
 }

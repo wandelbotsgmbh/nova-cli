@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 )
@@ -40,7 +42,7 @@ var licenseGetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		cmd.Println(string(license))
+		fmt.Fprintln(cmd.OutOrStdout(), string(license))
 		return nil
 	},
 }

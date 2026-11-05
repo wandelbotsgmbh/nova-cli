@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 )
 
 // Exports the image via `<runtime> save` (docker or podman) and writes it
@@ -14,7 +15,7 @@ import (
 // layers, so compressing here typically shrinks the archive by more than half
 // before it goes over the wire.
 func SaveImageGzipped(runtime string, image string, destPath string) (err error) {
-	cmd := exec.Command(runtime, "save", image)
+	cmd := debug.Command(runtime, "save", image)
 	cmd.Stderr = os.Stderr
 
 	stdout, err := cmd.StdoutPipe()

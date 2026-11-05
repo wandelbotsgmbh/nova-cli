@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/execx"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 )
@@ -29,7 +30,7 @@ var errBuildxMissing = errors.New("the docker buildx plugin is not installed (in
 // "docker buildx build -t ..." fails with the misleading
 // "unknown shorthand flag: 't' in -t" from the docker root command (issue #46).
 func requireBuildx() error {
-	if err := exec.Command("docker", "buildx", "version").Run(); err != nil {
+	if err := debug.Command("docker", "buildx", "version").Run(); err != nil {
 		return errBuildxMissing
 	}
 	return nil
@@ -41,10 +42,11 @@ func (dockerRuntime) BuildImage(pathToDockerFile string, image string, platform 
 	}
 	// --load is needed for non-default builders (e.g. docker-container driver),
 	// otherwise the image only stays in the build cache and the push fails
-	cmd := exec.Command("docker", "buildx", "build", "--load", "-t", image, "--platform", platform, pathToDockerFile)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	cmd := debug.Command("docker", "buildx", "build", "--load", "-t", image, "--platform", platform, pathToDockerFile)
+	if err := execx.Run(cmd); err != nil {
+		return fmt.Errorf("docker build failed: %w", err)
+	}
+	return nil
 }
 
 func (dockerRuntime) BuildImageOCI(pathToDockerFile string, image string, platform string, ociDir string) error {
@@ -54,23 +56,20 @@ func (dockerRuntime) BuildImageOCI(pathToDockerFile string, image string, platfo
 		return err
 	}
 	output := fmt.Sprintf("type=oci,dest=%s,tar=false,name=%s", ociDir, image)
-	cmd := exec.Command("docker", "buildx", "build", "--platform", platform, "--output", output, pathToDockerFile)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	cmd := debug.Command("docker", "buildx", "build", "--platform", platform, "--output", output, pathToDockerFile)
+	if err := execx.Run(cmd); err != nil {
+		return fmt.Errorf("docker build failed: %w", err)
+	}
+	return nil
 }
 
 func (dockerRuntime) PushImage(image string) (string, error) {
-	cmd := exec.Command("docker", "push", image)
+	cmd := debug.Command("docker", "push", image)
 
+	// the digest is only printed, so the output is parsed as well
 	var buf bytes.Buffer
-	writer := io.MultiWriter(os.Stdout, &buf)
-
-	cmd.Stdout = writer
-	cmd.Stderr = writer
-	err := cmd.Run()
-	if err != nil {
-		return "", err
+	if err := execx.Run(cmd, &buf); err != nil {
+		return "", fmt.Errorf("docker push failed: %w", err)
 	}
 
 	val := buf.String()
@@ -91,7 +90,7 @@ func (dockerRuntime) BuildAndPushMultiPlatform(dockerfilePath, contextPath, imag
 		return err
 	}
 
-	cmd := exec.Command("docker", "buildx", "build",
+	cmd := debug.Command("docker", "buildx", "build",
 		"--builder", buildxBuilderName,
 		"--platform", "linux/amd64,linux/arm64",
 		"-f", dockerfilePath,
@@ -99,9 +98,7 @@ func (dockerRuntime) BuildAndPushMultiPlatform(dockerfilePath, contextPath, imag
 		"--push",
 		contextPath,
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := execx.Run(cmd); err != nil {
 		return fmt.Errorf("failed to build and push image: %w", err)
 	}
 	return nil
@@ -110,21 +107,19 @@ func (dockerRuntime) BuildAndPushMultiPlatform(dockerfilePath, contextPath, imag
 // ensureBuildxBuilder creates a docker-container buildx builder if it doesn't exist.
 func ensureBuildxBuilder() error {
 	// Check if our builder already exists
-	cmd := exec.Command("docker", "buildx", "inspect", buildxBuilderName)
+	cmd := debug.Command("docker", "buildx", "inspect", buildxBuilderName)
 	if err := cmd.Run(); err == nil {
 		return nil // builder exists
 	}
 
 	// Create a new builder with docker-container driver (supports multi-platform)
-	fmt.Printf("Creating buildx builder '%s' for multi-platform builds...\n", buildxBuilderName)
-	createCmd := exec.Command("docker", "buildx", "create",
+	fmt.Fprintf(os.Stderr, "Creating buildx builder '%s' for multi-platform builds...\n", buildxBuilderName)
+	createCmd := debug.Command("docker", "buildx", "create",
 		"--name", buildxBuilderName,
 		"--driver", "docker-container",
 		"--bootstrap",
 	)
-	createCmd.Stdout = os.Stdout
-	createCmd.Stderr = os.Stderr
-	if err := createCmd.Run(); err != nil {
+	if err := execx.Run(createCmd); err != nil {
 		return fmt.Errorf("failed to create buildx builder: %w", err)
 	}
 

@@ -88,7 +88,7 @@ var nucleusLsCmd = &cobra.Command{
 				if e.IsDir() && !strings.HasSuffix(name, "/") {
 					name += "/"
 				}
-				cmd.Println(name)
+				fmt.Fprintln(cmd.OutOrStdout(), name)
 			}
 		}
 
@@ -353,20 +353,20 @@ var nucleusStatCmd = &cobra.Command{
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
 
-		cmd.Printf("Path:     %s\n", entry.Path)
-		cmd.Printf("Type:     %s\n", entry.PathType)
-		cmd.Printf("Size:     %d\n", entry.Size)
+		fmt.Fprintf(cmd.OutOrStdout(), "Path:     %s\n", entry.Path)
+		fmt.Fprintf(cmd.OutOrStdout(), "Type:     %s\n", entry.PathType)
+		fmt.Fprintf(cmd.OutOrStdout(), "Size:     %d\n", entry.Size)
 		if entry.CreatedBy != "" {
-			cmd.Printf("Created:  %s by %s\n", entry.CreatedTime().Format(time.RFC3339), entry.CreatedBy)
+			fmt.Fprintf(cmd.OutOrStdout(), "Created:  %s by %s\n", entry.CreatedTime().Format(time.RFC3339), entry.CreatedBy)
 		}
 		if entry.ModifiedBy != "" {
-			cmd.Printf("Modified: %s by %s\n", entry.ModifiedTime().Format(time.RFC3339), entry.ModifiedBy)
+			fmt.Fprintf(cmd.OutOrStdout(), "Modified: %s by %s\n", entry.ModifiedTime().Format(time.RFC3339), entry.ModifiedBy)
 		}
 		if entry.Hash != "" {
-			cmd.Printf("Hash:     %s\n", entry.Hash)
+			fmt.Fprintf(cmd.OutOrStdout(), "Hash:     %s\n", entry.Hash)
 		}
 		if entry.Version > 0 {
-			cmd.Printf("Version:  %d\n", entry.Version)
+			fmt.Fprintf(cmd.OutOrStdout(), "Version:  %d\n", entry.Version)
 		}
 
 		return nil

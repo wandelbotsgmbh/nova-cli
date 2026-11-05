@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"net/http"
 
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
 )
 
@@ -67,13 +68,16 @@ type userAgentTransport struct {
 }
 
 func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.Header.Get("User-Agent") != "" {
-		return t.next.RoundTrip(req)
+	if req.Header.Get("User-Agent") == "" {
+		// a RoundTripper must not modify the caller's request
+		req = req.Clone(req.Context())
+		req.Header.Set("User-Agent", version.UserAgent())
 	}
-	// a RoundTripper must not modify the caller's request
-	r := req.Clone(req.Context())
-	r.Header.Set("User-Agent", version.UserAgent())
-	return t.next.RoundTrip(r)
+	// checked per request: some clients are built before the flags are parsed
+	if debug.Enabled() {
+		return debugRoundTrip(t.next, req)
+	}
+	return t.next.RoundTrip(req)
 }
 
 // Client returns a new *http.Client honouring the global TLS setting.

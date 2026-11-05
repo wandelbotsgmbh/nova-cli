@@ -247,7 +247,7 @@ func installAppViaCopy(host string, cellname string, appContext DotNovaAppContex
 	}
 
 	if err := copyIncremental(target, imageName, appContext, importCmd, rt); err != nil {
-		fmt.Printf("Incremental copy unavailable (%v); falling back to full image transfer.\n", err)
+		fmt.Fprintf(os.Stderr, "Incremental copy unavailable (%v); falling back to full image transfer.\n", err)
 		if err := copyWholeImage(target, imageName, appContext, importCmd, rt); err != nil {
 			return err
 		}
@@ -342,7 +342,7 @@ func copyIncremental(target remote.Target, imageName string, appContext DotNovaA
 	}
 
 	reused := len(fromStoreHex)
-	fmt.Printf("Reusing %d/%d layers already on the instance; transferring %s of %s.\n",
+	fmt.Fprintf(os.Stderr, "Reusing %d/%d layers already on the instance; transferring %s of %s.\n",
 		reused, len(blobs.Layers), utils.HumanBytes(sentBytes), utils.HumanBytes(totalBytes))
 
 	partial, err := os.CreateTemp("", "nova-app-image-*.tar.gz")
@@ -379,7 +379,7 @@ func copyWholeImage(target remote.Target, imageName string, appContext DotNovaAp
 	archive.Close()
 	defer os.Remove(archive.Name())
 
-	fmt.Printf("Saving image %s to local archive...\n", imageName)
+	fmt.Fprintf(os.Stderr, "Saving image %s to local archive...\n", imageName)
 	if err := docker.SaveImageGzipped(rt.Name(), imageName, archive.Name()); err != nil {
 		return err
 	}
@@ -438,7 +438,7 @@ var listAppsCmd = &cobra.Command{
 			return err
 		}
 		for _, app := range list {
-			cmd.Println(app)
+			fmt.Fprintln(cmd.OutOrStdout(), app)
 		}
 		return nil
 	},
@@ -566,7 +566,7 @@ func createAppProject(appName string) error {
 
 	// reset: the env files of the templates contain placeholders for the instance settings
 	if err := writeAppEnv(rootCmd, outpath, true); err != nil {
-		fmt.Printf("Could not write the local development settings: %v\nRun 'nova app update-env' in %s once that is fixed.\n", err, outpath)
+		fmt.Fprintf(os.Stderr, "Could not write the local development settings: %v\nRun 'nova app update-env' in %s once that is fixed.\n", err, outpath)
 	}
 	return nil
 }
@@ -684,10 +684,10 @@ func installApp(host, cell, completeImageName string, appContext DotNovaAppConte
 	}
 
 	if updateApp {
-		fmt.Printf("App '%s' already installed. Updating it...\n", appContext.NovaApp.Name)
+		fmt.Fprintf(os.Stderr, "App '%s' already installed. Updating it...\n", appContext.NovaApp.Name)
 		return nova.UpdateAppConfigurationFromJson(host, cell, appContext.NovaApp.Name, appConfigJSON)
 	} else {
-		fmt.Printf("Installing app '%s'...\n", appContext.NovaApp.Name)
+		fmt.Fprintf(os.Stderr, "Installing app '%s'...\n", appContext.NovaApp.Name)
 		return nova.AddAppFromJson(host, cell, appContext.NovaApp.Name, appConfigJSON)
 	}
 
@@ -808,7 +808,7 @@ func mapDotNovaAppToApiApp(appContext DotNovaAppContext, completeImageName strin
 	}
 
 	if appContext.NovaApp.Resources.MemoryLimit != "" {
-		fmt.Println("WARN: Memory limit not supported in NOVA v1 API")
+		fmt.Fprintln(os.Stderr, "WARN: Memory limit not supported in NOVA v1 API")
 	}
 
 	// Handle Storage
@@ -983,11 +983,11 @@ func installFromExistingFile(host, cellname, pathToFile string) error {
 	// Note: The app is installed using the wrapper functions which automatically
 	// detect whether to use V2 or V1 API based on the Nova instance version
 	if alreadyInstalled {
-		fmt.Printf("App '%s' already installed. Updating it...\n", appName)
+		fmt.Fprintf(os.Stderr, "App '%s' already installed. Updating it...\n", appName)
 		return nova.UpdateAppConfigurationFromJson(host, cellname, appName, appJson)
 	}
 
-	fmt.Printf("Installing app '%s'...\n", appName)
+	fmt.Fprintf(os.Stderr, "Installing app '%s'...\n", appName)
 	return nova.AddAppFromJson(host, cellname, appName, appJson)
 }
 

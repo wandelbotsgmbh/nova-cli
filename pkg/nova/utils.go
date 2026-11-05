@@ -9,6 +9,7 @@ import (
 
 	apiv1 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova"
 	apiv2 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova/v2"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
 
@@ -61,7 +62,7 @@ func NewClientWithToken(host string) (*apiv1.ClientWithResponses, error) {
 
 	host = HostWithProtocol(host) + API_BASE_V1
 
-	client, err := apiv1.NewClientWithResponses(host, apiv1.WithRequestEditorFn(oauth.SetAuthForClient), apiv1.WithRequestEditorFn(version.SetUserAgent))
+	client, err := apiv1.NewClientWithResponses(host, apiv1.WithHTTPClient(httpx.Client()), apiv1.WithRequestEditorFn(oauth.SetAuthForClient), apiv1.WithRequestEditorFn(version.SetUserAgent))
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +79,7 @@ func NewV2ClientWithToken(host string) (*apiv2.ClientWithResponses, error) {
 
 	host = HostWithProtocol(host) + API_BASE_V2
 
-	client, err := apiv2.NewClientWithResponses(host, apiv2.WithRequestEditorFn(oauth.SetAuthForClient), apiv2.WithRequestEditorFn(version.SetUserAgent))
+	client, err := apiv2.NewClientWithResponses(host, apiv2.WithHTTPClient(httpx.Client()), apiv2.WithRequestEditorFn(oauth.SetAuthForClient), apiv2.WithRequestEditorFn(version.SetUserAgent))
 	if err != nil {
 		return nil, err
 	}

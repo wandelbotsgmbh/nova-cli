@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
@@ -54,6 +56,7 @@ func applyEnv(t instances.Instance) error {
 	}
 	oauth.SetActiveEnvironment(env)
 	portalEnvironment, envSource = env, src
+	debug.Logf("portal environment: %s (from %s)", env, src)
 	return nil
 }
 
@@ -121,6 +124,11 @@ func ensureTarget() (instances.Instance, error) {
 		return instances.Instance{}, err
 	}
 	target, targetSource, targetResolved = t, src, true
+	if src == instances.SourceNone {
+		debug.Logf("target: no instance selected")
+	} else {
+		debug.Logf("target: instance %q (from %s): kind %s, host %q, cell %q", t.Name, src, t.Kind, t.Host, t.Cell())
+	}
 	return target, nil
 }
 

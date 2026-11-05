@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/cli/browser"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
@@ -40,7 +41,7 @@ func NewAuth0Config(env AuthEnvironment) *oauth2.Config {
 	} else if env == AuthProd {
 		return createConfig(clientIdProd, auth0DomainProd)
 	}
-	fmt.Printf("warning: unknown auth environment '%s'", env)
+	fmt.Fprintf(os.Stderr, "warning: unknown auth environment '%s'\n", env)
 	return createConfig(clientIdProd, auth0DomainProd)
 }
 
@@ -93,8 +94,8 @@ func LoginWithRefreshToken(ctx context.Context, env AuthEnvironment, force bool)
 		return err
 	}
 
-	fmt.Println("Open the URL in the browser to get API access: ", deviceCodeResp.VerificationURIComplete)
-	fmt.Printf("Verify that your Device Verification Code \"%s\" is shown in the authentication dialog that opens in your browser\n", deviceCodeResp.UserCode)
+	fmt.Fprintln(os.Stderr, "Open the URL in the browser to get API access: ", deviceCodeResp.VerificationURIComplete)
+	fmt.Fprintf(os.Stderr, "Verify that your Device Verification Code \"%s\" is shown in the authentication dialog that opens in your browser\n", deviceCodeResp.UserCode)
 	browser.OpenURL(deviceCodeResp.VerificationURIComplete)
 
 	token, err := config.DeviceAccessToken(ctx, deviceCodeResp)

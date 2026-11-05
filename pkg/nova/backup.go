@@ -175,7 +175,7 @@ func RestoreBackup(host, filename string) error {
 	}
 
 	if isEqual, _ := IsCurrentVersionEqual(host, manifest.NovaVersion); !isEqual {
-		fmt.Println("Warning: You are restoring a backup to a different NOVA version than it was created with.")
+		fmt.Fprintln(os.Stderr, "Warning: You are restoring a backup to a different NOVA version than it was created with.")
 	}
 
 	reader := bytes.NewReader(data)

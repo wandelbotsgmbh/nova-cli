@@ -3,6 +3,7 @@ package docker
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -76,7 +77,7 @@ func newRuntime(name string) Runtime {
 	} else {
 		rt = dockerRuntime{}
 	}
-	fmt.Printf("Using container runtime: %s\n", rt.Name())
+	fmt.Fprintf(os.Stderr, "Using container runtime: %s\n", rt.Name())
 	if name == RuntimeNamePodman {
 		warnIfUnsupportedPodmanVersion()
 	}
