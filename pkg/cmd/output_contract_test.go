@@ -154,3 +154,25 @@ func TestNoDebugOutputByDefault(t *testing.T) {
 		t.Errorf("unexpected stderr output:\n%s", stderr)
 	}
 }
+
+// Without a selected instance, commands that need one say so instead of failing on
+// an empty URL ("Get \"http:///api/v2/system/version\": no Host in request URL").
+func TestNoInstanceSelectedError(t *testing.T) {
+	for _, args := range [][]string{{"app", "list"}, {"cell", "list"}, {"controller", "list"}, {"flow", "status"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			withConfig(t, "")
+			t.Setenv(debug.EnvVar, "")
+			_, stderr, err := runAsProcess(t, args...)
+			if err == nil {
+				t.Fatal("no error")
+			}
+			want := "Error: no instance selected: select one with 'nova instance select <name>'"
+			if !strings.HasPrefix(stderr, want) {
+				t.Errorf("stderr = %q, want it to start with %q", stderr, want)
+			}
+			if strings.Contains(stderr, "http://") {
+				t.Errorf("stderr leaks the empty URL: %q", stderr)
+			}
+		})
+	}
+}

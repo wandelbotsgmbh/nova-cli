@@ -1,10 +1,9 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 )
 
 var mcpCmd = &cobra.Command{
@@ -40,7 +39,7 @@ To stop the server, use Ctrl+C.
 	RunE: func(cmd *cobra.Command, args []string) error {
 		host := currentHost()
 		if host == "" {
-			return fmt.Errorf("error: no instance selected. Select one with 'nova instance select <name>' or register one with 'nova instance add <name> --host <url>'")
+			return nova.ErrNoInstance
 		}
 		return mcp.RunOpenAPIMCPServer(host)
 	},

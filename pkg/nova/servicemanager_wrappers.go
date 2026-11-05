@@ -21,6 +21,9 @@ func shouldRetryAfterCapabilityRefresh(host string, previous apiCapability) (boo
 }
 
 func requireHostCapability(host string) (apiCapability, error) {
+	if host == "" {
+		return capUnknown, ErrNoInstance
+	}
 	if val, ok := hostCapabilities.Load(host); ok {
 		return val.(apiCapability), nil
 	}
