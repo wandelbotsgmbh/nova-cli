@@ -41,7 +41,7 @@ func runNova(t *testing.T, args ...string) (string, error) {
 	rootCmd.SetOut(&out)
 	rootCmd.SetErr(&out)
 	rootCmd.SetArgs(args)
-	err := rootCmd.Execute()
+	err := executeRoot()
 	return out.String(), err
 }
 
@@ -141,6 +141,35 @@ func TestGroupTypoSuggestsSubcommand(t *testing.T) {
 	}
 	if !strings.Contains(out, "Error: "+want) {
 		t.Errorf("output does not contain the error:\n%s", out)
+	}
+}
+
+func TestCommandErrorOmitsUsage(t *testing.T) {
+	out, err := runNova(t, "instance", "select", "nosuchinstance")
+	if err == nil {
+		t.Fatalf("expected an error (exit 1), got none; output:\n%s", out)
+	}
+	if !strings.Contains(out, "Error: "+err.Error()) {
+		t.Errorf("output does not contain the error:\n%s", out)
+	}
+	if strings.Contains(out, "Usage:") || strings.Contains(out, "--help") {
+		t.Errorf("an error of the command itself should come without usage or hint:\n%s", out)
+	}
+}
+
+func TestInvocationErrorHintsAtHelp(t *testing.T) {
+	for _, args := range [][]string{
+		{"instance", "select", "--nosuchflag"},
+		{"instance", "select", "a", "b"},
+	} {
+		out, err := runNova(t, args...)
+		if err == nil {
+			t.Fatalf("%v: expected an error (exit 1), got none; output:\n%s", args, out)
+		}
+		want := "Error: " + err.Error() + "\nRun 'nova instance select --help' for usage.\n"
+		if out != want {
+			t.Errorf("%v: output = %q, want %q", args, out, want)
+		}
 	}
 }
 
