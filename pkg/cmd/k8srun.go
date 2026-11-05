@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/user"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -318,6 +320,20 @@ $ nova k8srun prune`,
 	return group
 }
 
+// localUser returns user@host of this machine, so the owner of a forgotten cluster can be
+// found; parts that can't be determined are left out or replaced by "unknown".
+func localUser() string {
+	name := ""
+	if u, err := user.Current(); err == nil {
+		name = u.Username
+	}
+	name = cmp.Or(name, os.Getenv("USER"), os.Getenv("USERNAME"), "unknown")
+	if host, err := os.Hostname(); err == nil && host != "" {
+		name += "@" + host
+	}
+	return name
+}
+
 func requestCluster(version string) (virtualInstance, error) {
 	var instance virtualInstance
 
@@ -328,7 +344,7 @@ func requestCluster(version string) (virtualInstance, error) {
 
 	params := url.Values{}
 	params.Add("duration", strconv.Itoa(k8srunMaxMinutes))
-	params.Add("comment", "created by nova-cli")
+	params.Add("comment", "created by nova-cli for "+localUser())
 	// TODO in future we need some possibility to configure the version of the SM
 	params.Add("install_service_manager", "true")
 	params.Add("service_manager_version", version)
