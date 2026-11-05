@@ -69,6 +69,8 @@ func resetFlags(c *cobra.Command) {
 	}
 	c.Flags().VisitAll(reset)
 	c.PersistentFlags().VisitAll(reset)
+	// forgets the position of '--' (ArgsLenAtDash)
+	c.Flags().Init(c.Flags().Name(), pflag.ContinueOnError)
 	for _, sub := range c.Commands() {
 		resetFlags(sub)
 	}

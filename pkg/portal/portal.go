@@ -174,8 +174,10 @@ func (p *Portal) GetInstance(instanceId string) (UserInstance, error) {
 		}
 	}
 
-	return UserInstance{}, errors.New("the given instance was not found")
+	return UserInstance{}, ErrInstanceNotFound
 }
+
+var ErrInstanceNotFound = errors.New("the given instance was not found")
 
 func (p *Portal) UpdateInstanceState(instanceId string, state StateUpdateState) error {
 	body := UpdateInstanceStateJSONRequestBody{
@@ -191,6 +193,20 @@ func (p *Portal) UpdateInstanceState(instanceId string, state StateUpdateState) 
 		return fmt.Errorf("failed to update instance state: %d %s", resp.StatusCode(), string(resp.Body))
 	}
 
+	return nil
+}
+
+// ExtendInstance pushes the expiry of a cloud instance out by the portal's extension
+// step; read the new expiry with GetInstance.
+func (p *Portal) ExtendInstance(instanceId string) error {
+	resp, err := p.client.ExtendInstanceWithResponse(context.Background(), instanceId)
+	if err != nil {
+		return err
+	}
+	// the spec declares 201, accept any success
+	if resp.StatusCode() < 200 || resp.StatusCode() > 299 {
+		return fmt.Errorf("failed to extend instance: %d %s", resp.StatusCode(), string(resp.Body))
+	}
 	return nil
 }
 
