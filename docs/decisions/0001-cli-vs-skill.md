@@ -37,6 +37,10 @@ issues), and workflows over single API calls through `nova api`.
   transcript, no tests.
 - **CLI commands for every workflow:** workflows that need judgment don't fit into flags;
   the CLI grows without bound.
+- **Code as the agent's action space** (CodeAct [S19], smolagents [S22]): the agent
+  writes Python that calls the API. Strong for composition, but it moves auth, protocols
+  and guard rails into generated code on every run; a shell with the CLI keeps that
+  composability (`&&`, pipes, `$(...)`) while the CLI owns the mechanics [S18][S23].
 
 ## Consequences
 

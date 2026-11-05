@@ -28,7 +28,7 @@ The kit lives in its own repo, **`nova-agent-kit`**.
 
 - Version drift between CLI and kit needs checks (ADR-0007).
 - **Visibility is decided per content, not per repo.** Some content depends on internal
-  infrastructure (e.g. `nova virtual` uses internal clusters, the dev Nucleus server) and
+  infrastructure (e.g. `nova k8srun` uses internal clusters, the dev Nucleus server) and
   must not ship in a public kit: either a separate internal plugin, or an internal repo.
 - Plugin names must not start with reserved prefixes (`claude-`, `anthropic-`,
   `anthropics-`, `cc-plugin-`) [S14].

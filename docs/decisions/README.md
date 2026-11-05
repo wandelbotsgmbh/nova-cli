@@ -133,8 +133,8 @@ the gateway (ADR-0015).
 
 ## Sources
 
-Checked October 2026. Vendor numbers are vendor-chosen examples. Sources marked † were
-not independently re-verified in review.
+Checked October 2026; S18 to S23 added November 2026. Vendor numbers are vendor-chosen
+examples. Sources marked † were not independently re-verified in review.
 
 - [S1] † Anthropic: Writing effective tools for agents. https://www.anthropic.com/engineering/writing-tools-for-agents
 - [S2] † Anthropic: Code execution with MCP. https://www.anthropic.com/engineering/code-execution-with-mcp
@@ -153,4 +153,10 @@ not independently re-verified in review.
 - [S15] CLI and function design: https://clig.dev/, https://cli.github.com/manual/gh_help_formatting, https://agents.md/, https://developers.openai.com/api/docs/guides/function-calling
 - [S16] † Authenticated API passthroughs: https://cli.github.com/manual/gh_api, https://gitlab.com/gitlab-org/cli/-/blob/main/docs/source/api/_index.md
 - [S17] Impeccable (one skill with reference files, generated adapters, CLI contract, harness matrix). https://github.com/pbakaus/impeccable
+- [S18] "CLI is All Agents Need", part 2 (agent-friendly CLI design: `--help` discovery, hints in errors, dry run plus `--confirm`, human approval out of band, large output to a file, exit codes, desire-path design). https://www.reddit.com/r/LocalLLaMA/comments/1rso48p/cli_is_all_agents_need_part_2_misconceptions/
+- [S19] CodeAct: Executable Code Actions Elicit Better LLM Agents (ICML 2024). https://arxiv.org/abs/2402.01030, https://github.com/xingyaoww/code-act
+- [S20] OpenAI: Harness engineering, leveraging Codex in an agent-first world (2026-02). https://openai.com/index/harness-engineering/
+- [S21] Anthropic: Effective harnesses for long-running agents (2025-11). https://www.anthropic.com/research/effective-harnesses-for-long-running-agents
+- [S22] Hugging Face smolagents (code-as-action agents). https://github.com/huggingface/smolagents
+- [S23] Lex Fridman Podcast #491 with Peter Steinberger (2026-02, "every MCP would be better as a CLI"). https://lexfridman.com/peter-steinberger-transcript
 - Malik et al.: MCP vs CLI for AI Agents (position paper). https://arxiv.org/html/2610.30157v1

@@ -92,7 +92,9 @@ Not the CLI. Physical safety at the cell:
   versioned with the API.
 - **`--read-only`** (flag, config or `NOVA_READ_ONLY=1`) blocks everything but the read
   list. Enabled by default in the kit.
-- **Severe writes need `--confirm=<name>`**, a guard against mistakes only.
+- **Severe writes need `--confirm=<name>`**, a guard against mistakes only. The split
+  matches agent CLI practice: a dry run or confirm flag catches mistakes the agent may
+  resolve itself, human authorization happens out of band [S18].
 - **Untrusted content:** catalog entries (from arbitrary catalog URLs), logs and resource
   names come from outside; the skill and MCP instructions treat them as data.
 

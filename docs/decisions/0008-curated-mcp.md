@@ -19,7 +19,8 @@ through it. Internal MCP work at Wandelbots independently chose curated tools in
 External precedents agree: GitHub's MCP server is hand-designed tools in toolsets [S7];
 Anthropic recommends a few workflow-level tools over one per endpoint [S1]. Clients
 (Claude Code, the OpenAI and Anthropic APIs) defer and search tools themselves [S3][S4],
-so a generated mirror mostly adds noise.
+so a generated mirror mostly adds noise. Practitioners increasingly prefer a CLI over an
+MCP server per tool for the same reason [S18][S23].
 
 ## Decision
 
