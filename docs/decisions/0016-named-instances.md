@@ -141,6 +141,12 @@ pointed at one entry for a single invocation.
 
 ## Addendum 2026-11-05
 
+- **`--no-select` on `instance create` and `k8srun create`.** Both select the new entry,
+  as before named instances, and scripts like `nova instance create && nova app install .`
+  rely on that. With `--no-select` the entry is only added, so a session that creates an
+  instance doesn't switch the target of other sessions on the same machine ("one
+  switches, the other silently follows", see Context); the new entry is targeted with
+  `--instance`. Agents working in parallel should pass it.
 - **Nucleus settings move out of instance entries** into their own registry (ADR-0018).
   `nucleus-host` and `nucleus-token` are no longer per-entry settings. Entries keep them
   for older binaries (the migration above still copies them into `default`), but the CLI

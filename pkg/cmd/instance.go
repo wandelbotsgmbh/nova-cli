@@ -23,6 +23,7 @@ var (
 	listVerboseInstances bool
 	listCloudInstances   bool
 	createNoWaitInstance bool
+	createNoSelect       bool
 	// timeout in seconds
 	timeoutCreateInstance       int
 	nameCreateInstanceCmd       string
@@ -304,12 +305,18 @@ var createInstancesCmd = &cobra.Command{
 	Annotations: noTarget,
 	Short:       "Creates a new cloud instance",
 	Long: `Creates a new cloud instance on portal.wandelbots.io, adds it to the local list
-(named after its instance id) and selects it.`,
+(named after its instance id) and selects it.
+
+With --no-select the selection stays as it is, e.g. while other sessions or agents work
+against the selected instance; target the new one with --instance <id>.`,
 	Example: `# create new instance with some name
 $ nova instance create --name my-instance
 
 # (internal) create instance with limited lifetime of 10 minutes
 $ nova instance create --name my-instance --ttl 10
+
+# create without changing the selected instance
+$ nova instance create --name my-instance --no-select
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		started := time.Now()
@@ -345,7 +352,7 @@ $ nova instance create --name my-instance --ttl 10
 			return err
 		}
 
-		err = registerCloudInstance(cmd.ErrOrStderr(), instance.InstanceId, instance.Host)
+		err = registerCloudInstance(cmd.ErrOrStderr(), instance.InstanceId, instance.Host, !createNoSelect)
 
 		fmt.Println("InstanceId:", instance.InstanceId, "\nHost:", instance.Host)
 
@@ -405,7 +412,7 @@ global --instance flag or the NOVA_INSTANCE environment variable instead.`,
 		if err != nil {
 			return err
 		}
-		return registerCloudInstance(cmd.ErrOrStderr(), instance.InstanceId, instance.Host)
+		return registerCloudInstance(cmd.ErrOrStderr(), instance.InstanceId, instance.Host, true)
 	},
 }
 
@@ -611,6 +618,7 @@ func init() {
 	createInstancesCmd.Flags().StringVar(&chartCreateInstanceCmd, "chart", "", "(Wandelbots Internal) If specified will override the default service-manager chart for the instance. If not specified, default from portal.wandelbots.io will be used.")
 	createInstancesCmd.Flags().StringVarP(&nameCreateInstanceCmd, "name", "n", "", "Name of the instance.")
 	createInstancesCmd.Flags().BoolVarP(&createNoWaitInstance, "no-wait", "w", false, "Do not wait for the instance to be in running state.")
+	createInstancesCmd.Flags().BoolVar(&createNoSelect, "no-select", false, "Add the instance to the local list without selecting it (target it with --instance)")
 	createInstancesCmd.Flags().IntVarP(&timeoutCreateInstance, "timeout", "t", defaultWaitTime, "Timeout in seconds for the instance to be in running state.")
 
 	listInstancesCmd.Flags().BoolVar(&listCloudInstances, "cloud", false, "List the instances on portal.wandelbots.io (previous output format).")
@@ -630,11 +638,11 @@ func saveRegistry(r *instances.Registry) error {
 	return r.Save(viper.GetViper())
 }
 
-// registerCloudInstance adds (or updates) a cloud instance in the local list and
-// selects it. A new entry is named after the instance id; if a local entry already has
+// registerCloudInstance adds (or updates) a cloud instance in the local list and,
+// with selectIt, selects it. A new entry is named after the instance id; if a local entry already has
 // that name, the first free name of <id>-2, <id>-3, … is used, so a created instance
 // always ends up in the list.
-func registerCloudInstance(errOut io.Writer, id, host string) error {
+func registerCloudInstance(errOut io.Writer, id, host string, selectIt bool) error {
 	r, err := loadRegistry()
 	if err != nil {
 		return err
@@ -651,7 +659,11 @@ func registerCloudInstance(errOut io.Writer, id, host string) error {
 	if err := r.Put(inst); err != nil {
 		return err
 	}
-	r.Current = inst.Name
+	if selectIt {
+		r.Current = inst.Name
+	} else {
+		fmt.Fprintf(errOut, "added cloud instance %q without selecting it; target it with --instance %s\n", inst.Name, inst.Name)
+	}
 	return saveRegistry(r)
 }
 

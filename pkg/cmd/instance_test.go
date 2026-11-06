@@ -264,7 +264,7 @@ func TestRegisterCloudInstanceNameTaken(t *testing.T) {
 	mustRun(t, "instance", "add", "abc-2", "--host", "192.168.1.11")
 
 	var errOut strings.Builder
-	if err := registerCloudInstance(&errOut, "abc", "abc.instance.wandelbots.io"); err != nil {
+	if err := registerCloudInstance(&errOut, "abc", "abc.instance.wandelbots.io", true); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(errOut.String(), `added cloud instance abc as "abc-3"`) {
@@ -281,12 +281,33 @@ func TestRegisterCloudInstanceNameTaken(t *testing.T) {
 
 	// registering the same cloud instance again updates its entry instead of adding abc-4
 	errOut.Reset()
-	if err := registerCloudInstance(&errOut, "abc", "new.instance.wandelbots.io"); err != nil {
+	if err := registerCloudInstance(&errOut, "abc", "new.instance.wandelbots.io", true); err != nil {
 		t.Fatal(err)
 	}
 	r, _ = instances.Load(viper.GetViper())
 	if got, _ := r.Get("abc-3"); got.Host != "new.instance.wandelbots.io" || len(r.Instances) != 3 || errOut.Len() != 0 {
 		t.Errorf("unexpected registry after re-register: %+v (note %q)", r, errOut.String())
+	}
+}
+
+// --no-select on create: other sessions keep their target.
+func TestRegisterCloudInstanceWithoutSelecting(t *testing.T) {
+	withConfig(t, "")
+	mustRun(t, "instance", "add", "lab", "--host", "192.168.1.10")
+
+	var errOut strings.Builder
+	if err := registerCloudInstance(&errOut, "abc", "abc.instance.wandelbots.io", false); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := instances.Load(viper.GetViper())
+	if got, ok := r.Get("abc"); !ok || got.Kind != instances.KindCloud {
+		t.Fatalf("abc not added: %+v", r)
+	}
+	if r.Current != "lab" {
+		t.Errorf("selection changed to %q, want lab", r.Current)
+	}
+	if !strings.Contains(errOut.String(), "--instance abc") {
+		t.Errorf("expected a hint how to target it, got %q", errOut.String())
 	}
 }
 

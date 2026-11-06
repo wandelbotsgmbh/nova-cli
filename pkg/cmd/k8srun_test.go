@@ -100,6 +100,21 @@ func TestK8sRunNamedSideBySide(t *testing.T) {
 	}
 }
 
+func TestK8sRunCreateNoSelect(t *testing.T) {
+	withConfig(t, "")
+	newFakeK8sRunService(t)
+	mustRun(t, "k8srun", "create", "--name", "sim-a")
+	mustRun(t, "k8srun", "create", "--name", "sim-b", "--no-select")
+
+	r, _ := instances.Load(viper.GetViper())
+	if _, ok := r.Get("sim-b"); !ok {
+		t.Fatalf("sim-b not added: %+v", r)
+	}
+	if r.Current != "sim-a" {
+		t.Errorf("selection changed to %q, want sim-a", r.Current)
+	}
+}
+
 func TestK8sRunCommentNamesTheUser(t *testing.T) {
 	withConfig(t, "")
 	fake := newFakeK8sRunService(t)
