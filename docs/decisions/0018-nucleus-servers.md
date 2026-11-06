@@ -58,7 +58,10 @@ and `nova nucleus` no longer resolves an instance.
   migration) and selects it. Setting a different host drops the entry's token.
   An explicit `--instance` with these keys is an error pointing to `--nucleus`: before
   this ADR it chose the entry the value went to, and silently writing another server
-  could store one server's token on another. `server add` selects the new server when none
+  could store one server's token on another. `NOVA_INSTANCE` has no effect (it is
+  ambient, e.g. from `nova instance env`); the command always names the server it wrote. Setting the host of another
+  entry is an error too, pointing to `server select` (re-hosting would drop a valid
+  token and duplicate that entry). `server add` selects the new server when none
   is selected, or with `--select` (as `instance add`).
 - **Credentials:** a token is only sent to the host of its entry (ADR-0006).
   `config view` and `server list` redact it unless `--show-secrets`.

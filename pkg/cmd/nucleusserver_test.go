@@ -92,6 +92,14 @@ func TestConfigSetNucleusKeys(t *testing.T) {
 	if _, _, err := runWithConfig(t, "--instance", "lab", "config", "set", "nucleus-token", "other"); err == nil || !strings.Contains(err.Error(), "--nucleus") {
 		t.Errorf("--instance with a Nucleus key: %v", err)
 	}
+	// NOVA_INSTANCE (ambient, from 'nova instance env') has no effect; the output names
+	// the server that was written
+	t.Setenv("NOVA_INSTANCE", "lab")
+	_, errOut, err := runWithConfig(t, "config", "set", "nucleus-token", "tok")
+	if err != nil || !strings.Contains(errOut, `set nucleus-token of Nucleus server "dev" (nucleus.dev.wandelbots.io)`) {
+		t.Errorf("NOVA_INSTANCE with a Nucleus key: %v %q", err, errOut)
+	}
+	t.Setenv("NOVA_INSTANCE", "")
 
 	r := loadServers(t)
 	if dev, ok := r.Get("dev"); !ok || r.Current != "dev" || dev.Token != "tok" {
@@ -105,12 +113,21 @@ func TestConfigSetNucleusKeys(t *testing.T) {
 	}
 
 	// a new host drops the token, it belongs to the old one
-	_, errOut, err := runWithConfig(t, "config", "set", "nucleus-host", "nucleus.wb.wandelbots.io")
+	_, errOut, err = runWithConfig(t, "config", "set", "nucleus-host", "nucleus.wb.wandelbots.io")
 	if err != nil || !strings.Contains(errOut, "was removed") {
 		t.Fatalf("change host: %v %q", err, errOut)
 	}
 	if dev, _ := loadServers(t).Get("dev"); dev.Token != "" || dev.Host != "nucleus.wb.wandelbots.io" {
 		t.Errorf("after host change: %+v", dev)
+	}
+
+	// the host of another entry: switch to that entry instead of re-hosting this one
+	mustRun(t, "nucleus", "server", "add", "other", "--host", "nucleus.other.wandelbots.io")
+	if _, _, err := runWithConfig(t, "config", "set", "nucleus-host", "https://nucleus.other.wandelbots.io/"); err == nil || !strings.Contains(err.Error(), "server select other") {
+		t.Errorf("host of another entry: %v", err)
+	}
+	if dev, _ := loadServers(t).Get("dev"); dev.Host != "nucleus.wb.wandelbots.io" {
+		t.Errorf("dev must stay unchanged: %+v", dev)
 	}
 }
 

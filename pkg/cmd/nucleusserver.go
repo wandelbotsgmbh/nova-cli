@@ -237,6 +237,11 @@ func setNucleusValue(cmd *cobra.Command, key, value string) error {
 	}
 	switch key {
 	case "nucleus-host":
+		if other, ok := r.FindByHost(value); ok && other.Name != s.Name {
+			// switching servers the old way: re-hosting this entry would drop a
+			// valid token and duplicate the other entry
+			return fmt.Errorf("the Nucleus server %q already has host %s: select it with 'nova nucleus server select %s' or use --nucleus %s", other.Name, value, other.Name, other.Name)
+		}
 		if s.Host != "" && !nucleusservers.SameHost(s.Host, value) && s.Token != "" {
 			// the token belongs to the old host (ADR-0006)
 			s.Token = ""
@@ -249,7 +254,12 @@ func setNucleusValue(cmd *cobra.Command, key, value string) error {
 	if err := r.Put(s); err != nil {
 		return err
 	}
-	return r.Save(viper.GetViper())
+	if err := r.Save(viper.GetViper()); err != nil {
+		return err
+	}
+	// the server isn't tied to the instance: always say which one was written
+	fmt.Fprintf(cmd.ErrOrStderr(), "set %s of Nucleus server %q (%s)\n", key, s.Name, s.Host)
+	return nil
 }
 
 func init() {
