@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/portal"
@@ -287,7 +288,7 @@ func (k *keeper) runWith(cmd *cobra.Command, command []string) error {
 		return err
 	}
 
-	child := exec.Command(command[0], command[1:]...)
+	child := debug.Command(command[0], command[1:]...)
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr()
 	// Ctrl-C reaches the child through the terminal's process group: survive it and wait
 	// for the child. SIGTERM is meant for nova, pass it on.

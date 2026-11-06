@@ -383,11 +383,11 @@ func SetNovaVersionV2Impl(host string, version string) error {
 			return err
 		}
 		if tmpVersion == "" {
-			fmt.Printf("latest version from channel '%s' already installed\n", version)
+			fmt.Fprintf(os.Stderr, "latest version from channel '%s' already installed\n", version)
 			return nil
 		}
 		targetVersion = tmpVersion
-		fmt.Printf("setting nova to target version %s...\n", targetVersion)
+		fmt.Fprintf(os.Stderr, "setting nova to target version %s...\n", targetVersion)
 	}
 
 	body := apiv2.UpdateNovaVersionJSONRequestBody{Channel: apiv2.ReleaseChannel(version)}

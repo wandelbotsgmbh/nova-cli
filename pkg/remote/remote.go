@@ -14,6 +14,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/execx"
 )
 
 // An ssh/scp destination.
@@ -43,9 +46,9 @@ func IsOpenSSHInstalled() bool {
 // scp's own progress meter is printed to the terminal.
 func CopyFile(t Target, localPath string, remotePath string) error {
 	args := scpArgs(t, localPath, remotePath)
-	cmd := exec.Command("scp", args...)
+	cmd := debug.Command("scp", args...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to copy %s to %s: %w", localPath, t.Host, err)
@@ -65,11 +68,9 @@ func scpArgs(t Target, localPath string, remotePath string) []string {
 // interactive prompts like sudo's password prompt work.
 func Run(t Target, command string, allocateTTY bool) error {
 	args := sshArgs(t, command, allocateTTY)
-	cmd := exec.Command("ssh", args...)
+	cmd := debug.Command("ssh", args...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return execx.Run(cmd)
 }
 
 func sshArgs(t Target, command string, allocateTTY bool) []string {
@@ -90,7 +91,7 @@ func sshArgs(t Target, command string, allocateTTY bool) []string {
 // stdout under a TTY) — see RemoteContentDigests for how that is handled.
 func RunCapture(t Target, command string) (string, error) {
 	args := sshArgs(t, command, false)
-	cmd := exec.Command("ssh", args...)
+	cmd := debug.Command("ssh", args...)
 	var out bytes.Buffer
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = &out
@@ -116,12 +117,12 @@ func CopyAndImportImage(opts ImportImageOptions, localArchivePath string) error 
 	// path (not filepath) keeps the remote path unix-style on windows builds
 	remotePath := path.Join(opts.RemoteDir, filepath.Base(localArchivePath))
 
-	fmt.Printf("Copying image archive to %s...\n", opts.Target.Host)
+	fmt.Fprintf(os.Stderr, "Copying image archive to %s...\n", opts.Target.Host)
 	if err := CopyFile(opts.Target, localArchivePath, remotePath); err != nil {
 		return err
 	}
 
-	fmt.Printf("Importing image into containerd on %s...\n", opts.Target.Host)
+	fmt.Fprintf(os.Stderr, "Importing image into containerd on %s...\n", opts.Target.Host)
 	if err := Run(opts.Target, importCommand(opts, remotePath), true); err != nil {
 		return fmt.Errorf("failed to import image on %s: %w", opts.Target.Host, err)
 	}
@@ -216,12 +217,12 @@ type IncrementalImportOptions struct {
 func CopyAndImportIncremental(opts IncrementalImportOptions, localPartialPath string) error {
 	remotePath := path.Join(opts.RemoteDir, filepath.Base(localPartialPath))
 
-	fmt.Printf("Copying missing layers to %s...\n", opts.Target.Host)
+	fmt.Fprintf(os.Stderr, "Copying missing layers to %s...\n", opts.Target.Host)
 	if err := CopyFile(opts.Target, localPartialPath, remotePath); err != nil {
 		return err
 	}
 
-	fmt.Printf("Reassembling and importing image on %s...\n", opts.Target.Host)
+	fmt.Fprintf(os.Stderr, "Reassembling and importing image on %s...\n", opts.Target.Host)
 	if err := Run(opts.Target, reassembleCommand(opts, remotePath), true); err != nil {
 		return fmt.Errorf("failed to import image on %s: %w", opts.Target.Host, err)
 	}

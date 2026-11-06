@@ -9,6 +9,8 @@ import (
 
 	apiv1 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova"
 	apiv2 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova/v2"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
 
@@ -51,9 +53,16 @@ func CellExists(host string, cell string) (bool, error) {
 	return false, nil
 }
 
+// ErrNoInstance is returned when a command needs an instance but none is targeted:
+// nothing selected, or an entry without host.
+var ErrNoInstance = fmt.Errorf("%w: select one with 'nova instance select <name>' (see 'nova instance list') or pass --instance <name>", instances.ErrNoTarget)
+
 // This creates a new client with already available token and/or basic auth.
 // If the host is some wabo cloud instance and no auth is available, it will return an error.
 func NewClientWithToken(host string) (*apiv1.ClientWithResponses, error) {
+	if host == "" {
+		return nil, ErrNoInstance
+	}
 	// Ensure the user is logged in
 	if err := oauth.RefreshTokenOrLogin(host); err != nil {
 		return nil, err
@@ -61,7 +70,7 @@ func NewClientWithToken(host string) (*apiv1.ClientWithResponses, error) {
 
 	host = HostWithProtocol(host) + API_BASE_V1
 
-	client, err := apiv1.NewClientWithResponses(host, apiv1.WithRequestEditorFn(oauth.SetAuthForClient), apiv1.WithRequestEditorFn(version.SetUserAgent))
+	client, err := apiv1.NewClientWithResponses(host, apiv1.WithHTTPClient(httpx.Client()), apiv1.WithRequestEditorFn(oauth.SetAuthForClient), apiv1.WithRequestEditorFn(version.SetUserAgent))
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +80,9 @@ func NewClientWithToken(host string) (*apiv1.ClientWithResponses, error) {
 // This creates a new client with already available token and/or basic auth.
 // If the host is some wabo cloud instance and no auth is available, it will return an error.
 func NewV2ClientWithToken(host string) (*apiv2.ClientWithResponses, error) {
+	if host == "" {
+		return nil, ErrNoInstance
+	}
 	// Ensure the user is logged in
 	if err := oauth.RefreshTokenOrLogin(host); err != nil {
 		return nil, err
@@ -78,7 +90,7 @@ func NewV2ClientWithToken(host string) (*apiv2.ClientWithResponses, error) {
 
 	host = HostWithProtocol(host) + API_BASE_V2
 
-	client, err := apiv2.NewClientWithResponses(host, apiv2.WithRequestEditorFn(oauth.SetAuthForClient), apiv2.WithRequestEditorFn(version.SetUserAgent))
+	client, err := apiv2.NewClientWithResponses(host, apiv2.WithHTTPClient(httpx.Client()), apiv2.WithRequestEditorFn(oauth.SetAuthForClient), apiv2.WithRequestEditorFn(version.SetUserAgent))
 	if err != nil {
 		return nil, err
 	}

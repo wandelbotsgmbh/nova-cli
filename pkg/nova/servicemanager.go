@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	apiv1 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova"
@@ -385,11 +386,11 @@ func setNovaVersionV1Impl(host string, version string) error {
 			return err
 		}
 		if tmpVersion == "" {
-			fmt.Printf("latest version from channel '%s' already installed\n", version)
+			fmt.Fprintf(os.Stderr, "latest version from channel '%s' already installed\n", version)
 			return nil
 		}
 		targetVersion = tmpVersion
-		fmt.Printf("setting nova to target version %s...\n", targetVersion)
+		fmt.Fprintf(os.Stderr, "setting nova to target version %s...\n", targetVersion)
 	}
 
 	body := apiv1.UpdateNovaVersionJSONRequestBody{Channel: apiv1.ReleaseChannel(version)}

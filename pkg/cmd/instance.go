@@ -354,16 +354,16 @@ $ nova instance create --name my-instance --no-select
 
 		err = registerCloudInstance(cmd.ErrOrStderr(), instance.InstanceId, instance.Host, !createNoSelect)
 
-		fmt.Println("InstanceId:", instance.InstanceId, "\nHost:", instance.Host)
+		fmt.Fprintln(cmd.OutOrStdout(), "InstanceId:", instance.InstanceId, "\nHost:", instance.Host)
 
 		if !createNoWaitInstance {
-			fmt.Println("Waiting for instance to be in running state...")
+			fmt.Fprintln(os.Stderr, "Waiting for instance to be in running state...")
 			// portal api just checks if the kustomization is done
 			if err := waitForInstanceRunning(p, instance.InstanceId, started); err != nil {
 				return err
 			}
 
-			fmt.Println("Waiting for core services to be ready...")
+			fmt.Fprintln(os.Stderr, "Waiting for core services to be ready...")
 			// now we need to check if all nova services are in running state
 			to := time.Duration(timeoutCreateInstance) * time.Second
 			if err := nova.WaitForAllRunning(instance.Host, started, to, checkInstanceStatusInterval); err != nil {
@@ -543,13 +543,13 @@ $ nova instance start instancename
 		}
 
 		if !createNoWaitInstance {
-			fmt.Println("Waiting for instance to be in running state...")
+			fmt.Fprintln(os.Stderr, "Waiting for instance to be in running state...")
 			// portal api just checks if the kustomization is done
 			if err := waitForInstanceRunning(p, instanceId, started); err != nil {
 				return err
 			}
 
-			fmt.Println("Waiting for core services to be ready...")
+			fmt.Fprintln(os.Stderr, "Waiting for core services to be ready...")
 			// now we need to check if all nova services are in running state
 			to := time.Duration(timeoutCreateInstance) * time.Second
 			if err := nova.WaitForAllRunning(instanceInfo.Host, started, to, checkInstanceStatusInterval); err != nil {

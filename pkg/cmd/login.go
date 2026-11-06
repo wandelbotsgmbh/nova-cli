@@ -90,7 +90,7 @@ If you were not logged in before, it will trigger the login process.`,
 		}
 
 		if token, err := oauth.LoadToken(); err == nil && token.OAuth2Token.AccessToken != "" {
-			fmt.Println(token.OAuth2Token.AccessToken)
+			fmt.Fprintln(cmd.OutOrStdout(), token.OAuth2Token.AccessToken)
 		} else {
 			return errors.New("failed to optain access token")
 		}

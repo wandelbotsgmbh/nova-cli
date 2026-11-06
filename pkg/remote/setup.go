@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 )
 
 // SetupSSHAccess prepares the target for password-free copy-image installs:
@@ -19,7 +21,7 @@ import (
 // is in place) and a single sudo password for the sudoers install; afterwards
 // installs run without any prompt.
 func SetupSSHAccess(t Target, ctrBinary string, useSudo bool) error {
-	fmt.Printf("Installing SSH public key on %s...\n", t.Host)
+	fmt.Fprintf(os.Stderr, "Installing SSH public key on %s...\n", t.Host)
 	if err := installSSHKey(t); err != nil {
 		return fmt.Errorf("failed to install ssh key: %w", err)
 	}
@@ -29,7 +31,7 @@ func SetupSSHAccess(t Target, ctrBinary string, useSudo bool) error {
 		return nil
 	}
 
-	fmt.Printf("Configuring passwordless sudo for %q on %s...\n", ctrBinary, t.Host)
+	fmt.Fprintf(os.Stderr, "Configuring passwordless sudo for %q on %s...\n", ctrBinary, t.Host)
 	if err := configureNopasswdSudo(t, ctrBinary); err != nil {
 		return fmt.Errorf("failed to configure passwordless sudo: %w", err)
 	}
@@ -46,9 +48,9 @@ func installSSHKey(t Target) error {
 	}
 
 	if _, err := exec.LookPath("ssh-copy-id"); err == nil {
-		cmd := exec.Command("ssh-copy-id", sshCopyIDArgs(t, pubKeyPath)...)
+		cmd := debug.Command("ssh-copy-id", sshCopyIDArgs(t, pubKeyPath)...)
 		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
+		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
 	}
@@ -93,9 +95,9 @@ func ensureLocalPublicKey() (string, error) {
 		return "", err
 	}
 	keyPath := filepath.Join(sshDir, "id_ed25519")
-	fmt.Println("No SSH key found; generating an ed25519 keypair...")
-	cmd := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-f", keyPath)
-	cmd.Stdout = os.Stdout
+	fmt.Fprintln(os.Stderr, "No SSH key found; generating an ed25519 keypair...")
+	cmd := debug.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-f", keyPath)
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return "", err
@@ -170,9 +172,9 @@ install -m 0440 -o root -g root "$t" /etc/sudoers.d/nova-cli`, shellQuote(b64))
 // any password from /dev/tty, so login prompts keep working.
 func runWithInput(t Target, command string, input string) error {
 	args := sshArgs(t, command, false)
-	cmd := exec.Command("ssh", args...)
+	cmd := debug.Command("ssh", args...)
 	cmd.Stdin = strings.NewReader(input)
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }

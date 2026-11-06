@@ -113,11 +113,11 @@ func Init(opts InitOptions) error {
 		return fmt.Errorf("failed to write %s: %w", MetaFileName, err)
 	}
 
-	fmt.Printf("Model initialized in %s\n", opts.OutputDir)
-	fmt.Printf("  Metadata:   %s\n", metaPath)
-	fmt.Printf("  Dockerfile: %s\n", dockerfilePath)
-	fmt.Printf("  Name:       %s\n", name)
-	fmt.Printf("  Version:    %s\n", version)
+	fmt.Fprintf(os.Stderr, "Model initialized in %s\n", opts.OutputDir)
+	fmt.Fprintf(os.Stderr, "  Metadata:   %s\n", metaPath)
+	fmt.Fprintf(os.Stderr, "  Dockerfile: %s\n", dockerfilePath)
+	fmt.Fprintf(os.Stderr, "  Name:       %s\n", name)
+	fmt.Fprintf(os.Stderr, "  Version:    %s\n", version)
 	return nil
 }
 
@@ -130,7 +130,7 @@ func BuildAndPush(projectPath, imageTag string, rt docker.Runtime) error {
 		return fmt.Errorf("no %s found in %s — run 'nova model init' first", DockerfileName, projectPath)
 	}
 
-	fmt.Printf("Building and pushing model image: %s\n", imageTag)
+	fmt.Fprintf(os.Stderr, "Building and pushing model image: %s\n", imageTag)
 
 	// The generated Dockerfile is FROM scratch + COPY only, so the arm64 leg
 	// needs no qemu/binfmt emulation.
@@ -138,7 +138,7 @@ func BuildAndPush(projectPath, imageTag string, rt docker.Runtime) error {
 		return fmt.Errorf("failed to build and push model image: %w", err)
 	}
 
-	fmt.Printf("\nModel image pushed successfully: %s\n", imageTag)
+	fmt.Fprintf(os.Stderr, "\nModel image pushed successfully: %s\n", imageTag)
 	return nil
 }
 
@@ -184,13 +184,13 @@ func resolveSource(source, providerName, outputDir string) (string, error) {
 		return "", fmt.Errorf("source '%s' is not a local directory and no provider could be determined: %w", source, err)
 	}
 
-	fmt.Printf("Downloading model from %s...\n", provider.Name())
+	fmt.Fprintf(os.Stderr, "Downloading model from %s...\n", provider.Name())
 	path, err := provider.DownloadModel(context.Background(), source, outputDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to download model: %w", err)
 	}
 
-	fmt.Printf("Model downloaded to: %s\n", path)
+	fmt.Fprintf(os.Stderr, "Model downloaded to: %s\n", path)
 	return path, nil
 }
 

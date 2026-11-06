@@ -9,7 +9,9 @@ import (
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -68,6 +70,10 @@ func executeRoot() error {
 // to the config file.
 var insecureSkipTLSVerify bool
 
+// debugFlag is bound to --debug only, like --insecure-skip-tls-verify: debug output
+// is for one invocation (or a session via NOVA_DEBUG), never persisted.
+var debugFlag bool
+
 func init() {
 	cobra.OnInitialize(initConfig)
 	// run the root's target resolution in addition to the pre-run hooks of subcommands
@@ -84,14 +90,19 @@ func init() {
 	})
 	_ = rootCmd.RegisterFlagCompletionFunc("env", cobra.FixedCompletions([]string{"prod", "stg", "dev"}, cobra.ShellCompDirectiveNoFileComp))
 
+	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false,
+		"Write diagnostic output to stderr: HTTP requests and responses, external commands, the resolved instance. Known secrets are redacted, but bodies (app environments, kubeconfigs) can still contain some: don't share the output unreviewed (env: "+debug.EnvVar+"=1)")
 	rootCmd.PersistentFlags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", false,
 		"If true, the server's certificate will not be checked for validity (disables TLS verification for all requests)")
 }
 
 func initConfig() {
+	debug.Enable(debugFlag || debug.EnabledByEnv())
+	debug.Logf("nova %s on %s/%s", version.GetCliVersion(), runtime.GOOS, runtime.GOARCH)
+
 	home, err := homedir.Dir()
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	configPath := home + "/.nova"
@@ -116,10 +127,11 @@ func initConfig() {
 
 	err = viper.ReadInConfig()
 	if err != nil {
-		fmt.Println("Can't read config:", err)
+		fmt.Fprintln(os.Stderr, "Can't read config:", err)
 		os.Exit(1)
 	}
 
+	debug.Logf("config: %s", viper.ConfigFileUsed())
 	httpx.SetInsecureSkipTLSVerify(insecureSkipTLSVerify)
 }
 
@@ -133,21 +145,21 @@ func createConfigFileIfMissing(configFile string, configPath string) {
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
 		// Config file not found; let's create it
 		if err := os.MkdirAll(configPath, configDirMode); err != nil {
-			fmt.Println(err)
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		f, err := os.OpenFile(configFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, configFileMode)
 		if err != nil {
-			fmt.Println("Can't create config:", err)
+			fmt.Fprintln(os.Stderr, "Can't create config:", err)
 			os.Exit(1)
 		}
 		if err := f.Close(); err != nil {
-			fmt.Println("Can't create config:", err)
+			fmt.Fprintln(os.Stderr, "Can't create config:", err)
 			os.Exit(1)
 		}
 		err = viper.WriteConfig()
 		if err != nil {
-			fmt.Println("Can't write config:", err)
+			fmt.Fprintln(os.Stderr, "Can't write config:", err)
 			os.Exit(1)
 		}
 	}

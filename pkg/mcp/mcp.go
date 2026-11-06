@@ -116,7 +116,7 @@ func RunOpenAPIMCPServer(host string) error {
 // generateToolsFromPaths creates MCP tools from OpenAPI paths.
 func generateToolsFromPaths(s *server.MCPServer, docModel *v3.Document, baseURL string) error {
 	if docModel.Paths == nil || docModel.Paths.PathItems == nil {
-		fmt.Println("Warning: No paths found in OpenAPI spec")
+		fmt.Fprintln(os.Stderr, "Warning: No paths found in OpenAPI spec")
 		return nil
 	}
 
@@ -132,7 +132,7 @@ func generateToolsFromPaths(s *server.MCPServer, docModel *v3.Document, baseURL 
 			}
 			tool, err := createToolForOperation(method, pathName, op)
 			if err != nil {
-				fmt.Printf("Error creating tool for %s %s: %v\n", method, pathName, err)
+				fmt.Fprintf(os.Stderr, "Error creating tool for %s %s: %v\n", method, pathName, err)
 				return
 			}
 

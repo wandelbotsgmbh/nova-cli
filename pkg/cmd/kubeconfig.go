@@ -7,11 +7,12 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
@@ -445,7 +446,7 @@ func parentProcessName() string {
 	if b, err := os.ReadFile("/proc/" + ppid + "/comm"); err == nil {
 		return string(b)
 	}
-	out, err := exec.Command("ps", "-o", "comm=", "-p", ppid).Output()
+	out, err := debug.Command("ps", "-o", "comm=", "-p", ppid).Output()
 	if err != nil {
 		return ""
 	}

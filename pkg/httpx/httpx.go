@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"net/http"
 
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
 )
 
@@ -38,22 +39,14 @@ func InsecureSkipTLSVerify() bool {
 	return insecureSkipTLSVerify
 }
 
-// Transport returns an http.RoundTripper honouring the global TLS setting and
-// setting the CLI's User-Agent. It clones http.DefaultTransport so that
-// connection pooling defaults are kept.
+// Transport returns an http.RoundTripper that sets the CLI's User-Agent on top of
+// http.DefaultTransport. All clients share its connection pool on purpose: a
+// transport per client opens a new connection per request, and a freshly created
+// instance's ingress refuses or drops new connections for a while (GOAWAY on the
+// first stream, which Go can't retry for a PUT/POST). --insecure-skip-tls-verify
+// patches http.DefaultTransport itself (SetInsecureSkipTLSVerify).
 func Transport() http.RoundTripper {
-	dt, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return WithUserAgent(http.DefaultTransport)
-	}
-	t := dt.Clone()
-	if insecureSkipTLSVerify {
-		if t.TLSClientConfig == nil {
-			t.TLSClientConfig = &tls.Config{}
-		}
-		t.TLSClientConfig.InsecureSkipVerify = true
-	}
-	return WithUserAgent(t)
+	return WithUserAgent(http.DefaultTransport)
 }
 
 // WithUserAgent wraps rt so that requests without a User-Agent get the CLI's.
@@ -67,13 +60,16 @@ type userAgentTransport struct {
 }
 
 func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.Header.Get("User-Agent") != "" {
-		return t.next.RoundTrip(req)
+	if req.Header.Get("User-Agent") == "" {
+		// a RoundTripper must not modify the caller's request
+		req = req.Clone(req.Context())
+		req.Header.Set("User-Agent", version.UserAgent())
 	}
-	// a RoundTripper must not modify the caller's request
-	r := req.Clone(req.Context())
-	r.Header.Set("User-Agent", version.UserAgent())
-	return t.next.RoundTrip(r)
+	// checked per request: some clients are built before the flags are parsed
+	if debug.Enabled() {
+		return debugRoundTrip(t.next, req)
+	}
+	return t.next.RoundTrip(req)
 }
 
 // Client returns a new *http.Client honouring the global TLS setting.

@@ -3,7 +3,9 @@
 - **Date:** 2026-10-31
 - **Status:** accepted
 - **Implementation:** in progress (#40: suggestions for unknown subcommands, flag
-  constraints; the rest not started)
+  constraints; data on stdout, messages on stderr, `--debug` / `NOVA_DEBUG`, output tail in
+  tool failures; `-o json`,
+  typed errors and exit codes not started)
 
 ## Context
 
@@ -17,14 +19,33 @@ stderr, exit codes and files written; golden tests replay it (as Impeccable's
 `CLI-CONTRACT.md` and `tests/oracle/` do [S17]).
 
 - **`-o json`** with a stable shape, first on `status`, `app list`, `cell list`,
-  `controller list`, `catalog list`. When stdout is not a TTY, stdout carries only data;
-  everything else goes to stderr [S10][S15]. gh-style field selection later
+  `controller list`, `catalog list`. gh-style field selection later
   (`--json` lists fields, `--json f1,f2` selects) [S15].
 - **Existing commands stay non-interactive.** `cell delete`, `app delete`,
   `instance delete`, `backup restore`, `version set` and `k8srun create` run without
   prompts today, and scripts rely on that. No new prompts. A preview by default plus
   `--confirm`, as agent-friendly CLI design recommends [S18], would break those scripts
   and needs its own ADR with a deprecation window.
+- **Data on stdout, everything else on stderr, always** (not only without a TTY):
+  progress, warnings, prompts and the output of child processes (docker, ssh, kubectl)
+  go to stderr, so `$(nova cell list)` and pipes get only the data [S10][S15]. Contract tests run
+  the commands like the real process (`runAsProcess` in `pkg/cmd/output_contract_test.go`).
+- **`--debug` / `NOVA_DEBUG=1`** writes diagnostics to stderr, prefixed `debug: `: the
+  resolved instance and portal environment, every HTTP request and response (headers,
+  first 4 KiB of text bodies) and every external command line. It catches what error
+  messages lose, e.g. ingress error pages served as HTTP 200. Known secrets (tokens,
+  passwords, cookies, `Authorization` headers, kubeconfig credentials, JWTs, sensitive
+  field and parameter names) are redacted, but only as best effort: bodies are logged as
+  they are otherwise, so an app's environment (`{"name": …, "value": …}`) or a bare
+  kubeconfig string can appear in clear. This is how `curl -v`, `kubectl -v=8` and
+  `GH_DEBUG=api` behave: the help text says so, the output itself carries no warning.
+  Not logging bodies at all was rejected: the bodies are what make the output useful. The env var lets an agent switch
+  it on once for a session; stdout is unchanged either way.
+- **Failures of external tools explain themselves.** When a docker/podman build or push or
+  the ssh image import fails and stderr is not a terminal, the error carries the last 20
+  lines of the tool's output (the failing step, the compiler error), so an agent finds the
+  cause next to the error instead of in a long, possibly truncated log. On a terminal the
+  tool keeps its TTY and interactive progress view.
 - **A refused or aborted action never exits 0**: a distinct non-zero exit code plus a
   typed error on stderr, e.g.
   `{"error": {"code": "CONFIRMATION_REQUIRED", "retryable": false, "hint": "pass --confirm=<cell>"}}`.

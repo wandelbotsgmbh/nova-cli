@@ -169,7 +169,7 @@ var flowOpenCmd = &cobra.Command{
 			return err
 		}
 		u := c.AppURL(novaflow.EditorApp) + "/"
-		cmd.Println(u)
+		fmt.Fprintln(cmd.OutOrStdout(), u)
 		return browser.OpenURL(u)
 	},
 }

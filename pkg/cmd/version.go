@@ -17,13 +17,13 @@ var versionCmd = &cobra.Command{
 	Long:  `Print the version of the NOVA CLI and the NOVA OS instance`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cliVersion := version.GetCliVersion()
-		fmt.Println("cli version:", cliVersion)
+		fmt.Fprintln(cmd.OutOrStdout(), "cli version:", cliVersion)
 
 		if printVersionVerbose {
 			host := currentHost()
 			if novaVersion, err := nova.GetNovaVersion(host); err == nil {
 				updateAvailable := getUpdateAvailable(host)
-				cmd.Println("nova version:", novaVersion, updateAvailable)
+				fmt.Fprintln(cmd.OutOrStdout(), "nova version:", novaVersion, updateAvailable)
 			}
 		}
 	},

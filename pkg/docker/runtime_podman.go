@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/execx"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 )
@@ -21,13 +23,13 @@ const minPodmanMajor, minPodmanMinor = 5, 4
 type podmanRuntime struct{}
 
 func warnIfUnsupportedPodmanVersion() {
-	out, err := exec.Command("podman", "version", "--format", "{{.Client.Version}}").Output()
+	out, err := debug.Command("podman", "version", "--format", "{{.Client.Version}}").Output()
 	if err != nil {
 		return
 	}
 	version := strings.TrimSpace(string(out))
 	if !isSupportedPodmanVersion(version) {
-		fmt.Printf("Warning: podman %s detected, nova is tested with podman >= %d.%d - older versions may misbehave\n", version, minPodmanMajor, minPodmanMinor)
+		fmt.Fprintf(os.Stderr, "Warning: podman %s detected, nova is tested with podman >= %d.%d - older versions may misbehave\n", version, minPodmanMajor, minPodmanMinor)
 	}
 }
 
@@ -55,28 +57,22 @@ func (podmanRuntime) Name() string {
 }
 
 func (podmanRuntime) BuildImage(pathToDockerFile string, image string, platform string) error {
-	cmd := exec.Command("podman", "build", "--platform", platform, "-t", image, pathToDockerFile)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("podman build failed: %w (on macOS/Windows, ensure the podman machine is running: 'podman machine start')", err)
+	cmd := debug.Command("podman", "build", "--platform", platform, "-t", image, pathToDockerFile)
+	if err := execx.Run(cmd); err != nil {
+		return fmt.Errorf("podman build failed (on macOS/Windows, ensure the podman machine is running: 'podman machine start'): %w", err)
 	}
 	return nil
 }
 
 func (podmanRuntime) BuildImageOCI(pathToDockerFile string, image string, platform string, ociDir string) error {
 	// build into podman's local storage, then export it as an OCI layout dir
-	build := exec.Command("podman", "build", "--platform", platform, "-t", image, pathToDockerFile)
-	build.Stdout = os.Stdout
-	build.Stderr = os.Stderr
-	if err := build.Run(); err != nil {
-		return fmt.Errorf("podman build failed: %w (on macOS/Windows, ensure the podman machine is running: 'podman machine start')", err)
+	build := debug.Command("podman", "build", "--platform", platform, "-t", image, pathToDockerFile)
+	if err := execx.Run(build); err != nil {
+		return fmt.Errorf("podman build failed (on macOS/Windows, ensure the podman machine is running: 'podman machine start'): %w", err)
 	}
 
-	save := exec.Command("podman", "save", "--format", "oci-dir", "-o", ociDir, image)
-	save.Stdout = os.Stdout
-	save.Stderr = os.Stderr
-	if err := save.Run(); err != nil {
+	save := debug.Command("podman", "save", "--format", "oci-dir", "-o", ociDir, image)
+	if err := execx.Run(save); err != nil {
 		return fmt.Errorf("podman save (oci-dir) failed: %w", err)
 	}
 	return nil
@@ -92,11 +88,9 @@ func (podmanRuntime) PushImage(image string) (string, error) {
 	digestFile.Close()
 	defer os.Remove(digestFile.Name())
 
-	cmd := exec.Command("podman", "push", "--digestfile", digestFile.Name(), image)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("podman push failed: %w (on macOS/Windows, ensure the podman machine is running: 'podman machine start')", err)
+	cmd := debug.Command("podman", "push", "--digestfile", digestFile.Name(), image)
+	if err := execx.Run(cmd); err != nil {
+		return "", fmt.Errorf("podman push failed (on macOS/Windows, ensure the podman machine is running: 'podman machine start'): %w", err)
 	}
 
 	content, err := os.ReadFile(digestFile.Name())
@@ -119,29 +113,25 @@ func (r podmanRuntime) GetRegistryCredentials(imageName string) (ImageRegistryCr
 func (podmanRuntime) BuildAndPushMultiPlatform(dockerfilePath, contextPath, imageTag string) error {
 	// podman build --manifest appends to an existing manifest list, so remove
 	// any leftover from a previous build to avoid duplicate entries
-	rmCmd := exec.Command("podman", "manifest", "rm", imageTag)
+	rmCmd := debug.Command("podman", "manifest", "rm", imageTag)
 	_ = rmCmd.Run()
 
 	// --no-cache: older podman versions (e.g. 5.4) don't include the platform
 	// in the build cache key, so cached layers from one platform leg get
 	// reused for the other and the manifest list collapses to a single entry
-	buildCmd := exec.Command("podman", "build",
+	buildCmd := debug.Command("podman", "build",
 		"--no-cache",
 		"--platform", "linux/amd64,linux/arm64",
 		"--manifest", imageTag,
 		"-f", dockerfilePath,
 		contextPath,
 	)
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("failed to build image: %w (multi-platform builds require podman >= %d.%d; on macOS/Windows ensure the podman machine is running: 'podman machine start')", err, minPodmanMajor, minPodmanMinor)
+	if err := execx.Run(buildCmd); err != nil {
+		return fmt.Errorf("failed to build image (multi-platform builds require podman >= %d.%d; on macOS/Windows ensure the podman machine is running: 'podman machine start'): %w", minPodmanMajor, minPodmanMinor, err)
 	}
 
-	pushCmd := exec.Command("podman", "manifest", "push", "--all", imageTag, "docker://"+imageTag)
-	pushCmd.Stdout = os.Stdout
-	pushCmd.Stderr = os.Stderr
-	if err := pushCmd.Run(); err != nil {
+	pushCmd := debug.Command("podman", "manifest", "push", "--all", imageTag, "docker://"+imageTag)
+	if err := execx.Run(pushCmd); err != nil {
 		return fmt.Errorf("failed to push image: %w", err)
 	}
 	return nil
