@@ -92,3 +92,13 @@ func TestEnabledByEnv(t *testing.T) {
 		}
 	}
 }
+
+// A JSON value cut off by the body limit is redacted, also when the cut falls right
+// after a backslash (an escaped \n in a PEM key).
+func TestRedactCutOffValue(t *testing.T) {
+	for _, in := range []string{`{"private_key":"-----BEGIN KEY-----\nMIIEv`, `{"private_key":"-----BEGIN KEY-----\`} {
+		if got := Redact(in); got != `{"private_key":"[redacted]"` {
+			t.Errorf("Redact(%q) = %q", in, got)
+		}
+	}
+}

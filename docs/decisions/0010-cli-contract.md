@@ -33,9 +33,14 @@ stderr, exit codes and files written; golden tests replay it (as Impeccable's
 - **`--debug` / `NOVA_DEBUG=1`** writes diagnostics to stderr, prefixed `debug: `: the
   resolved instance and portal environment, every HTTP request and response (headers,
   first 4 KiB of text bodies) and every external command line. It catches what error
-  messages lose, e.g. ingress error pages served as HTTP 200. Secrets (tokens, passwords,
-  cookies, kubeconfig credentials, JWTs) are redacted before they are written. The env var
-  lets an agent switch it on once for a session; stdout is unchanged either way.
+  messages lose, e.g. ingress error pages served as HTTP 200. Known secrets (tokens,
+  passwords, cookies, `Authorization` headers, kubeconfig credentials, JWTs, sensitive
+  field and parameter names) are redacted, but only as best effort: bodies are logged as
+  they are otherwise, so an app's environment (`{"name": …, "value": …}`) or a bare
+  kubeconfig string can appear in clear. This is how `curl -v`, `kubectl -v=8` and
+  `GH_DEBUG=api` behave: the help text says so, the output itself carries no warning.
+  Not logging bodies at all was rejected: the bodies are what make the output useful. The env var lets an agent switch
+  it on once for a session; stdout is unchanged either way.
 - **Failures of external tools explain themselves.** When a docker/podman build or push or
   the ssh image import fails and stderr is not a terminal, the error carries the last 20
   lines of the tool's output (the failing step, the compiler error), so an agent finds the

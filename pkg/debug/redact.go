@@ -18,7 +18,7 @@ const sensitive = `(?i:[\w.-]*(?:token|secret|password|passwd|api[_-]?key|privat
 
 var (
 	// "name": "value" in JSON; a value cut off by the body limit has no closing quote
-	jsonField = regexp.MustCompile(`("` + sensitive + `"\s*:\s*)"(?:[^"\\]|\\.)*(?:"|$)`)
+	jsonField = regexp.MustCompile(`("` + sensitive + `"\s*:\s*)"(?:[^"\\]|\\.)*(?:"|\\?$)`)
 	// name: value in YAML (kubeconfig, manifests)
 	yamlField = regexp.MustCompile(`(?m)^(\s*(?:-\s+)?` + sensitive + `:[ \t]*)[^\s#].*$`)
 	// name=value in forms, query strings and command lines

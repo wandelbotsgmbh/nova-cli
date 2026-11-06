@@ -91,7 +91,7 @@ func init() {
 	_ = rootCmd.RegisterFlagCompletionFunc("env", cobra.FixedCompletions([]string{"prod", "stg", "dev"}, cobra.ShellCompDirectiveNoFileComp))
 
 	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false,
-		"Write diagnostic output to stderr: HTTP requests and responses, external commands, the resolved instance; secrets are redacted (env: "+debug.EnvVar+"=1)")
+		"Write diagnostic output to stderr: HTTP requests and responses, external commands, the resolved instance. Known secrets are redacted, but bodies (app environments, kubeconfigs) can still contain some: don't share the output unreviewed (env: "+debug.EnvVar+"=1)")
 	rootCmd.PersistentFlags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", false,
 		"If true, the server's certificate will not be checked for validity (disables TLS verification for all requests)")
 }
