@@ -99,6 +99,11 @@ func TestConfigSetNucleusKeys(t *testing.T) {
 	if err != nil || !strings.Contains(errOut, `set nucleus-token of Nucleus server "dev" (nucleus.dev.wandelbots.io)`) {
 		t.Errorf("NOVA_INSTANCE with a Nucleus key: %v %q", err, errOut)
 	}
+	// a stale NOVA_INSTANCE doesn't block it either
+	t.Setenv("NOVA_INSTANCE", "removed-long-ago")
+	if _, errOut, err := runWithConfig(t, "config", "set", "nucleus-token", "tok"); err != nil {
+		t.Errorf("stale NOVA_INSTANCE: %v %q", err, errOut)
+	}
 	t.Setenv("NOVA_INSTANCE", "")
 
 	r := loadServers(t)
@@ -128,6 +133,13 @@ func TestConfigSetNucleusKeys(t *testing.T) {
 	}
 	if dev, _ := loadServers(t).Get("dev"); dev.Host != "nucleus.wb.wandelbots.io" {
 		t.Errorf("dev must stay unchanged: %+v", dev)
+	}
+
+	// nothing selected: no "added" note for an entry that isn't created
+	mustRun(t, "nucleus", "server", "remove", "dev")
+	_, errOut, err = runWithConfig(t, "config", "set", "nucleus-host", "nucleus.other.wandelbots.io")
+	if err == nil || strings.Contains(errOut, "added") {
+		t.Errorf("host of another entry without a selection: %v %q", err, errOut)
 	}
 }
 
