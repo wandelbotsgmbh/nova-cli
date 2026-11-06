@@ -39,22 +39,14 @@ func InsecureSkipTLSVerify() bool {
 	return insecureSkipTLSVerify
 }
 
-// Transport returns an http.RoundTripper honouring the global TLS setting and
-// setting the CLI's User-Agent. It clones http.DefaultTransport so that
-// connection pooling defaults are kept.
+// Transport returns an http.RoundTripper that sets the CLI's User-Agent on top of
+// http.DefaultTransport. All clients share its connection pool on purpose: a
+// transport per client opens a new connection per request, and a freshly created
+// instance's ingress refuses or drops new connections for a while (GOAWAY on the
+// first stream, which Go can't retry for a PUT/POST). --insecure-skip-tls-verify
+// patches http.DefaultTransport itself (SetInsecureSkipTLSVerify).
 func Transport() http.RoundTripper {
-	dt, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return WithUserAgent(http.DefaultTransport)
-	}
-	t := dt.Clone()
-	if insecureSkipTLSVerify {
-		if t.TLSClientConfig == nil {
-			t.TLSClientConfig = &tls.Config{}
-		}
-		t.TLSClientConfig.InsecureSkipVerify = true
-	}
-	return WithUserAgent(t)
+	return WithUserAgent(http.DefaultTransport)
 }
 
 // WithUserAgent wraps rt so that requests without a User-Agent get the CLI's.
