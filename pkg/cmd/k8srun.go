@@ -277,31 +277,8 @@ $ nova k8srun prune`,
 				}
 			}
 
-			verb := "removed"
-			if k8srunPruneDryRun {
-				verb = "would remove"
-			}
-			for _, name := range gone {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", verb, name)
-			}
-			if len(gone) > 0 && !k8srunPruneDryRun {
-				selected := r.Current
-				for _, name := range gone {
-					if err := r.Remove(name); err != nil {
-						return err
-					}
-				}
-				if err := saveRegistry(r); err != nil {
-					return err
-				}
-				for _, name := range gone {
-					if dir, err := instanceDir(name); err == nil {
-						_ = os.RemoveAll(dir)
-					}
-				}
-				if selected != "" && r.Current == "" {
-					fmt.Fprintf(errOut, "the selected instance %q was removed; select another with 'nova instance select <name>'\n", selected)
-				}
+			if err := removeGoneEntries(cmd, r, gone, k8srunPruneDryRun); err != nil {
+				return err
 			}
 			if unchecked > 0 {
 				return fmt.Errorf("%d cluster(s) could not be checked and were kept", unchecked)

@@ -67,14 +67,16 @@ func readConfig(t *testing.T, path string) string {
 }
 
 func TestLegacyConfigKeepsWorking(t *testing.T) {
-	path := withConfig(t, "host: 192.168.1.10\ncellname: line1\nnucleus-token: s3cret\n")
+	path := withConfig(t, "host: 192.168.1.10\ncellname: line1\nnucleus-host: nucleus.dev.wandelbots.io\nnucleus-token: s3cret\n")
 	before := readConfig(t, path)
 
 	out := mustRun(t, "config", "view")
 	for _, want := range []string{
 		"host: 192.168.1.10\n",
 		"cellname: line1\n",
+		"nucleus-host: nucleus.dev.wandelbots.io\n",
 		"nucleus-token: " + instances.Redact + "\n",
+		"nucleus: dev (from config)\n",
 		"instance: default (host, from config)\n",
 	} {
 		if !strings.Contains(out, want) {
@@ -95,14 +97,14 @@ func TestLegacyConfigKeepsWorking(t *testing.T) {
 
 func TestConfigSetMigratesIntoSelectedEntry(t *testing.T) {
 	path := withConfig(t, "host: 192.168.1.10\neditor: vim\n")
-	mustRun(t, "config", "set", "nucleus-host", "nucleus.example.com")
+	mustRun(t, "config", "set", "cellname", "line1")
 
 	r, err := instances.Load(viper.GetViper())
 	if err != nil {
 		t.Fatal(err)
 	}
 	def, ok := r.Get(instances.DefaultName)
-	if !ok || def.Host != "192.168.1.10" || def.NucleusHost != "nucleus.example.com" {
+	if !ok || def.Host != "192.168.1.10" || def.CellName != "line1" {
 		t.Fatalf("unexpected registry: %+v", r)
 	}
 	if content := readConfig(t, path); !strings.Contains(content, "editor: vim") || !strings.Contains(content, "host: 192.168.1.10") {
@@ -168,13 +170,13 @@ func TestConfigSetWithOverrideWritesThatEntry(t *testing.T) {
 	withConfig(t, "")
 	mustRun(t, "instance", "add", "lab", "--host", "10.0.0.1")
 	mustRun(t, "instance", "add", "ipc2", "--host", "10.0.0.2")
-	mustRun(t, "--instance", "ipc2", "config", "set", "nucleus-token", "tok2")
+	mustRun(t, "--instance", "ipc2", "config", "set", "cellname", "line2")
 
 	r, _ := instances.Load(viper.GetViper())
 	lab, _ := r.Get("lab")
 	ipc2, _ := r.Get("ipc2")
-	if lab.NucleusToken != "" || ipc2.NucleusToken != "tok2" {
-		t.Errorf("token went to the wrong entry: lab=%+v ipc2=%+v", lab, ipc2)
+	if lab.CellName != "" || ipc2.CellName != "line2" {
+		t.Errorf("cell went to the wrong entry: lab=%+v ipc2=%+v", lab, ipc2)
 	}
 	if r.Current != "lab" {
 		t.Errorf("selection changed to %q", r.Current)
@@ -237,16 +239,22 @@ func TestSelectAndRemove(t *testing.T) {
 	}
 }
 
-func TestInstanceInfoRedacts(t *testing.T) {
-	withConfig(t, "")
-	mustRun(t, "instance", "add", "lab", "--host", "10.0.0.1")
-	mustRun(t, "config", "set", "nucleus-token", "s3cret")
-	out := mustRun(t, "instance", "info", "lab")
-	if strings.Contains(out, "s3cret") || !strings.Contains(out, instances.Redact) {
-		t.Errorf("info must redact:\n%s", out)
-	}
-	if out := mustRun(t, "instance", "info", "lab", "--show-secrets"); !strings.Contains(out, "s3cret") {
-		t.Errorf("--show-secrets must print the token:\n%s", out)
+// Nucleus keys left in an entry for older CLI versions aren't used and not shown
+// (ADR-0018), not even with --show-secrets.
+func TestInstanceInfoHidesLegacyNucleusKeys(t *testing.T) {
+	withConfig(t, `current-instance: lab
+instances:
+  - name: lab
+    kind: host
+    host: 10.0.0.1
+    nucleus-host: nucleus.dev.wandelbots.io
+    nucleus-token: s3cret
+`)
+	for _, args := range [][]string{{"instance", "info", "lab"}, {"instance", "info", "lab", "--show-secrets"}} {
+		out := mustRun(t, args...)
+		if strings.Contains(out, "s3cret") || strings.Contains(out, "nucleus") {
+			t.Errorf("%v shows the legacy Nucleus keys:\n%s", args, out)
+		}
 	}
 }
 

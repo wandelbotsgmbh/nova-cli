@@ -15,29 +15,37 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/nucleusservers"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/omniverse/nucleus"
 )
 
 var nucleusCmd = &cobra.Command{
 	Use:   "nucleus",
 	Short: "EXPERIMENTAL: Interact with an Omniverse Nucleus server",
+	// a Nucleus server is its own target, independent of the NOVA instance (ADR-0018)
+	Annotations: noTarget,
 	Long: `EXPERIMENTAL: Commands for listing, copying, and removing files on an Omniverse Nucleus server.
 
 Configuration:
-  Before using nucleus commands you need to configure the server host and an API token.
+  Nucleus servers are kept in their own list, independent of the NOVA instance. The
+  commands work against the selected server, or the one named with --nucleus <name> /
+  NOVA_NUCLEUS for a single invocation.
 
-  # Set the Nucleus server host (persisted in config)
+  # Add a server with its API token (read from stdin), list and select servers
+  nova nucleus server add dev --host nucleus.dev.wandelbots.io --token-stdin < token.txt
+  nova nucleus server list
+  nova nucleus server select dev
+
+  # Or set host and token of the selected server
   nova config set nucleus-host nucleus.dev.wandelbots.io
-
-  # Set the API token (persisted in config)
   nova config set nucleus-token <your-token>
 
-  Alternatively, use flags (--nucleus-host, --nucleus-token) or the NUCLEUS_TOKEN
-  environment variable for per-invocation overrides. TLS is enabled by default and
-  can be disabled with --nucleus-tls=false.
+  --nucleus-host, --nucleus-token and the NUCLEUS_TOKEN environment variable override
+  them for one invocation; the token of a server is never sent to another host. TLS is
+  enabled by default and can be disabled with --nucleus-tls=false.
 
   Verify your configuration with:
-  nova config view
+  nova nucleus server list
 
 Usage examples:
   nova nucleus ls /
@@ -668,28 +676,48 @@ func uploadFile(ctx context.Context, client *nucleus.Client, localPath, remotePa
 	return nil
 }
 
+// nucleusConfig picks host, token and TLS: the resolved Nucleus server (--nucleus,
+// NOVA_NUCLEUS, selected), overridden by --nucleus-host, --nucleus-token / NUCLEUS_TOKEN
+// and --nucleus-tls. A server's token is only used for its own host (ADR-0006): with
+// --nucleus-host pointing elsewhere, the token has to be given explicitly.
+func nucleusConfig(cmd *cobra.Command) (nucleus.ClientConfig, error) {
+	s, _, err := resolveNucleus()
+	if err != nil {
+		return nucleus.ClientConfig{}, err
+	}
+	cfg := nucleus.ClientConfig{Host: s.Host, APIToken: s.Token, TLS: s.UseTLS()}
+
+	tlsFlag, _ := cmd.Flags().GetBool("nucleus-tls")
+	if host, _ := cmd.Flags().GetString("nucleus-host"); host != "" && (s.Host == "" || !nucleusservers.SameHost(host, s.Host)) {
+		cfg = nucleus.ClientConfig{Host: host, TLS: tlsFlag}
+	} else if f := cmd.Flags().Lookup("nucleus-tls"); f != nil && f.Changed {
+		cfg.TLS = tlsFlag
+	}
+	if token, _ := cmd.Flags().GetString("nucleus-token"); token != "" {
+		cfg.APIToken = token
+	} else if token := os.Getenv("NUCLEUS_TOKEN"); token != "" {
+		cfg.APIToken = token
+	}
+
+	if cfg.Host == "" {
+		return nucleus.ClientConfig{}, errNoNucleusServer
+	}
+	if cfg.APIToken == "" {
+		if s.Name != "" && nucleusservers.SameHost(cfg.Host, s.Host) {
+			return nucleus.ClientConfig{}, fmt.Errorf("nucleus server %q has no API token: set it with 'nova config set nucleus-token <token> --nucleus %s', or use --nucleus-token / NUCLEUS_TOKEN", s.Name, s.Name)
+		}
+		return nucleus.ClientConfig{}, fmt.Errorf("no API token for %s: use --nucleus-token or NUCLEUS_TOKEN (the token of a Nucleus server is only sent to its own host)", cfg.Host)
+	}
+	return cfg, nil
+}
+
 // dialNucleus creates a Nucleus client using flags, env vars, or config.
 func dialNucleus(cmd *cobra.Command) (*nucleus.Client, error) {
-	host, _ := cmd.Flags().GetString("nucleus-host")
-	if host == "" {
-		host = currentTarget().NucleusHost
+	cfg, err := nucleusConfig(cmd)
+	if err != nil {
+		return nil, err
 	}
-	if host == "" {
-		return nil, fmt.Errorf("nucleus host not configured — set via --nucleus-host flag or `nova config set nucleus-host <host>`")
-	}
-
-	token, _ := cmd.Flags().GetString("nucleus-token")
-	if token == "" {
-		token = os.Getenv("NUCLEUS_TOKEN")
-	}
-	if token == "" {
-		token = currentTarget().NucleusToken
-	}
-	if token == "" {
-		return nil, fmt.Errorf("nucleus API token not set — use --nucleus-token flag, NUCLEUS_TOKEN env var, or `nova config set nucleus-token <token>`")
-	}
-
-	tls, _ := cmd.Flags().GetBool("nucleus-tls")
+	host, token, tls := cfg.Host, cfg.APIToken, cfg.TLS
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 	defer cancel()

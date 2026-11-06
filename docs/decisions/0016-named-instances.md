@@ -147,3 +147,16 @@ pointed at one entry for a single invocation.
   instance doesn't switch the target of other sessions on the same machine ("one
   switches, the other silently follows", see Context); the new entry is targeted with
   `--instance`. Agents working in parallel should pass it.
+- **Nucleus settings move out of instance entries** into their own registry (ADR-0018).
+  `nucleus-host` and `nucleus-token` are no longer per-entry settings. Entries keep them
+  for older binaries (the migration above still copies them into `default`), but the CLI
+  ignores them and `instance info` doesn't show them.
+- **`nova instance prune [--dry-run]`** removes entries whose instance is gone, as
+  `nova k8srun prune` does for clusters. Only a definite answer counts: for `cloud`
+  entries the portal not listing the instance for the account logged in to the entry's
+  environment, for `k8srun` entries a 404 from the cluster service. The portal only
+  answers per account (its per-id endpoints also answer 404 for another account's
+  instance), so an entry for an instance of another account counts as gone. Any other answer (no login for that
+  environment, network error, 5xx) keeps the entry. `host` entries are never pruned: an
+  unreachable host can't be told apart from one that is switched off. If the selected
+  entry is removed, no instance is selected. No prompts (ADR-0010).

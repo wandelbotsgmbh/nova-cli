@@ -36,8 +36,10 @@ var (
 
 // resolveTarget picks the instance this invocation works against. It never writes
 // the config, so concurrent sessions with different overrides don't interfere.
-func resolveTarget(cmd *cobra.Command, _ []string) error {
-	if skipsTarget(cmd) {
+func resolveTarget(cmd *cobra.Command, args []string) error {
+	// 'config set nucleus-*' writes a Nucleus server, not the instance (ADR-0018): a
+	// stale NOVA_INSTANCE must not block it
+	if skipsTarget(cmd) || (cmd == setCmd && len(args) > 0 && isNucleusKey(args[0])) {
 		// registry commands still need the portal environment
 		return applyEnv(instances.Instance{})
 	}

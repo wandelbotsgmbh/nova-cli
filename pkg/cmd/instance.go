@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/nucleusservers"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/portal"
 	"gopkg.in/yaml.v3"
@@ -486,6 +487,8 @@ $ nova instance info lab
 			return nil
 		}
 
+		// Nucleus keys left in the entry for older CLI versions aren't used (ADR-0018)
+		inst.NucleusHost, inst.NucleusToken = "", ""
 		if !showSecretsInstanceInfoCmd {
 			inst = inst.Redacted()
 		}
@@ -633,7 +636,23 @@ func loadRegistry() (*instances.Registry, error) {
 
 func saveRegistry(r *instances.Registry) error {
 	defer resetTarget()
+	// Nucleus servers migrated from instance entries live only in memory until saved:
+	// persist them before the entries change, or removing one loses its server (ADR-0018).
+	if err := persistMigratedNucleusServers(); err != nil {
+		return err
+	}
 	return r.Save(viper.GetViper())
+}
+
+func persistMigratedNucleusServers() error {
+	nr, err := nucleusservers.Load(viper.GetViper())
+	if err != nil {
+		return err
+	}
+	if !nr.Migrated {
+		return nil
+	}
+	return nr.Save(viper.GetViper())
 }
 
 // registerCloudInstance adds (or updates) a cloud instance in the local list and,
