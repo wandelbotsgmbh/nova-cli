@@ -133,3 +133,43 @@ func TestNoDebugOutputWhenDisabled(t *testing.T) {
 		t.Errorf("unexpected debug output:\n%s", log.String())
 	}
 }
+
+// Secrets never reach the log in clear: a value cut off by the body limit, and a
+// base64 kubeconfig as the k8srun service sends it.
+func TestDebugRedactsCutOffAndKubeconfigBodies(t *testing.T) {
+	secret := "SECRETSECRET" + strings.Repeat("s", 200)
+	// the value of refresh_token straddles the 4 KiB cut
+	prefix := `{"pad":"` + strings.Repeat("p", maxLoggedBody-40) + `","refresh_token":"`
+	cutOff := prefix + secret + `"}`
+	kubeconfig := `{"id":"abc","kubeconfig":"YXBpVmVyc2lvbjogdjEKdXNlcnM6Ci0gdXNlcjoKICAgIGNsaWVudC1rZXktZGF0YTogU0VDUkVU"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/kubeconfig" {
+			_, _ = io.WriteString(w, kubeconfig)
+			return
+		}
+		_, _ = io.WriteString(w, cutOff)
+	}))
+	defer srv.Close()
+	log := captureDebug(t)
+
+	for _, path := range []string{"/token", "/kubeconfig"} {
+		resp, err := Client().Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+	}
+
+	out := log.String()
+	if len(prefix) >= maxLoggedBody || len(prefix)+len(secret) <= maxLoggedBody {
+		t.Fatalf("test setup: the secret must straddle the cut (prefix %d bytes)", len(prefix))
+	}
+	if strings.Contains(out, "SECRET") || strings.Contains(out, "YXBpVmVyc2lvbjog") {
+		t.Errorf("secret logged:\n%s", out)
+	}
+	if !strings.Contains(out, `"refresh_token":"[redacted]"`) || !strings.Contains(out, `"kubeconfig":"[redacted]"`) {
+		t.Errorf("fields not redacted:\n%s", out)
+	}
+}

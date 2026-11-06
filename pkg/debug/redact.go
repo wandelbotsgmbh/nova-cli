@@ -9,13 +9,16 @@ import (
 const redacted = "[redacted]"
 
 // sensitive matches names of fields, headers and parameters whose values are
-// never written: tokens, passwords, keys and kubeconfig credentials.
+// never written: tokens, passwords, keys and kubeconfigs (the k8srun service
+// sends a whole kubeconfig, client key included, base64-encoded as "kubeconfig").
+// Matching any name that contains one of these also hides harmless fields
+// (token_expiry, secretName): in debug output that is the safe side.
 const sensitive = `(?i:[\w.-]*(?:token|secret|password|passwd|api[_-]?key|private[_-]?key|` +
-	`client-key-data|client-certificate-data|code_verifier|device_code|authorization|cookie)[\w.-]*)`
+	`client-key-data|client-certificate-data|kubeconfig|code_verifier|device_code|authorization|cookie)[\w.-]*)`
 
 var (
-	// "name": "value" in JSON
-	jsonField = regexp.MustCompile(`("` + sensitive + `"\s*:\s*)"(?:[^"\\]|\\.)*"`)
+	// "name": "value" in JSON; a value cut off by the body limit has no closing quote
+	jsonField = regexp.MustCompile(`("` + sensitive + `"\s*:\s*)"(?:[^"\\]|\\.)*(?:"|$)`)
 	// name: value in YAML (kubeconfig, manifests)
 	yamlField = regexp.MustCompile(`(?m)^(\s*(?:-\s+)?` + sensitive + `:[ \t]*)[^\s#].*$`)
 	// name=value in forms, query strings and command lines
