@@ -55,6 +55,9 @@ var setCmd = &cobra.Command{
 			return fmt.Errorf("invalid value %q for container-runtime: must be \"docker\" or \"podman\"", args[1])
 		}
 
+		if isNucleusKey(args[0]) {
+			return setNucleusValue(cmd, args[0], args[1])
+		}
 		if field := instanceField(args[0]); field != nil {
 			return setInstanceValue(cmd, args[0], args[1])
 		}
@@ -67,6 +70,10 @@ var setCmd = &cobra.Command{
 // secretKeys are redacted by 'config view' unless --show-secrets is given.
 var secretKeys = map[string]struct{}{"nucleus-token": {}}
 
+// isNucleusKey reports whether key belongs to the Nucleus server, not the instance
+// (ADR-0018).
+func isNucleusKey(key string) bool { return key == "nucleus-host" || key == "nucleus-token" }
+
 // instanceField returns the entry field for a key stored per instance, or nil.
 func instanceField(key string) func(*instances.Instance) *string {
 	switch key {
@@ -76,10 +83,6 @@ func instanceField(key string) func(*instances.Instance) *string {
 		return func(i *instances.Instance) *string { return &i.CellName }
 	case "virtualid":
 		return func(i *instances.Instance) *string { return &i.ID }
-	case "nucleus-host":
-		return func(i *instances.Instance) *string { return &i.NucleusHost }
-	case "nucleus-token":
-		return func(i *instances.Instance) *string { return &i.NucleusToken }
 	}
 	return nil
 }
@@ -129,16 +132,25 @@ var viewCmd = &cobra.Command{
 	Use:   "view",
 	Short: "Shows the configuration of the Wandelbots NOVA CLI",
 	Long: `Shows the configuration of the Wandelbots NOVA CLI: global settings plus the settings
-of the targeted instance (selected, or set via --instance / NOVA_INSTANCE).
+of the targeted instance (selected, or set via --instance / NOVA_INSTANCE) and of the
+Nucleus server (selected, or set via --nucleus / NOVA_NUCLEUS).
 Tokens are redacted unless --show-secrets is given.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		t, err := ensureTarget()
 		if err != nil {
 			return err
 		}
+		nuc, nucSource, err := resolveNucleus()
+		if err != nil {
+			return err
+		}
 		values := map[string]string{}
 		for key := range keys {
-			if key == "cellname" {
+			if key == "nucleus-host" {
+				values[key] = nuc.Host
+			} else if key == "nucleus-token" {
+				values[key] = nuc.Token
+			} else if key == "cellname" {
 				values[key] = t.Cell()
 			} else if field := instanceField(key); field != nil {
 				values[key] = *field(&t)
@@ -150,6 +162,9 @@ Tokens are redacted unless --show-secrets is given.`,
 			values["instance"] = fmt.Sprintf("%s (%s, from %s)", t.Name, t.Kind, targetSource)
 		}
 		values["env"] = fmt.Sprintf("%s (from %s)", portalEnvironment, envSource)
+		if nuc.Name != "" {
+			values["nucleus"] = fmt.Sprintf("%s (from %s)", nuc.Name, nucSource)
+		}
 
 		sorted := make([]string, 0, len(values))
 		for key := range values {

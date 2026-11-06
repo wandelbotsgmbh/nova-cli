@@ -6,9 +6,14 @@ Most common configurations values are:
 - host: the host of the Wandelbots NOVA OS instance
 - cellname: name of the default cell to be used
 
-host, cellname, virtualid, nucleus-host and nucleus-token are stored per instance: they
-apply to the selected instance, or to the one named via --instance / NOVA_INSTANCE (see
-'nova instance'). If no instance exists yet, an instance "default" is created.
+host, cellname and virtualid are stored per instance: they apply to the selected
+instance, or to the one named via --instance / NOVA_INSTANCE (see 'nova instance'). If no
+instance exists yet, an instance "default" is created.
+
+nucleus-host and nucleus-token belong to the selected Nucleus server, or the one named via
+--nucleus / NOVA_NUCLEUS (see 'nova nucleus server'). If there is none, setting
+nucleus-host adds one named after the host. Changing the host of a server drops its token.
+
 All other values are global.
 
 Other values:
@@ -21,8 +26,8 @@ const configSetTxtExample = `
 # Setting the host of the selected instance (set automatically by 'nova instance create/select')
 nova config set host instanceid.instance.wandelbots.io
 
-# Setting the Nucleus token of a specific instance without selecting it
-nova --instance lab config set nucleus-token <token>
+# Setting the Nucleus token of a specific Nucleus server without selecting it
+nova config set nucleus-token <token> --nucleus dev
 
 # Setting the default image registry to be used for pushing images via 'nova app install' command
 # Example shows different providers:

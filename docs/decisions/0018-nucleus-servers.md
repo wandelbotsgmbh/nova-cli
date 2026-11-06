@@ -41,11 +41,13 @@ and `nova nucleus` no longer resolves an instance.
   Environments (dev, production, a customer's on-prem server) are just entries. They
   are not tied to the portal environment (`--env`): Nucleus uses its own API tokens, not
   the portal login.
-- **Target resolution:** `--nucleus <name>`, then `NOVA_NUCLEUS`, then
-  `current-nucleus`. An unknown name is an error (`NOT_FOUND`), never a fallback.
+- **Target resolution:** `--nucleus <name>` (a flag of `nova nucleus` and `nova config`,
+  not a global one), then `NOVA_NUCLEUS`, then `current-nucleus`. An unknown name is an error (`NOT_FOUND`), never a fallback.
   Resolving never writes the config. `--nucleus-host`, `--nucleus-token`,
   `NUCLEUS_TOKEN` and `--nucleus-tls` stay as per-invocation overrides of the resolved
-  entry, or replace it when there is none.
+  entry, or replace it when there is none. `--nucleus-host` naming another host than the
+  resolved entry's drops that entry's token: the token comes from `--nucleus-token` /
+  `NUCLEUS_TOKEN` then.
 - **Commands:** `nova nucleus server add <name> --host <host> [--token-stdin] [--tls=false]`,
   `server list` (marks the selected entry, never shows tokens), `server select <name>`,
   `server remove <name>`. No prompts (ADR-0010). `nova nucleus ls/cp/mv/rm/mkdir/stat`
@@ -53,7 +55,9 @@ and `nova nucleus` no longer resolves an instance.
 - **`nova config set nucleus-host|nucleus-token`** keep working and write the resolved
   Nucleus server (`--nucleus`, `NOVA_NUCLEUS`, `current-nucleus`). With no server
   registered, `config set nucleus-host` creates one named after the host (see
-  migration) and selects it. `--instance` has no effect on these keys.
+  migration) and selects it. Setting a different host drops the entry's token.
+  `--instance` has no effect on these keys. `server add` selects the new server when none
+  is selected, or with `--select` (as `instance add`).
 - **Credentials:** a token is only sent to the host of its entry (ADR-0006).
   `config view` and `server list` redact it unless `--show-secrets`.
 - **Migration**, on the first run without `nucleus-servers`: the Nucleus keys of all

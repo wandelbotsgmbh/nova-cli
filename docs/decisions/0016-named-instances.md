@@ -142,8 +142,9 @@ pointed at one entry for a single invocation.
 ## Addendum 2026-11-05
 
 - **Nucleus settings move out of instance entries** into their own registry (ADR-0018).
-  `nucleus-host` and `nucleus-token` are no longer per-entry settings; the migration
-  above no longer copies them into `default`.
+  `nucleus-host` and `nucleus-token` are no longer per-entry settings. Entries keep them
+  for older binaries (the migration above still copies them into `default`), but the CLI
+  ignores them and `instance info` doesn't show them.
 - **`nova instance prune [--dry-run]`** removes entries whose instance is gone, as
   `nova k8srun prune` does for clusters. Only a definite answer counts: for `cloud`
   entries the portal's "instance not found" in the entry's environment, for `k8srun`

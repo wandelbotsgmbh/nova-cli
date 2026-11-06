@@ -75,9 +75,10 @@ nova nucleus cp n:/a n:/b           # server-side copy
 Obtain an API token from Nucleus Navigator:
 **Account menu → API Tokens → Generate**
 
-Configure via:
-- `nova config set nucleus-host nucleus.example.com`
-- `nova config set nucleus-token <token>` or `export NUCLEUS_TOKEN=<token>`
+Configure a server (independent of the NOVA instance) via:
+- `nova nucleus server add dev --host nucleus.example.com --token-stdin < token.txt`
+- or `nova config set nucleus-host nucleus.example.com` and `nova config set nucleus-token <token>`
+- per invocation: `--nucleus <name>` / `NOVA_NUCLEUS`, or `--nucleus-host` with `--nucleus-token` / `NUCLEUS_TOKEN`
 
 ## Package structure
 

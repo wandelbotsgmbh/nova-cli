@@ -479,6 +479,8 @@ $ nova instance info lab
 			return nil
 		}
 
+		// Nucleus keys left in the entry for older CLI versions aren't used (ADR-0018)
+		inst.NucleusHost, inst.NucleusToken = "", ""
 		if !showSecretsInstanceInfoCmd {
 			inst = inst.Redacted()
 		}
