@@ -138,3 +138,12 @@ pointed at one entry for a single invocation.
   - Write the config atomically with a lock: token refresh and `config set` rewrite the
     whole file and can still race between sessions.
   - `-o json` for `instance list/info` (ADR-0010).
+
+## Addendum 2026-11-05
+
+- **`--no-select` on `instance create` and `k8srun create`.** Both select the new entry,
+  as before named instances, and scripts like `nova instance create && nova app install .`
+  rely on that. With `--no-select` the entry is only added, so a session that creates an
+  instance doesn't switch the target of other sessions on the same machine ("one
+  switches, the other silently follows", see Context); the new entry is targeted with
+  `--instance`. Agents working in parallel should pass it.
