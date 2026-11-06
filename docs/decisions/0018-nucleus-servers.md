@@ -56,7 +56,9 @@ and `nova nucleus` no longer resolves an instance.
   Nucleus server (`--nucleus`, `NOVA_NUCLEUS`, `current-nucleus`). With no server
   registered, `config set nucleus-host` creates one named after the host (see
   migration) and selects it. Setting a different host drops the entry's token.
-  `--instance` has no effect on these keys. `server add` selects the new server when none
+  An explicit `--instance` with these keys is an error pointing to `--nucleus`: before
+  this ADR it chose the entry the value went to, and silently writing another server
+  could store one server's token on another. `server add` selects the new server when none
   is selected, or with `--select` (as `instance add`).
 - **Credentials:** a token is only sent to the host of its entry (ADR-0006).
   `config view` and `server list` redact it unless `--show-secrets`.
@@ -68,6 +70,8 @@ and `nova nucleus` no longer resolves an instance.
   `-3`, … on collisions. `current-nucleus` is the server of the selected instance, else
   the first entry. The old keys stay untouched for older binaries, which keep reading
   them; the new binary ignores them once `nucleus-servers` exists.
+  The migration is persisted by the first Nucleus write and before any write of the
+  instance list, so removing or pruning an entry never takes its server along.
 - **Later, only with a real case:** an instance entry may name its server
   (`nucleus: <name>`, e.g. an IPC with an on-prem Nucleus), resolved after
   `NOVA_NUCLEUS` and before `current-nucleus`. A reference, never a copy of host and

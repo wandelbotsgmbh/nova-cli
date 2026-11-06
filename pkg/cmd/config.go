@@ -56,6 +56,12 @@ var setCmd = &cobra.Command{
 		}
 
 		if isNucleusKey(args[0]) {
+			// before ADR-0018 '--instance <name> config set nucleus-token' wrote that
+			// entry; silently writing the selected server instead could store one
+			// server's token on another
+			if instanceFlag != "" {
+				return fmt.Errorf("%s belongs to a Nucleus server, not an instance: use --nucleus <name> instead of --instance (see 'nova nucleus server list')", args[0])
+			}
 			return setNucleusValue(cmd, args[0], args[1])
 		}
 		if field := instanceField(args[0]); field != nil {

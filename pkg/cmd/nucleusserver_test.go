@@ -88,6 +88,10 @@ func TestConfigSetNucleusKeys(t *testing.T) {
 	}
 	mustRun(t, "config", "set", "nucleus-host", "nucleus.dev.wandelbots.io")
 	mustRun(t, "config", "set", "nucleus-token", "tok", "--nucleus", "dev")
+	// the pre-ADR-0018 form must not silently write the selected server
+	if _, _, err := runWithConfig(t, "--instance", "lab", "config", "set", "nucleus-token", "other"); err == nil || !strings.Contains(err.Error(), "--nucleus") {
+		t.Errorf("--instance with a Nucleus key: %v", err)
+	}
 
 	r := loadServers(t)
 	if dev, ok := r.Get("dev"); !ok || r.Current != "dev" || dev.Token != "tok" {

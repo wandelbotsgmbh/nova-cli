@@ -102,3 +102,39 @@ instances:
 		t.Errorf("listings per environment: %v", envs)
 	}
 }
+
+// An entry without env is checked in the default environment, as every other command
+// resolves it, not in prod.
+func TestInstancePruneEntryWithoutEnv(t *testing.T) {
+	withConfig(t, `default-env: dev
+instances:
+  - {name: default, kind: cloud, id: ccc, host: ccc.instance.dev.wandelbots.io}
+`)
+	fakePortalListings(t, map[oauth.AuthEnvironment][]string{
+		oauth.AuthProd: {},
+		oauth.AuthDev:  {"ccc"},
+	})
+	if out, errOut, err := runWithConfig(t, "instance", "prune"); err != nil || out != "" {
+		t.Fatalf("prune: %v %q %q", err, out, errOut)
+	}
+	if r, _ := instances.Load(viper.GetViper()); len(r.Instances) != 1 {
+		t.Errorf("the dev instance must be kept: %+v", r.Instances)
+	}
+}
+
+// Nucleus servers migrated from instance entries survive removing those entries.
+func TestPruneKeepsMigratedNucleusServers(t *testing.T) {
+	path := withConfig(t, `current-instance: alive
+instances:
+  - {name: alive, kind: cloud, id: aaa, host: aaa.instance.wandelbots.io, env: prod}
+  - {name: gone, kind: cloud, id: bbb, host: bbb.instance.wandelbots.io, env: prod, nucleus-host: nucleus.wb.wandelbots.io, nucleus-token: wbtok}
+`)
+	fakePortalListings(t, map[oauth.AuthEnvironment][]string{oauth.AuthProd: {"aaa"}})
+	mustRun(t, "instance", "prune")
+	if !strings.Contains(readConfig(t, path), "nucleus-servers") {
+		t.Errorf("the migrated servers must be written:\n%s", readConfig(t, path))
+	}
+	if wb, ok := loadServers(t).Get("wb"); !ok || wb.Token != "wbtok" {
+		t.Errorf("server of the removed entry lost: %+v", loadServers(t))
+	}
+}

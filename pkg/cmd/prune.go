@@ -31,7 +31,8 @@ var pruneInstancesCmd = &cobra.Command{
 	Long: `Remove entries of instances that no longer exist from the local list.
 
 Only a definite answer removes an entry:
-  cloud   the portal doesn't list the instance in the entry's environment
+  cloud   the portal doesn't list the instance for the account logged in to the
+          entry's environment (an instance of another account counts as gone)
   k8srun  the cluster service doesn't know the cluster id (as 'nova k8srun prune')
   host    never removed: an unreachable host can't be told apart from one that is off
 
@@ -56,7 +57,8 @@ $ nova instance prune`,
 			}
 			env, err := oauth.ParseEnvironment(i.Env)
 			if i.Env == "" {
-				env, err = oauth.AuthProd, nil
+				// as every other command does (resolveEnv)
+				env, err = oauth.DefaultEnvironment(), nil
 			}
 			if err != nil || i.ID == "" {
 				fmt.Fprintf(errOut, "keeping %q: can't check it (environment %q, id %q)\n", i.Name, i.Env, i.ID)
