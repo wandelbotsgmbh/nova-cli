@@ -175,8 +175,11 @@ func TestVirtualAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out+errOut, "use 'nova k8srun' instead") {
-		t.Errorf("expected a deprecation note, got %q", out+errOut)
+	if !strings.Contains(out+errOut, `Command "create" is deprecated, 'nova virtual' was renamed: use 'nova k8srun create'`) {
+		t.Errorf("expected a deprecation note naming 'nova virtual' and the replacement, got %q", out+errOut)
+	}
+	if out, errOut, _ := runWithConfig(t, "virtual", "list"); !strings.Contains(out+errOut, "use 'nova k8srun list'") {
+		t.Errorf("deprecation note of 'virtual list': %q", out+errOut)
 	}
 	if out, errOut, _ := runWithConfig(t, "k8srun", "list"); strings.Contains(out+errOut, "deprecated") {
 		t.Error("no deprecation note for 'nova k8srun'")

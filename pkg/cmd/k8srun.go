@@ -43,9 +43,9 @@ type virtualInstance struct {
 	Ip         string `json:"ip"`
 }
 
-// newK8sRunCmd builds the command group; it is registered as 'k8srun' and, deprecated
-// and hidden, as 'virtual'.
-func newK8sRunCmd(use, deprecated string) *cobra.Command {
+// newK8sRunCmd builds the command group; it is registered as 'k8srun' and, through
+// deprecatedAlias, as 'virtual' (cobra needs a separate tree per parent).
+func newK8sRunCmd(use string) *cobra.Command {
 	group := &cobra.Command{
 		Use:   use,
 		Short: "(Wandelbots internal) Create or destroy Kubernetes clusters with Wandelbots NOVA OS and a kubeconfig",
@@ -293,12 +293,20 @@ $ nova k8srun prune`,
 	create.Flags().BoolVar(&k8srunNoSelect, "no-select", false, "Add the cluster to the local list without selecting it (target it with --instance)")
 	prune.Flags().BoolVar(&k8srunPruneDryRun, "dry-run", false, "Only print the entries that would be removed")
 
-	for _, c := range []*cobra.Command{create, destroy, list, prune} {
-		c.Deprecated = deprecated
-		group.AddCommand(c)
+	group.AddCommand(create, destroy, list, prune)
+	return group
+}
+
+// deprecatedAlias hides group and marks it and its subcommands deprecated in favour of
+// 'nova <replacement>'. cobra prints 'Command "<name>" is deprecated, <message>', so
+// each message names the group and the replacement; otherwise 'nova virtual list'
+// reads as if only 'list' were deprecated.
+func deprecatedAlias(group *cobra.Command, replacement string) *cobra.Command {
+	group.Hidden = true
+	group.Deprecated = fmt.Sprintf("'nova %s' was renamed: use 'nova %s'", group.Name(), replacement)
+	for _, c := range group.Commands() {
+		c.Deprecated = fmt.Sprintf("'nova %s' was renamed: use 'nova %s %s'", group.Name(), replacement, c.Name())
 	}
-	group.Deprecated = deprecated
-	group.Hidden = deprecated != ""
 	return group
 }
 
@@ -416,6 +424,6 @@ func setClusterExpiry(instanceId string, minutes int) error {
 }
 
 func init() {
-	rootCmd.AddCommand(newK8sRunCmd("k8srun", ""))
-	rootCmd.AddCommand(newK8sRunCmd("virtual", "use 'nova k8srun' instead"))
+	rootCmd.AddCommand(newK8sRunCmd("k8srun"))
+	rootCmd.AddCommand(deprecatedAlias(newK8sRunCmd("virtual"), "k8srun"))
 }
