@@ -45,7 +45,7 @@ type virtualInstance struct {
 
 // newK8sRunCmd builds the command group; it is registered as 'k8srun' and, deprecated
 // and hidden, as 'virtual'.
-func newK8sRunCmd(use, deprecated string) *cobra.Command {
+func newK8sRunCmd(use string, deprecated bool) *cobra.Command {
 	group := &cobra.Command{
 		Use:   use,
 		Short: "(Wandelbots internal) Create or destroy Kubernetes clusters with Wandelbots NOVA OS and a kubeconfig",
@@ -294,11 +294,17 @@ $ nova k8srun prune`,
 	prune.Flags().BoolVar(&k8srunPruneDryRun, "dry-run", false, "Only print the entries that would be removed")
 
 	for _, c := range []*cobra.Command{create, destroy, list, prune} {
-		c.Deprecated = deprecated
+		if deprecated {
+			// cobra prints 'Command "<name>" is deprecated, <this>': name the group and
+			// the replacement, or it reads as if only the subcommand were deprecated
+			c.Deprecated = fmt.Sprintf("'nova %s' was renamed: use 'nova k8srun %s'", use, c.Name())
+		}
 		group.AddCommand(c)
 	}
-	group.Deprecated = deprecated
-	group.Hidden = deprecated != ""
+	if deprecated {
+		group.Deprecated = fmt.Sprintf("'nova %s' was renamed: use 'nova k8srun'", use)
+		group.Hidden = true
+	}
 	return group
 }
 
@@ -416,6 +422,6 @@ func setClusterExpiry(instanceId string, minutes int) error {
 }
 
 func init() {
-	rootCmd.AddCommand(newK8sRunCmd("k8srun", ""))
-	rootCmd.AddCommand(newK8sRunCmd("virtual", "use 'nova k8srun' instead"))
+	rootCmd.AddCommand(newK8sRunCmd("k8srun", false))
+	rootCmd.AddCommand(newK8sRunCmd("virtual", true))
 }
