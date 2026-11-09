@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/credentials"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
@@ -117,9 +118,14 @@ Diagnostics go to stderr; stdout carries only the MCP protocol.`,
 		}
 		downloadDir := mcpDownloadDir
 		if downloadDir == "" {
-			downloadDir = filepath.Join(os.TempDir(), "nova-mcp")
+			if downloadDir, err = tool.DefaultDownloadDir(); err != nil {
+				return err
+			}
 		}
 		if downloadDir, err = filepath.Abs(downloadDir); err != nil {
+			return err
+		}
+		if err := tool.PrepareDownloadDir(downloadDir); err != nil {
 			return err
 		}
 		return mcp.ServeStdio(cmd.Context(), api, client, mcp.Options{
@@ -144,13 +150,19 @@ type mcpSession struct {
 
 // auth authenticates every request. Unlike one-shot commands it never starts an
 // interactive login (that would block a tool call on a browser dialog): it refreshes the
-// stored portal login when it has expired, or fails with a hint.
+// stored portal login when it has expired, or fails with a hint. It holds mu for the
+// whole request setup: tool calls run concurrently, and both the refresh (writes) and
+// SetAuthForRequest (reads) use viper, which isn't safe for concurrent use.
 func (m *mcpSession) auth(ctx context.Context, req *http.Request) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if oauth.SendsTokenTo(req.URL.Host) {
 		env := oauth.ActiveEnvironment()
 		err := oauth.RefreshToken(ctx, env)
+		if err != nil && hasBasicAuth() {
+			// basic auth alone is enough (SetAuthForRequest decides); no portal login needed
+			err = nil
+		}
 		if err != nil && !strings.Contains(err.Error(), "nova login") {
 			return fmt.Errorf("%w, run 'nova login --env %s'", err, env)
 		}
@@ -162,6 +174,12 @@ func (m *mcpSession) auth(ctx context.Context, req *http.Request) error {
 		return err
 	}
 	return version.SetUserAgent(ctx, req)
+}
+
+// hasBasicAuth reports whether basic auth credentials are configured.
+func hasBasicAuth() bool {
+	c, err := credentials.GetBasicAuth()
+	return err == nil && c.Username != "" && c.Password != ""
 }
 
 // registry reads the instance registry fresh from the config file, so instances added
@@ -183,13 +201,13 @@ func instanceInfo(i instances.Instance, current string) tool.InstanceInfo {
 
 // List implements tool.InstanceSwitcher.
 func (m *mcpSession) List() ([]tool.InstanceInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	r, err := m.registry()
 	if err != nil {
 		return nil, err
 	}
-	m.mu.Lock()
 	current := m.current
-	m.mu.Unlock()
 	list := make([]tool.InstanceInfo, 0, len(r.Instances))
 	for _, i := range r.Instances {
 		list = append(list, instanceInfo(i, current))
@@ -201,6 +219,9 @@ func (m *mcpSession) List() ([]tool.InstanceInfo, error) {
 // the portal environment of a cloud instance (an explicit --env/NOVA_ENV that
 // contradicts it is an error, as for every command).
 func (m *mcpSession) Use(name string) (tool.InstanceInfo, error) {
+	// viper and the active environment are shared with the requests of other tool calls
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	r, err := m.registry()
 	if err != nil {
 		return tool.InstanceInfo{}, err
@@ -216,8 +237,6 @@ func (m *mcpSession) Use(name string) (tool.InstanceInfo, error) {
 	if err != nil {
 		return tool.InstanceInfo{}, err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	oauth.SetActiveEnvironment(env)
 	m.client.SwitchBaseURL(nova.HostWithProtocol(i.Host) + nova.API_BASE_V2)
 	m.current = i.Name
@@ -228,7 +247,7 @@ func (m *mcpSession) Use(name string) (tool.InstanceInfo, error) {
 func init() {
 	mcpCmd.Flags().StringSliceVar(&mcpToolsets, "toolsets", nil,
 		"comma-separated toolsets to serve, 'default', 'all' or any of: "+strings.Join(mcp.AllToolsets(), ", "))
-	mcpCmd.Flags().StringVar(&mcpDownloadDir, "download-dir", "", "where tools save files such as diagnosis packages and backups (default: <temp dir>/nova-mcp)")
+	mcpCmd.Flags().StringVar(&mcpDownloadDir, "download-dir", "", "where tools save files such as diagnosis packages and backups; must be private to you (default: <user cache dir>/nova/mcp-downloads)")
 	mcpCmd.Flags().BoolVar(&mcpReadOnly, "read-only", false, "serve only tools that don't change the instance")
 	rootCmd.AddCommand(mcpCmd)
 }

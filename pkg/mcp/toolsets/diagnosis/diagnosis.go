@@ -239,9 +239,21 @@ func createDiagnosisPackage(c *novaapi.Client, downloadDir string) tool.Registra
 			if err := os.MkdirAll(downloadDir, 0o700); err != nil {
 				return tool.Fail[packageOutput](localError(name, err))
 			}
-			path := filepath.Join(downloadDir, "nova-diagnosis-"+time.Now().UTC().Format("20060102-150405")+".zip")
-			if err := os.WriteFile(path, res.Body, 0o600); err != nil {
-				return tool.Fail[packageOutput](localError(name, err))
+			// exclusive creation: never follows a planted symlink or overwrites an
+			// earlier package of the same second
+			f, ferr := os.CreateTemp(downloadDir, "nova-diagnosis-"+time.Now().UTC().Format("20060102-150405")+"-*.zip")
+			if ferr != nil {
+				return tool.Fail[packageOutput](localError(name, ferr))
+			}
+			path := f.Name()
+			if _, werr := f.Write(res.Body); werr != nil {
+				f.Close()
+				os.Remove(path)
+				return tool.Fail[packageOutput](localError(name, werr))
+			}
+			if cerr := f.Close(); cerr != nil {
+				os.Remove(path)
+				return tool.Fail[packageOutput](localError(name, cerr))
 			}
 			out := packageOutput{Path: path, SizeBytes: int64(len(res.Body))}
 			for _, f := range zr.File {

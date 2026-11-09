@@ -336,31 +336,57 @@ func (t ingressTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		base = http.DefaultTransport
 	}
 	resp, err := base.RoundTrip(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
+	if err != nil || !mayBeIngressPage(req, resp) {
 		return resp, err
 	}
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxIngressPage+1))
 	if err != nil {
+		resp.Body.Close()
 		return nil, err
 	}
+	if len(body) > maxIngressPage {
+		// not a page; hand on the read part plus the rest
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(body), resp.Body), resp.Body}
+		return resp, nil
+	}
+	resp.Body.Close()
 	resp.Body = io.NopCloser(bytes.NewReader(body))
-	if status := ingressErrorStatus(body); status != 0 {
+	if status := ingressErrorStatus(resp.Header.Get("Content-Type"), body); status != 0 {
 		resp.StatusCode = status
 		resp.Status = fmt.Sprintf("%d %s", status, http.StatusText(status))
 	}
 	return resp, nil
 }
 
+// maxIngressPage is the largest body checked for an ingress error page; real pages are
+// a few dozen bytes.
+const maxIngressPage = 2048
+
+// mayBeIngressPage reports whether resp could be an error page of the instance ingress:
+// HTTP 200 with a text or JSON content type. Object-store contents are user data and
+// never checked: an object may well start with "Error 404:".
+func mayBeIngressPage(req *http.Request, resp *http.Response) bool {
+	if resp.StatusCode != http.StatusOK || strings.Contains(req.URL.Path, "/store/objects/") {
+		return false
+	}
+	ct := resp.Header.Get("Content-Type")
+	return strings.HasPrefix(ct, "text/plain") || strings.HasPrefix(ct, "text/html") || strings.HasPrefix(ct, "application/json")
+}
+
 // ingressErrorStatus returns the status of an error page the instance ingress serves as
 // HTTP 200 (plain text "Error 401: Unauthorized", or {"error": true, "code": 401, …}
 // for clients accepting JSON), 0 for anything else.
-func ingressErrorStatus(body []byte) int {
+func ingressErrorStatus(contentType string, body []byte) int {
 	s := bytes.TrimSpace(body)
-	if rest, ok := bytes.CutPrefix(s, []byte("Error ")); ok {
-		code, _, _ := bytes.Cut(rest, []byte(":"))
-		if n, err := strconv.Atoi(string(bytes.TrimSpace(code))); err == nil && n >= 400 {
-			return n
+	if !strings.HasPrefix(contentType, "application/json") {
+		if rest, ok := bytes.CutPrefix(s, []byte("Error ")); ok {
+			code, _, _ := bytes.Cut(rest, []byte(":"))
+			if n, err := strconv.Atoi(string(bytes.TrimSpace(code))); err == nil && n >= 400 {
+				return n
+			}
 		}
 		return 0
 	}

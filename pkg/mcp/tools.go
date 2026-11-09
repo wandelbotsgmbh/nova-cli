@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/tool"
@@ -175,7 +176,20 @@ func deleteControllerTool(api novaapi.API) tool.Registration {
 			Description: "Delete a controller from a cell. DESTRUCTIVE and not undoable — confirm with the " +
 				"user first, naming the exact cell and controller.",
 			Annotations: tool.Annotations("Delete controller", false, true, true, false),
-		}, func(ctx context.Context, _ *sdk.CallToolRequest, in controllerInput) (*sdk.CallToolResult, deployOutput, error) {
+		}, func(ctx context.Context, req *sdk.CallToolRequest, in controllerInput) (*sdk.CallToolResult, deployOutput, error) {
+			// a physical controller is a real robot's commissioning: the user approves its
+			// deletion in a dialog (nova-cli addition, the MR only relies on rule 3)
+			controller, err := api.DescribeController(ctx, in.Cell, in.Controller)
+			if err != nil {
+				return tool.Fail[deployOutput](tool.AsAPIError(err))
+			}
+			if controller.Physical {
+				if res := tool.Approval(req, "delete_controller", fmt.Sprintf(
+					"Delete the PHYSICAL %s controller '%s' from cell '%s'? Its configuration is removed and has to be commissioned again.",
+					controller.Manufacturer, in.Controller, in.Cell)); res != nil {
+					return res, deployOutput{}, nil
+				}
+			}
 			result, err := api.DeleteController(ctx, in.Cell, in.Controller)
 			if err != nil {
 				return tool.Fail[deployOutput](tool.AsAPIError(err))

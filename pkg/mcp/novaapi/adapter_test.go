@@ -295,3 +295,31 @@ func TestNoTarget_IsUnavailableWithHint(t *testing.T) {
 		t.Errorf("Do without target: %v", err)
 	}
 }
+
+// Real data that happens to look like an ingress page must stay data.
+func TestIngressPage_OnlyShortTextOrJSONOutsideObjectStore(t *testing.T) {
+	cases := map[string]struct {
+		path, contentType, body string
+	}{
+		"object store": {"/cells/cell/store/objects/report.txt", "text/plain", "Error 404: device not found"},
+		"octet-stream": {"/cells/cell/store/objects/x", "application/octet-stream", "Error 401: Unauthorized"},
+		"binary type":  {"/other", "application/octet-stream", "Error 401: Unauthorized"},
+		"text in JSON": {"/other", "application/json", `"Error 401: Unauthorized"`},
+		"long text":    {"/other", "text/plain", "Error 404: " + strings.Repeat("x", 3000)},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			cl := novaapi.NewClient(serve(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", c.contentType)
+				_, _ = w.Write([]byte(c.body))
+			}), nil, nil, nil)
+			res, err := cl.Do(context.Background(), novaapi.Call{Tool: "t", Method: http.MethodGet, Path: c.path})
+			if err != nil {
+				t.Fatalf("data rewritten into an error: %v", err)
+			}
+			if string(res.Body) != c.body {
+				t.Errorf("body changed: %q", res.Body)
+			}
+		})
+	}
+}

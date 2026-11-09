@@ -328,3 +328,29 @@ func TestRegister_InstanceToolsOnlyWhenNotPinned(t *testing.T) {
 		cs.Close()
 	}
 }
+
+func TestDeleteController_PhysicalNeedsApproval(t *testing.T) {
+	// the test client has no elicitation: a physical controller is refused, a virtual one deleted
+	physical := &fakeAPI{controller: novaapi.ControllerInfo{Name: "kuka-1", Manufacturer: "KukaController", Physical: true},
+		deployResult: novaapi.DeployResult{Name: "kuka-1", Status: novaapi.StatusCompleted}}
+	session := connect(t, physical, novamcp.AllToolsets(), false)
+	result, err := session.CallTool(context.Background(), &sdk.CallToolParams{
+		Name: "delete_controller", Arguments: map[string]any{"cell": "cell", "controller": "kuka-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := result.Content[0].(*sdk.TextContent).Text; !strings.HasPrefix(text, "APPROVAL_REQUIRED:") || len(physical.deletedNames) != 0 {
+		t.Errorf("physical controller: %q, deleted %v", text, physical.deletedNames)
+	}
+
+	virtual := &fakeAPI{controller: novaapi.ControllerInfo{Name: "sim", Physical: false},
+		deployResult: novaapi.DeployResult{Name: "sim", Status: novaapi.StatusCompleted}}
+	session = connect(t, virtual, novamcp.AllToolsets(), false)
+	result, err = session.CallTool(context.Background(), &sdk.CallToolParams{
+		Name: "delete_controller", Arguments: map[string]any{"cell": "cell", "controller": "sim"},
+	})
+	if err != nil || result.IsError || len(virtual.deletedNames) != 1 {
+		t.Errorf("virtual controller: %v %+v, deleted %v", err, result, virtual.deletedNames)
+	}
+}
