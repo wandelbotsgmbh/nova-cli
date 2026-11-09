@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"fmt"
+	"github.com/spf13/viper"
 	"os"
 
 	"github.com/cli/browser"
@@ -114,11 +115,24 @@ func LoginWithRefreshToken(ctx context.Context, env AuthEnvironment, force bool)
 	return nil
 }
 
+// refreshConfig is the OAuth config RefreshToken uses (replaced in tests).
+var refreshConfig = NewAuth0Config
+
 // RefreshToken refreshes the stored login of env without any interaction; it fails if
 // there is none or it can't be refreshed.
+//
+// It works on the config file as it is now, not on this process's copy: long-running
+// processes (nova mcp, keep-alive) see logins other processes refreshed meanwhile
+// (refresh tokens can be rotated), and writing back changes only the login, so it never
+// reverts what others changed in the config (selected instance, new instances).
 func RefreshToken(ctx context.Context, env AuthEnvironment) error {
 	ctx = withHTTPClient(ctx)
-	old, err := LoadTokenFor(env)
+	disk := configOnDisk()
+	src := viper.GetViper()
+	if disk != nil {
+		src = disk
+	}
+	old, err := loadTokenFor(src, env)
 	if err != nil {
 		return err
 	}
@@ -126,13 +140,24 @@ func RefreshToken(ctx context.Context, env AuthEnvironment) error {
 		return fmt.Errorf("not logged in to the %s environment", env)
 	}
 	if old.OAuth2Token.Valid() {
+		if disk != nil {
+			adoptToken(old, env)
+		}
 		return nil
 	}
-	newToken, err := NewAuth0Config(env).TokenSource(ctx, &old.OAuth2Token).Token()
+	newToken, err := refreshConfig(env).TokenSource(ctx, &old.OAuth2Token).Token()
 	if err != nil {
 		return fmt.Errorf("login of the %s environment expired, run 'nova login --env %s': %w", env, env, err)
 	}
-	return StoreToken(newToken, env)
+	if disk == nil {
+		return StoreToken(newToken, env)
+	}
+	setToken(disk, newToken, env)
+	if err := disk.WriteConfig(); err != nil {
+		return err
+	}
+	adoptToken(WaboAuthToken{OAuth2Token: *newToken, AuthEnvironment: env}, env)
+	return nil
 }
 
 func LoginWithProvidedRefreshToken(ctx context.Context, env AuthEnvironment, refreshToken string) error {

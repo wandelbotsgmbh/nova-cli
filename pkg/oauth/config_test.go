@@ -84,7 +84,7 @@ func TestLoginsPerEnvironment(t *testing.T) {
 	if dev.OAuth2Token.AccessToken != "dev-access" || prod.OAuth2Token.AccessToken != "prod-access" {
 		t.Fatalf("dev=%+v prod=%+v", dev, prod)
 	}
-	if legacy, _ := loadLegacyToken(); legacy.OAuth2Token.AccessToken != "dev-access" {
+	if legacy, _ := loadLegacyToken(viper.GetViper()); legacy.OAuth2Token.AccessToken != "dev-access" {
 		t.Errorf("legacy key must keep the default environment's login, got %+v", legacy)
 	}
 
@@ -96,7 +96,7 @@ func TestLoginsPerEnvironment(t *testing.T) {
 	if got := DefaultEnvironment(); got != AuthProd {
 		t.Errorf("default = %q, want prod", got)
 	}
-	if legacy, _ := loadLegacyToken(); legacy.OAuth2Token.AccessToken != "prod-access" || legacy.AuthEnvironment != AuthProd {
+	if legacy, _ := loadLegacyToken(viper.GetViper()); legacy.OAuth2Token.AccessToken != "prod-access" || legacy.AuthEnvironment != AuthProd {
 		t.Errorf("legacy mirror = %+v", legacy)
 	}
 	if dev, _ := LoadTokenFor(AuthDev); dev.OAuth2Token.AccessToken != "dev-access" {
