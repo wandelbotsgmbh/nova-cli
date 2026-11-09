@@ -65,6 +65,10 @@ func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		req = req.Clone(req.Context())
 		req.Header.Set("User-Agent", version.UserAgent())
 	}
+	return retryRoundTrip(t.send, req)
+}
+
+func (t userAgentTransport) send(req *http.Request) (*http.Response, error) {
 	// checked per request: some clients are built before the flags are parsed
 	if debug.Enabled() {
 		return debugRoundTrip(t.next, req)

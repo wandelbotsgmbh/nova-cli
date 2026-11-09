@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"time"
 
@@ -91,7 +92,7 @@ func DeleteAppV2Impl(host string, cell string, app string) error {
 		return err
 	}
 
-	if !StatusSuccessfull(resp.StatusCode()) {
+	if !StatusSuccessfull(resp.StatusCode()) && !deletedByEarlierAttempt(resp.HTTPResponse) {
 		return fmt.Errorf("failed to delete app: %s %s", resp.Status(), string(resp.Body))
 	}
 	return nil
@@ -104,15 +105,13 @@ func AddAppV2Impl(host string, cell string, app string, config apiv2.App) error 
 	}
 
 	params := &apiv2.AddAppParams{CompletionTimeout: GetDefaultCompletionTimeout()}
-	resp, err := client.AddAppWithResponse(context.TODO(), cell, params, config)
-	if err != nil {
-		return err
-	}
-
-	if !StatusSuccessfull(resp.StatusCode()) {
-		return fmt.Errorf("failed to create new app: %s %s", resp.Status(), string(resp.Body))
-	}
-	return nil
+	return createWithRetry("app "+app, func() (*http.Response, []byte, error) {
+		resp, err := client.AddAppWithResponse(context.TODO(), cell, params, config)
+		if err != nil {
+			return nil, nil, err
+		}
+		return resp.HTTPResponse, resp.Body, nil
+	}, "failed to create new app")
 }
 
 func AddAppFromJsonV2Impl(host, cell, app string, config []byte) error {
@@ -122,15 +121,13 @@ func AddAppFromJsonV2Impl(host, cell, app string, config []byte) error {
 	}
 
 	params := &apiv2.AddAppParams{CompletionTimeout: GetDefaultCompletionTimeout()}
-	resp, err := client.AddAppWithBodyWithResponse(context.TODO(), cell, params, contentTypeJson, bytes.NewReader(config))
-	if err != nil {
-		return err
-	}
-
-	if !StatusSuccessfull(resp.StatusCode()) {
-		return fmt.Errorf("failed to create new app: %s %s", resp.Status(), string(resp.Body))
-	}
-	return nil
+	return createWithRetry("app "+app, func() (*http.Response, []byte, error) {
+		resp, err := client.AddAppWithBodyWithResponse(context.TODO(), cell, params, contentTypeJson, bytes.NewReader(config))
+		if err != nil {
+			return nil, nil, err
+		}
+		return resp.HTTPResponse, resp.Body, nil
+	}, "failed to create new app")
 }
 
 func AddAppFromYamlV2Impl(host, cell, app string, config []byte) error {
@@ -227,19 +224,15 @@ func CreateCellV2Impl(host string, cell string) error {
 	}
 
 	params := &apiv2.DeployCellParams{CompletionTimeout: GetDefaultCompletionTimeoutSeconds()}
-	resp, err := client.DeployCell(context.TODO(), params, apiv2.Cell{Name: cell})
-	if err != nil {
-		return err
-	}
-
-	defer resp.Body.Close()
-
-	if !StatusSuccessfull(resp.StatusCode) {
+	return createWithRetry("cell "+cell, func() (*http.Response, []byte, error) {
+		resp, err := client.DeployCell(context.TODO(), params, apiv2.Cell{Name: cell})
+		if err != nil {
+			return nil, nil, err
+		}
+		defer resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to create cell: %s %s", resp.Status, string(body))
-	}
-
-	return nil
+		return resp, body, nil
+	}, "failed to create cell")
 }
 
 func DeleteCellV2Impl(host string, cell string) error {
@@ -256,7 +249,7 @@ func DeleteCellV2Impl(host string, cell string) error {
 
 	defer resp.Body.Close()
 
-	if !StatusSuccessfull(resp.StatusCode) {
+	if !StatusSuccessfull(resp.StatusCode) && !deletedByEarlierAttempt(resp) {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("failed to delete cell: %s %s", resp.Status, string(body))
 	}
