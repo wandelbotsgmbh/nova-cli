@@ -20,6 +20,8 @@ func fakeInstance(t *testing.T) *httptest.Server {
 		"/api/v2/cells":                  []string{"cell", "line2"},
 		"/api/v2/cells/cell/controllers": []string{"ur5", "kuka"},
 		"/api/v2/cells/cell/apps":        []string{"waypoints"},
+		"/api/v2/cells/cell":             map[string]any{"name": "cell"},
+		"/api/v2/cells/line2/apps":       []string{},
 	}
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a, ok := answers[r.URL.Path]

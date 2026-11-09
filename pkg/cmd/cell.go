@@ -72,10 +72,7 @@ var listCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		for _, cell := range cells {
-			fmt.Fprintln(cmd.OutOrStdout(), cell)
-		}
-		return nil
+		return writeNames(cmd, cellListOutput, cells)
 	},
 }
 
@@ -122,8 +119,9 @@ If no name is given, the default cellname is used (which can be changed with 'no
 			cellData = tmp
 		}
 
-		os.Remove(cell + ".cell")
-		file, err := os.Create(cell + ".cell")
+		path := cell + ".cell"
+		os.Remove(path)
+		file, err := os.Create(path)
 		if err != nil {
 			return err
 		}
@@ -133,9 +131,23 @@ If no name is given, the default cellname is used (which can be changed with 'no
 		if err != nil {
 			return err
 		}
-
-		return nil
+		if *cellSaveOutput != outputJSON {
+			return nil
+		}
+		format := "yaml"
+		if saveJson {
+			format = "json"
+		}
+		return writeJSON(cmd, savedCell{Cell: cell, Path: absPath(path), Format: format})
 	},
+}
+
+// savedCell is the JSON result of 'cell save -o json'.
+type savedCell struct {
+	Cell string `json:"cell"`
+	Path string `json:"path"`
+	// format of the file: yaml or json (--json)
+	Format string `json:"format"`
 }
 
 var installCmd = &cobra.Command{
@@ -252,7 +264,12 @@ func completeCell(cmd *cobra.Command, args []string, toComplete string) ([]strin
 	return comp, cobra.ShellCompDirectiveNoFileComp
 }
 
+// -o/--output of 'cell list' and 'cell save'
+var cellListOutput, cellSaveOutput *outputFormat
+
 func init() {
+	cellListOutput = addOutputFlag(listCmd)
+	cellSaveOutput = addOutputFlag(saveCmd)
 	cellCmd.AddCommand(deleteCmd)
 	cellCmd.AddCommand(addCmd)
 	cellCmd.AddCommand(listCmd)

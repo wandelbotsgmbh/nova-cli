@@ -114,7 +114,11 @@ var createAppCmd = &cobra.Command{
 		if len(args) > 0 {
 			appName = strings.TrimSpace(args[0])
 		}
-		return createAppProject(appName)
+		path, err := createAppProject(appName)
+		if err != nil || path == "" || *appCreateOutput != outputJSON {
+			return err
+		}
+		return writeJSON(cmd, createdApp{Name: appName, Generator: appGenerator, Path: absPath(path)})
 	},
 }
 
@@ -437,10 +441,7 @@ var listAppsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		for _, app := range list {
-			fmt.Fprintln(cmd.OutOrStdout(), app)
-		}
-		return nil
+		return writeNames(cmd, appListOutput, list)
 	},
 }
 
@@ -474,7 +475,12 @@ var editAppCmd = &cobra.Command{
 	},
 }
 
+// -o/--output of 'app list' and 'app create'
+var appListOutput, appCreateOutput *outputFormat
+
 func init() {
+	appListOutput = addOutputFlag(listAppsCmd)
+	appCreateOutput = addOutputFlag(createAppCmd)
 	rootCmd.AddCommand(appCmd)
 
 	// subcommands
@@ -509,17 +515,27 @@ func init() {
 	installAppCmd.MarkFlagsMutuallyExclusive("copy-image", "omit-credentials")
 }
 
-func createAppProject(appName string) error {
+// createdApp is the JSON result of 'app create -o json'.
+type createdApp struct {
+	Name      string `json:"name"`
+	Generator string `json:"generator"`
+	// the project directory
+	Path string `json:"path"`
+}
+
+// createAppProject generates the project and returns its directory, or "" when the
+// user declined to write into an existing directory.
+func createAppProject(appName string) (string, error) {
 	// TODO we might need to verify the output path
 	err := utils.VerifyProjectName(appName)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	strippedAppName, err := utils.ConvertToValidSubdomainName(appName)
 	// we could try to continue but the if the app name is not valid, the backend most likely will fail
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	cliVersion := version.GetCliVersion()
@@ -556,19 +572,19 @@ func createAppProject(appName string) error {
 		msg := fmt.Sprintf("Directory %s already exists. Contents may be overwritten. Do you want to continue?", outpath)
 		confirmed := utils.PromptUserConfirmation(msg)
 		if !confirmed {
-			return nil
+			return "", nil
 		}
 	}
 
 	if err := appGen.CreateProject(outpath, spec); err != nil {
-		return err
+		return "", err
 	}
 
 	// reset: the env files of the templates contain placeholders for the instance settings
 	if err := writeAppEnv(rootCmd, outpath, true); err != nil {
 		fmt.Fprintf(os.Stderr, "Could not write the local development settings: %v\nRun 'nova app update-env' in %s once that is fixed.\n", err, outpath)
 	}
-	return nil
+	return outpath, nil
 }
 
 // Writes the instance url, cell and a fresh access token into the gitignored env file of the

@@ -393,9 +393,30 @@ var flowBackupDownloadCmd = &cobra.Command{
 			cmd.Printf(", %d objects", len(m.Objects))
 		}
 		cmd.Printf(" of cell %q to %s\n", c.Cell(), outname)
-		return err
+		if err != nil || *flowBackupOutput != outputJSON {
+			return err
+		}
+		res := flowBackupResult{Cell: c.Cell(), Path: absPath(outname), Flows: len(m.Flows), Globals: m.Globals}
+		if flowBackupIncludeObjects {
+			n := len(m.Objects)
+			res.Objects = &n
+		}
+		return writeJSON(cmd, res)
 	},
 }
+
+// flowBackupResult is the JSON result of 'flow backup download -o json'.
+type flowBackupResult struct {
+	Cell    string `json:"cell"`
+	Path    string `json:"path"`
+	Flows   int    `json:"flows"`
+	Globals int    `json:"globals"`
+	// only with --include-objects
+	Objects *int `json:"objects,omitempty"`
+}
+
+// -o/--output of 'flow backup download'
+var flowBackupOutput *outputFormat
 
 var flowBackupRestoreCmd = &cobra.Command{
 	Use:     "restore <filename>",
@@ -773,6 +794,7 @@ func init() {
 	flowBackupRestoreCmd.Flags().BoolVar(&flowBackupIncludeObjects, "include-objects", false, "Restore the objects in the backup to the cell object store")
 	flowBackupRestoreCmd.Flags().BoolVar(&flowRestoreDryRun, "dry-run", false, "Only show what would be restored")
 
+	flowBackupOutput = addOutputFlag(flowBackupDownloadCmd)
 	flowBackupCmd.AddCommand(flowBackupDownloadCmd, flowBackupRestoreCmd)
 	flowCmd.AddCommand(flowStatusCmd, flowInstallCmd, flowUninstallCmd, flowOpenCmd, flowListCmd, flowGetCmd, flowPushCmd, flowDeleteCmd, flowBackupCmd)
 	rootCmd.AddCommand(flowCmd)
