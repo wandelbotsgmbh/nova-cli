@@ -42,6 +42,7 @@ distributes it.**
 | [0016](0016-named-instances.md) | Named instances and a per-invocation target (`--instance`, `NOVA_INSTANCE`) | proposed |
 | [0017](0017-instance-keep-alive.md) | `nova instance keep-alive` keeps an instance from expiring | proposed |
 | [0018](0018-nucleus-servers.md) | Nucleus servers are their own target (`--nucleus`, `NOVA_NUCLEUS`) | proposed |
+| [0019](0019-local-instance-mcp-tools.md) | `nova mcp` serves the instance MCP toolsets locally until the service ships | proposed |
 
 ## Glossary
 
@@ -59,11 +60,9 @@ distributes it.**
 
 ## Current state (October 2026)
 
-- `nova mcp` is EXPERIMENTAL and **does not start against v2-only instances**: the spec
-  URL is hardcoded to `/api/v1/ui/public.openapi.yaml` (`pkg/nova/oapispec.go`), which
-  returns 404 there. It mirrors every OpenAPI operation, without annotations, and
-  streaming (WebSocket) endpoints hang the tool call. Two diagnostics go to stdout and
-  corrupt the stdio transport. A separate PR fixes the immediate problems.
+- `nova mcp` is EXPERIMENTAL and serves the toolsets of the instance MCP service's
+  roadmap locally over the v2 API until the service ships (ADR-0019); motion only on
+  virtual controllers. The OpenAPI generator is gone.
 - No command offers `-o json` (the only `--json` is `cell save`, meaning file format).
 - Secrets are visible to agents: `nova config view` prints `nucleus-token`,
   `nova login token` prints the access token.
@@ -95,7 +94,7 @@ misuse is covered by physical safety at the cell. See ADR-0009.
 
 ## Roadmap
 
-1. **Fix `nova mcp`** (separate PR): spec discovery, diagnostics to stderr.
+1. **Fix `nova mcp`:** done by serving the instance MCP service's tools locally (ADR-0019).
 2. **`-o json` and `nova status`,** non-TTY data-only stdout, secrets redacted in
    `config view`, auth bound to the configured host.
 3. **`nova api`** (GET plus an explicit write allow-list, `--dry-run`, `search`,

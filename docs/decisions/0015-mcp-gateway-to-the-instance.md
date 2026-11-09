@@ -51,3 +51,8 @@ agent ──stdio──> nova mcp ──HTTP──> instance: MCP service       
 - MCP 2026-07-28 is stateless, which makes proxying simple [S5]; SDK choice per ADR-0014.
 - Supersedes the earlier proposal of a single instance-hosted MCP endpoint with local
   OpenAPI fallback.
+
+## Addendum 2026-11-09
+
+Until the instance MCP service is deployed, `nova mcp` serves its toolsets locally with
+the same names (ADR-0019), so switching to the gateway doesn't change what agents see.

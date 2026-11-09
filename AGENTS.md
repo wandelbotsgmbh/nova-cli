@@ -96,6 +96,15 @@
 * Go module: `github.com/wandelbotsgmbh/nova-cli` (public repo)
 * Merges to `main` publish `x.y.z-rc.N` prereleases (semantic-release); stable versions (Homebrew, winget, docker `latest`, docs) come from fast-forwarding the `release` branch via the Promote workflow. Use Conventional Commit messages / PR titles (`fix:`, `feat:`, `docs:`, `ci:`, …) — they decide the version bump. See `RELEASING.md`.
 
+## MCP server (`nova mcp`, ADR-0019)
+
+* Serves the toolsets of the instance MCP service's roadmap (service-manager MR !2924, `services/mcp/docs/roadmap.md` on code.wabo.run) locally over stdio until that service ships. The 8 tools in `pkg/mcp/tools.go` are ported unchanged from the MR; the toolsets in `pkg/mcp/toolsets/<name>` use the roadmap's names and rules so they can be upstreamed. `pkg/mcp/testdata/tools_snapshot.json` pins the surface (`UPDATE_SNAPSHOTS=1 go test ./pkg/mcp/` regenerates; review the diff).
+* Shared code: `pkg/mcp/tool` (toolset names, default vs opt-in, annotations, `OK`/`Fail` result lines, `Page`, `Approval` for elicitation), `pkg/mcp/novaapi` (`Client`: plain HTTP to the v2 API with error mapping, ingress 200 pages, `RequireVirtual`/`RequireAllVirtual` gate). Response structs declare only the fields handed on, never connection details, credentials, env values or tokens. The published Go clients are older than the instances, so toolsets don't use them.
+* Motion, I/O writes and mode changes only on virtual controllers (physical: `APPROVAL_REQUIRED`). `delete_cell`, `restore_backup`, `update_nova_version` go through `tool.Approval`. Server instructions in `pkg/mcp/instructions.go` (≤ 4096 chars, tested).
+* Auth per call via `mcpAuth` (`pkg/cmd/mcp.go`): non-interactive `oauth.RefreshToken`, never a device login.
+* Live tests: `TestLive*` in each toolset, skipped unless `NOVA_MCP_LIVE_HOST` (+ `NOVA_MCP_LIVE_TOKEN=$(nova login token)`, `NOVA_MCP_LIVE_CELL`, `NOVA_MCP_LIVE_CONTROLLER` for a virtual controller, default `mcp-ur5e`) is set (`pkg/mcp/internal/livetest`). They only write to `mcp-test-*` resources they delete again; motion tests move the virtual controller.
+* Smoke test: pipe `initialize`, `tools/list` and `tools/call` JSON-RPC lines into `bin/nova mcp`; stdout must carry only protocol messages.
+
 ## Agentic tooling
 
 * Design decisions for agent support (MCP, skills, `nova-agent-kit`, CLI contract, robot motion): ADRs in `docs/decisions/` (index in its README). Add a new ADR from `0000-template.md` when changing `nova mcp` or agent-facing CLI behaviour.
