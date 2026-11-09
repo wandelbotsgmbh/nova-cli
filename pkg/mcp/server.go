@@ -26,6 +26,8 @@ type Options struct {
 	ReadOnly bool
 	// DownloadDir is where tools save files (diagnosis packages, backups).
 	DownloadDir string
+	// Instances lets the agent switch the target; nil when the instance is pinned.
+	Instances tool.InstanceSwitcher
 }
 
 // NewServer returns an MCP server with the tools of opts.Toolsets. api serves the ported
@@ -37,7 +39,7 @@ func NewServer(api novaapi.API, client *novaapi.Client, opts Options) *sdk.Serve
 	}
 	server := sdk.NewServer(&sdk.Implementation{Name: "nova-cli", Version: opts.Version},
 		&sdk.ServerOptions{Instructions: instructions})
-	Register(server, api, tool.Env{Client: client, DownloadDir: opts.DownloadDir}, toolsets, opts.ReadOnly)
+	Register(server, api, tool.Env{Client: client, DownloadDir: opts.DownloadDir, Instances: opts.Instances}, toolsets, opts.ReadOnly)
 	return server
 }
 

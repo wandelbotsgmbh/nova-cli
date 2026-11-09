@@ -48,6 +48,11 @@ of the targeted instance.
     older than the instances (no datasets, session, network or model endpoints).
   - `--toolsets` and `--read-only` are flags instead of query parameters; an unknown
     toolset is an error, not ignored.
+  - **Instance switching:** the service is the instance; the CLI isn't. Unless the
+    instance is pinned (`--instance`, `NOVA_INSTANCE`), the `instances` toolset offers
+    `list_instances` and `use_instance`, which switch the target for this session only
+    (never written to the config, like every target resolution, ADR-0016). Pinned, the
+    tools aren't served at all, so an agent can't leave the instance the user chose.
 - `mark3labs/mcp-go` and `libopenapi` are dropped for `modelcontextprotocol/go-sdk`
   (ADR-0014), the SDK the service uses.
 

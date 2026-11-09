@@ -11,10 +11,13 @@ import (
 	"sync"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/novaapi"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/tool"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
@@ -32,7 +35,7 @@ var mcpCmd = &cobra.Command{
 	Long: `EXPERIMENTAL: Start an MCP server (stdio) with curated tools for the selected instance.
 
 Toolsets served by default (mostly reads):
-  context, cells, controllers, virtual-controllers, motion-group-models, system, apps,
+  instances (only when not pinned), context, cells, controllers, virtual-controllers, motion-group-models, system, apps,
   diagnosis, guides, kinematics, datasets
 Opt-in with --toolsets (e.g. --toolsets default,planning,motion or --toolsets all):
   planning, stores, motion, programs, maintenance
@@ -51,10 +54,12 @@ Guard rails (not a safety function):
 
 Downloads (diagnosis packages, backups) are saved to --download-dir.
 
-The server targets the selected instance ('nova instance select <name>'). To pin it to
-a specific instance, pass --instance <name> or set NOVA_INSTANCE (e.g. in the "env" of
-the MCP client config). Cloud instances need a 'nova login'; the login is refreshed
-automatically while the server runs.
+The server starts on the selected instance ('nova instance select <name>'). The agent
+can switch it for the session with list_instances and use_instance; that never changes
+the selection in the config. Pinned with --instance <name> or NOVA_INSTANCE (e.g. in the
+"env" of the MCP client config), the server stays on that instance and doesn't offer
+those tools. Cloud instances need a 'nova login'; the login is refreshed automatically
+while the server runs.
 
 Example for Claude Code ('.mcp.json') or Cursor ('.cursor/mcp.json'):
 
@@ -79,8 +84,11 @@ Diagnostics go to stderr; stdout carries only the MCP protocol.`,
 		if err != nil {
 			return err
 		}
-		host := currentHost()
-		if host == "" {
+		t := currentTarget()
+		// pinned with --instance or NOVA_INSTANCE: the session stays on it, the instances
+		// tools aren't served; otherwise use_instance may switch (never written to the config)
+		pinned := targetSource == instances.SourceFlag || targetSource == instances.SourceEnv
+		if t.Host == "" && pinned {
 			return nova.ErrNoInstance
 		}
 
@@ -90,7 +98,19 @@ Diagnostics go to stderr; stdout carries only the MCP protocol.`,
 		}
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-		client := novaapi.NewClient(nova.HostWithProtocol(host)+nova.API_BASE_V2, httpx.Client(), mcpAuth(), logger)
+		session := &mcpSession{current: t.Name}
+		base := ""
+		if t.Host != "" {
+			base = nova.HostWithProtocol(t.Host) + nova.API_BASE_V2
+		} else {
+			fmt.Fprintln(os.Stderr, "note: no instance selected; the agent can pick one with list_instances and use_instance")
+		}
+		client := novaapi.NewClient(base, httpx.Client(), session.auth, logger)
+		session.client = client
+		var switcher tool.InstanceSwitcher
+		if !pinned {
+			switcher = session
+		}
 		api, err := novaapi.NewFromClient(client)
 		if err != nil {
 			return err
@@ -107,33 +127,102 @@ Diagnostics go to stderr; stdout carries only the MCP protocol.`,
 			Toolsets:    toolsets,
 			ReadOnly:    mcpReadOnly,
 			DownloadDir: downloadDir,
+			Instances:   switcher,
 		})
 	},
 }
 
-// mcpAuth authenticates every request of the MCP server. Unlike one-shot commands it
-// never starts an interactive login (that would block a tool call on a browser dialog):
-// it refreshes the stored portal login when it has expired, or fails with a hint.
-func mcpAuth() novaapi.RequestEditor {
-	var mu sync.Mutex // tool calls run concurrently; a refresh writes the config
-	return func(ctx context.Context, req *http.Request) error {
-		if oauth.SendsTokenTo(req.URL.Host) {
-			env := oauth.ActiveEnvironment()
-			mu.Lock()
-			err := oauth.RefreshToken(ctx, env)
-			mu.Unlock()
-			if err != nil && !strings.Contains(err.Error(), "nova login") {
-				return fmt.Errorf("%w, run 'nova login --env %s'", err, env)
-			}
-			if err != nil {
-				return err
-			}
+// mcpSession holds the target of one `nova mcp` server: the instance it talks to
+// (switchable with use_instance unless pinned) and the authentication of its requests.
+type mcpSession struct {
+	// mu serializes token refreshes (they write the config) and instance switches
+	// (they change the active portal environment)
+	mu      sync.Mutex
+	client  *novaapi.Client
+	current string
+}
+
+// auth authenticates every request. Unlike one-shot commands it never starts an
+// interactive login (that would block a tool call on a browser dialog): it refreshes the
+// stored portal login when it has expired, or fails with a hint.
+func (m *mcpSession) auth(ctx context.Context, req *http.Request) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if oauth.SendsTokenTo(req.URL.Host) {
+		env := oauth.ActiveEnvironment()
+		err := oauth.RefreshToken(ctx, env)
+		if err != nil && !strings.Contains(err.Error(), "nova login") {
+			return fmt.Errorf("%w, run 'nova login --env %s'", err, env)
 		}
-		if err := oauth.SetAuthForRequest(req); err != nil {
+		if err != nil {
 			return err
 		}
-		return version.SetUserAgent(ctx, req)
 	}
+	if err := oauth.SetAuthForRequest(req); err != nil {
+		return err
+	}
+	return version.SetUserAgent(ctx, req)
+}
+
+// registry reads the instance registry fresh from the config file, so instances added
+// in another terminal show up. Read only, never written.
+func (m *mcpSession) registry() (*instances.Registry, error) {
+	if file := viper.ConfigFileUsed(); file != "" {
+		v := viper.New()
+		v.SetConfigFile(file)
+		if err := v.ReadInConfig(); err == nil {
+			return instances.Load(v)
+		}
+	}
+	return instances.Load(viper.GetViper())
+}
+
+func instanceInfo(i instances.Instance, current string) tool.InstanceInfo {
+	return tool.InstanceInfo{Name: i.Name, Kind: string(i.Kind), Host: i.Host, Cell: i.Cell(), Env: i.Env, Current: i.Name == current}
+}
+
+// List implements tool.InstanceSwitcher.
+func (m *mcpSession) List() ([]tool.InstanceInfo, error) {
+	r, err := m.registry()
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	current := m.current
+	m.mu.Unlock()
+	list := make([]tool.InstanceInfo, 0, len(r.Instances))
+	for _, i := range r.Instances {
+		list = append(list, instanceInfo(i, current))
+	}
+	return list, nil
+}
+
+// Use implements tool.InstanceSwitcher: later requests go to the instance name, with
+// the portal environment of a cloud instance (an explicit --env/NOVA_ENV that
+// contradicts it is an error, as for every command).
+func (m *mcpSession) Use(name string) (tool.InstanceInfo, error) {
+	r, err := m.registry()
+	if err != nil {
+		return tool.InstanceInfo{}, err
+	}
+	i, ok := r.Get(name)
+	if !ok {
+		return tool.InstanceInfo{}, fmt.Errorf("no instance %q is configured (see list_instances)", name)
+	}
+	if i.Host == "" {
+		return tool.InstanceInfo{}, fmt.Errorf("instance %q has no host", name)
+	}
+	env, _, err := resolveEnv(i)
+	if err != nil {
+		return tool.InstanceInfo{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	oauth.SetActiveEnvironment(env)
+	m.client.SwitchBaseURL(nova.HostWithProtocol(i.Host) + nova.API_BASE_V2)
+	m.current = i.Name
+	debug.Logf("mcp: session target switched to instance %q (host %q, env %s)", i.Name, i.Host, env)
+	return instanceInfo(i, m.current), nil
 }
 
 func init() {

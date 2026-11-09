@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // RequestEditor prepares every outbound request (login, User-Agent). An error from it
@@ -24,6 +25,10 @@ type RequestEditor func(ctx context.Context, req *http.Request) error
 // structs only declare the fields a tool hands on, which keeps connection details and
 // credentials out by construction.
 type Client struct {
+	// origin is the base URL the client was created with; requests built against it
+	// (by the generated client) are redirected to the current target in edit.
+	origin  string
+	mu      sync.RWMutex
 	baseURL string
 	http    *http.Client
 	editor  RequestEditor
@@ -42,11 +47,38 @@ func NewClient(baseURL string, httpClient *http.Client, editor RequestEditor, lo
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Client{baseURL: strings.TrimSuffix(baseURL, "/"), http: &withIngress, editor: editor, logger: logger}
+	baseURL = strings.TrimSuffix(baseURL, "/")
+	origin := baseURL
+	if origin == "" {
+		origin = noTargetOrigin
+	}
+	return &Client{origin: origin, baseURL: baseURL, http: &withIngress, editor: editor, logger: logger}
+}
+
+// noTargetOrigin stands in for the base URL of a client created without a target.
+const noTargetOrigin = "http://no-instance.invalid/api/v2"
+
+// SwitchBaseURL points every later request at another instance ("https://<host>/api/v2").
+// Requests in flight keep their target.
+func (c *Client) SwitchBaseURL(baseURL string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.baseURL = strings.TrimSuffix(baseURL, "/")
+}
+
+// noTargetError is returned for requests while no instance is targeted.
+type noTargetError struct{}
+
+func (noTargetError) Error() string {
+	return "no instance selected: call list_instances and use_instance first"
 }
 
 // BaseURL is the API root, e.g. "https://host/api/v2".
-func (c *Client) BaseURL() string { return c.baseURL }
+func (c *Client) BaseURL() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.baseURL
+}
 
 // HTTPClient is the client used for all requests (debug logging, ingress handling).
 func (c *Client) HTTPClient() *http.Client { return c.http }
@@ -70,6 +102,19 @@ func (e *authError) Error() string { return e.err.Error() }
 func (e *authError) Unwrap() error { return e.err }
 
 func (c *Client) edit(ctx context.Context, req *http.Request) error {
+	base := c.BaseURL()
+	if base == "" {
+		return noTargetError{}
+	}
+	if base != c.origin {
+		if rest, ok := strings.CutPrefix(req.URL.String(), c.origin); ok {
+			u, err := url.Parse(base + rest)
+			if err != nil {
+				return err
+			}
+			req.URL, req.Host = u, u.Host
+		}
+	}
 	if c.editor == nil {
 		return nil
 	}
@@ -115,7 +160,11 @@ func (c *Client) Do(ctx context.Context, call Call) (*Result, *Error) {
 		}
 		body = bytes.NewReader(raw)
 	}
-	u := c.baseURL + call.Path
+	base := c.BaseURL()
+	if base == "" {
+		return nil, c.transportError(ctx, call.Tool, noTargetError{})
+	}
+	u := base + call.Path
 	if len(call.Query) > 0 {
 		u += "?" + call.Query.Encode()
 	}
@@ -240,6 +289,10 @@ func (c *Client) RequireAllVirtual(ctx context.Context, tool, cell string) *Erro
 // DNS, connection, timeout. Running locally, the message only carries what the user
 // configured (host, error text), so it is passed on: the agent can't read our stderr.
 func (c *Client) transportError(ctx context.Context, tool string, err error) *Error {
+	var noTarget noTargetError
+	if errors.As(err, &noTarget) {
+		return &Error{Code: CodeUnavailable, Message: tool + ": " + noTarget.Error()}
+	}
 	var auth *authError
 	if errors.As(err, &auth) {
 		return &Error{Code: CodeUnauthenticated, Message: tool + ": " + auth.Error()}

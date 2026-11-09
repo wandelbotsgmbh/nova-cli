@@ -56,7 +56,7 @@ func Tools(env tool.Env) []tool.Registration {
 	c := env.Client
 	return []tool.Registration{
 		{Toolset: tool.Motion, ReadOnly: false, Add: func(s *sdk.Server) { addExecute(s, c) }},
-		{Toolset: tool.Motion, ReadOnly: false, Add: func(s *sdk.Server) { addStop(s) }},
+		{Toolset: tool.Motion, ReadOnly: false, Add: func(s *sdk.Server) { addStop(s, c) }},
 	}
 }
 
@@ -87,7 +87,11 @@ var (
 	registry   = map[string]*execution{}
 )
 
-func key(cell, controller string) string { return cell + "/" + controller }
+func key(scope, controller string) string { return scope + "/" + controller }
+
+// instanceScope identifies a cell on the targeted instance, so executions on equally
+// named cells of different instances (use_instance) don't mix.
+func instanceScope(c *novaapi.Client, cell string) string { return c.BaseURL() + "#" + cell }
 
 func register(cell, controller string, e *execution) bool {
 	registryMu.Lock()
@@ -246,7 +250,8 @@ func addExecute(s *sdk.Server, c *novaapi.Client) {
 		}
 
 		exec := &execution{trajectory: in.Trajectory}
-		if !register(in.Cell, in.Controller, exec) {
+		scope := instanceScope(c, in.Cell) // fixed for this execution, even if use_instance switches
+		if !register(scope, in.Controller, exec) {
 			return tool.Fail[ExecuteOutput](fail(name, "an execution started by this server is still running on controller '%s'; stop it with stop_execution or wait", in.Controller))
 		}
 
@@ -259,7 +264,7 @@ func addExecute(s *sdk.Server, c *novaapi.Client) {
 		if apiErr != nil {
 			runCancel()
 			connCancel()
-			unregister(in.Cell, in.Controller, exec)
+			unregister(scope, in.Controller, exec)
 			return tool.Fail[ExecuteOutput](apiErr)
 		}
 		exec.conn = conn
@@ -267,7 +272,7 @@ func addExecute(s *sdk.Server, c *novaapi.Client) {
 			_ = conn.Close(websocket.StatusNormalClosure, "")
 			runCancel()
 			connCancel()
-			unregister(in.Cell, in.Controller, exec)
+			unregister(scope, in.Controller, exec)
 		}
 
 		if apiErr := start(runCtx, exec, name, in.Trajectory, speed); apiErr != nil {
@@ -488,7 +493,7 @@ type stopOutput struct {
 	Trajectory string `json:"trajectory"`
 }
 
-func addStop(s *sdk.Server) {
+func addStop(s *sdk.Server, c *novaapi.Client) {
 	const name = "stop_execution"
 	sdk.AddTool(s, &sdk.Tool{
 		Name: name,
@@ -499,7 +504,7 @@ func addStop(s *sdk.Server) {
 		if err := tool.Required(name, "cell", in.Cell, "controller", in.Controller); err != nil {
 			return tool.Fail[stopOutput](err)
 		}
-		exec := running(in.Cell, in.Controller)
+		exec := running(instanceScope(c, in.Cell), in.Controller)
 		if exec == nil {
 			return tool.Fail[stopOutput](&novaapi.Error{Code: novaapi.CodeNotFound, Message: fmt.Sprintf(
 				"%s: no movement started by this server is running on controller '%s' in cell '%s'", name, in.Controller, in.Cell)})

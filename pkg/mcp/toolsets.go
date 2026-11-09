@@ -12,6 +12,7 @@ import (
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/toolsets/datasets"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/toolsets/diagnosis"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/toolsets/guides"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/toolsets/instances"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/toolsets/kinematics"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/toolsets/maintenance"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/toolsets/models"
@@ -39,6 +40,7 @@ func DefaultToolsets() []string { return tool.DefaultToolsets() }
 
 // toolsetPackages build the tools beyond the ones ported from the instance service.
 var toolsetPackages = []func(tool.Env) []tool.Registration{
+	instances.Tools,
 	cells.Tools, system.Tools, apps.Tools, diagnosis.Tools,
 	controllers.Tools, models.Tools, kinematics.Tools,
 	virtualcontrollers.Tools,

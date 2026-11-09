@@ -248,3 +248,50 @@ func TestValidationDetailIsPassedOn(t *testing.T) {
 		t.Errorf("expected the validation message, got %q", apiErr.Message)
 	}
 }
+
+func TestSwitchBaseURL_RedirectsEveryRequest(t *testing.T) {
+	var hitA, hitB []string
+	a := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		hitA = append(hitA, r.URL.Path)
+		jsonAnswer(`["a"]`)(w, r)
+	})
+	b := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		hitB = append(hitB, r.URL.Path)
+		jsonAnswer(`["b"]`)(w, r)
+	})
+	c := novaapi.NewClient(a+"/api/v2", nil, nil, nil)
+	api, err := novaapi.NewFromClient(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cells, _ := api.ListCells(context.Background()); len(cells) != 1 || cells[0] != "a" {
+		t.Fatalf("before the switch: %v", cells)
+	}
+	c.SwitchBaseURL(b + "/api/v2")
+	if cells, _ := api.ListCells(context.Background()); len(cells) != 1 || cells[0] != "b" {
+		t.Errorf("generated client not redirected: %v", cells)
+	}
+	var out []string
+	if err := c.Get(context.Background(), "t", "/cells", "", &out); err != nil || out[0] != "b" {
+		t.Errorf("Do not redirected: %v %v", out, err)
+	}
+	if len(hitA) != 1 || strings.Join(hitB, " ") != "/api/v2/cells /api/v2/cells" {
+		t.Errorf("hits a=%v b=%v", hitA, hitB)
+	}
+}
+
+func TestNoTarget_IsUnavailableWithHint(t *testing.T) {
+	c := novaapi.NewClient("", nil, nil, nil)
+	api, err := novaapi.NewFromClient(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = api.ListCells(context.Background())
+	apiErr := wantCode(t, err, novaapi.CodeUnavailable)
+	if !strings.Contains(apiErr.Message, "use_instance") {
+		t.Errorf("expected a hint to use_instance, got %q", apiErr.Message)
+	}
+	if err := c.Get(context.Background(), "t", "/cells", "", nil); err == nil || err.Code != novaapi.CodeUnavailable {
+		t.Errorf("Do without target: %v", err)
+	}
+}

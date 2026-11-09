@@ -295,3 +295,36 @@ func TestInstructionsWithinBudget(t *testing.T) {
 		t.Errorf("instructions must be 1..4096 chars (ADR-0008), got %d", n)
 	}
 }
+
+type oneInstance struct{}
+
+func (oneInstance) List() ([]tool.InstanceInfo, error) {
+	return []tool.InstanceInfo{{Name: "a", Current: true}}, nil
+}
+func (oneInstance) Use(string) (tool.InstanceInfo, error) { return tool.InstanceInfo{Name: "a"}, nil }
+
+func TestRegister_InstanceToolsOnlyWhenNotPinned(t *testing.T) {
+	for name, sw := range map[string]tool.InstanceSwitcher{"pinned": nil, "switchable": oneInstance{}} {
+		server := sdk.NewServer(&sdk.Implementation{Name: "t", Version: "t"}, nil)
+		novamcp.Register(server, &fakeAPI{}, tool.Env{Client: novaapi.NewClient("http://nova.invalid/api/v2", nil, nil, nil), Instances: sw},
+			novamcp.DefaultToolsets(), true)
+		ct, st := sdk.NewInMemoryTransports()
+		if _, err := server.Connect(context.Background(), st, nil); err != nil {
+			t.Fatal(err)
+		}
+		cs, err := sdk.NewClient(&sdk.Implementation{Name: "c", Version: "c"}, nil).Connect(context.Background(), ct, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := cs.ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names := strings.Join(toolNames(t, res), ",")
+		has := strings.Contains(names, "use_instance") && strings.Contains(names, "list_instances")
+		if has != (sw != nil) {
+			t.Errorf("%s: instance tools served=%v (read-only), tools: %s", name, has, names)
+		}
+		cs.Close()
+	}
+}

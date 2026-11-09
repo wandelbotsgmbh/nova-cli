@@ -40,11 +40,14 @@ const (
 	Motion             = "motion"
 	Programs           = "programs"
 	Maintenance        = "maintenance"
+	// Instances switches the target of the session; local to nova mcp (the instance
+	// service is the instance) and only served when the instance isn't pinned.
+	Instances = "instances"
 )
 
 // DefaultToolsets are served without --toolsets: mostly reads.
 func DefaultToolsets() []string {
-	return []string{Context, Cells, Controllers, VirtualControllers, MotionGroupModels, System, Apps,
+	return []string{Instances, Context, Cells, Controllers, VirtualControllers, MotionGroupModels, System, Apps,
 		Diagnosis, Guides, Kinematics, Datasets}
 }
 
@@ -202,4 +205,28 @@ type Env struct {
 	// DownloadDir is where tools save files they fetch (diagnosis packages, backups);
 	// results name the absolute path. Created on first use.
 	DownloadDir string
+	// Instances lists and switches the target instance of this session. Nil when the
+	// instance is pinned (--instance, NOVA_INSTANCE): then the instances tools aren't
+	// served at all.
+	Instances InstanceSwitcher
+}
+
+// InstanceInfo describes a configured instance, without secrets (no tokens,
+// kubeconfig paths or ssh users).
+type InstanceInfo struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind" jsonschema:"cloud, host or k8srun"`
+	Host    string `json:"host"`
+	Cell    string `json:"cell" jsonschema:"default cell of the entry"`
+	Env     string `json:"env,omitempty" jsonschema:"portal environment of a cloud instance"`
+	Current bool   `json:"current" jsonschema:"true for the instance this session targets"`
+}
+
+// InstanceSwitcher is implemented by the CLI: the registry is in the user's nova config.
+type InstanceSwitcher interface {
+	// List returns the configured instances, read fresh from the config.
+	List() ([]InstanceInfo, error)
+	// Use makes name the target of this session (never written to the config) and
+	// returns it. The error message is user-facing.
+	Use(name string) (InstanceInfo, error)
 }

@@ -20,4 +20,5 @@ Rules:
 12. set_virtual_joint_position teleports without planning or collision check; use it only while nothing moves that motion group.
 13. set_output_values: call list_io_descriptions (direction=output) first for valid ids and types.
 14. Dataset poses are relative to their frame: resolve_poses_to_world before using them in planning or kinematics. create_dataset on an existing id needs new_revision.
-15. Troubleshooting: diagnose_instance, then create_diagnosis_package and read_diagnosis_file (from_end, contains). Never read, print or upload a backup file: it can contain credentials. Never put secrets in app environment variables.`
+15. use_instance (only offered when the instance isn't pinned) switches this session's target: confirm with the user unless they named the instance, don't call other tools in parallel with it, then call get_context.
+16. Troubleshooting: diagnose_instance, then create_diagnosis_package and read_diagnosis_file (from_end, contains). Never read, print or upload a backup file: it can contain credentials. Never put secrets in app environment variables.`

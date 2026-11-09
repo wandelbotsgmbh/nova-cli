@@ -18,18 +18,20 @@ import (
 // specPath is the instance's public API description, relative to /api/v2.
 const specPath = "/ui/public.openapi.yaml"
 
-// specCache loads the instance's API description once per process; a failed load is
-// retried on the next call.
+// specCache loads the instance's API description once per instance (use_instance can
+// switch it); a failed load is retried on the next call.
 type specCache struct {
 	client *novaapi.Client
 	mu     sync.Mutex
 	spec   *apiSpec
+	base   string
 }
 
 func (c *specCache) get(ctx context.Context, toolName string) (*apiSpec, *novaapi.Error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.spec != nil {
+	base := c.client.BaseURL()
+	if c.spec != nil && c.base == base {
 		return c.spec, nil
 	}
 	res, apiErr := c.client.Do(ctx, novaapi.Call{Tool: toolName, Method: http.MethodGet, Path: specPath,
@@ -41,7 +43,7 @@ func (c *specCache) get(ctx context.Context, toolName string) (*apiSpec, *novaap
 	if err != nil {
 		return nil, c.client.UnexpectedAnswer(ctx, toolName, res.Status, res.Body)
 	}
-	c.spec = spec
+	c.spec, c.base = spec, base
 	return spec, nil
 }
 

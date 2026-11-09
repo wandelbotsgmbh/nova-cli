@@ -20,7 +20,7 @@ func New(baseURL string, httpClient *http.Client, editor RequestEditor, logger *
 
 // NewFromClient returns an API that sends its requests through c.
 func NewFromClient(c *Client) (API, error) {
-	gen, err := apiv2.NewClientWithResponses(c.baseURL, apiv2.WithHTTPClient(c.http), apiv2.WithRequestEditorFn(c.edit))
+	gen, err := apiv2.NewClientWithResponses(c.origin, apiv2.WithHTTPClient(c.http), apiv2.WithRequestEditorFn(c.edit))
 	if err != nil {
 		return nil, fmt.Errorf("create NOVA API client: %w", err)
 	}
@@ -138,7 +138,7 @@ func projectController(robot apiv2.RobotController) ControllerInfo {
 // in use doesn't have yet.
 func (a *adapter) ListRobotConfigurations(ctx context.Context) ([]string, error) {
 	const tool = "list_robot_configurations"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/robot-configurations", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.BaseURL()+"/robot-configurations", nil)
 	if err != nil {
 		return nil, a.transportError(ctx, tool, err)
 	}
