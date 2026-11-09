@@ -228,6 +228,12 @@ jobs:
           export INSTANCE_TOKEN
           . testdata/app_health_check.sh
           check_app_reachability "your-nova-app"
+      # nova api against the instance: v2 API (read, write round trip, errors,
+      # stream refusal) and the API of the app installed above
+      - name: nova api
+        env:
+          NOVA_API_E2E_APP: your-nova-app
+        run: testdata/api/e2e.sh
       # every run moves :latest, the previous image stays untagged; keep the newest 10
       - name: Prune old e2e images
         continue-on-error: true

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/ingress"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
@@ -160,20 +161,20 @@ func (c *Client) send(ctx context.Context, r request) (*response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: reading response: %w", r.method, u, err)
 	}
-	if isUnauthorizedPage(b) || isLoginRedirect(resp) {
+	if ingress.IsUnauthorizedPage(b) || ingress.IsLoginRedirect(resp) {
 		return nil, ErrUnauthorized
 	}
-	if code, ok := errorPageCode(resp.Header, b); ok {
+	if code, ok := ingress.ErrorPageCode(resp.Header, b); ok {
 		if code == http.StatusUnauthorized {
 			return nil, ErrUnauthorized
 		}
-		return nil, &APIError{Method: r.method, URL: u, Status: code, Detail: errorDetail(b)}
+		return nil, &APIError{Method: r.method, URL: u, Status: code, Detail: ingress.ErrorDetail(b)}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if resp.StatusCode == http.StatusNotFound && !isJSON(resp.Header) {
+		if resp.StatusCode == http.StatusNotFound && !ingress.IsJSON(resp.Header) {
 			return nil, fmt.Errorf("%s %s: %w", r.method, u, ErrUnreachable)
 		}
-		return nil, &APIError{Method: r.method, URL: u, Status: resp.StatusCode, Detail: errorDetail(b)}
+		return nil, &APIError{Method: r.method, URL: u, Status: resp.StatusCode, Detail: ingress.ErrorDetail(b)}
 	}
 	return &response{status: resp.StatusCode, header: resp.Header, body: b}, nil
 }
@@ -187,74 +188,13 @@ func (c *Client) do(ctx context.Context, r request, out any) (*response, error) 
 	if out == nil {
 		return resp, nil
 	}
-	if !isJSON(resp.header) {
+	if !ingress.IsJSON(resp.header) {
 		return nil, fmt.Errorf("%s %s: unexpected %q answer: %w", r.method, c.base+r.path, resp.header.Get("Content-Type"), ErrUnreachable)
 	}
 	if err := json.Unmarshal(resp.body, out); err != nil {
 		return nil, fmt.Errorf("%s %s: decoding answer: %w", r.method, c.base+r.path, err)
 	}
 	return resp, nil
-}
-
-func isJSON(h http.Header) bool {
-	return strings.Contains(h.Get("Content-Type"), "json")
-}
-
-func isUnauthorizedPage(b []byte) bool {
-	return bytes.HasPrefix(bytes.TrimSpace(b), []byte("Error 401"))
-}
-
-func isLoginRedirect(resp *http.Response) bool {
-	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
-		return false
-	}
-	loc := resp.Header.Get("Location")
-	return strings.Contains(loc, "/oauth2/") || strings.Contains(loc, "login")
-}
-
-// errorPageCode recognizes the ingress' JSON error page, which (like the
-// plain-text one) may come with HTTP 200:
-// {"error": true, "code": 401, "message": "Unauthorized", ...}
-func errorPageCode(h http.Header, b []byte) (int, bool) {
-	if !isJSON(h) || !bytes.HasPrefix(bytes.TrimSpace(b), []byte("{")) {
-		return 0, false
-	}
-	var page struct {
-		Error bool `json:"error"`
-		Code  int  `json:"code"`
-	}
-	if json.Unmarshal(b, &page) != nil || !page.Error || page.Code < 400 {
-		return 0, false
-	}
-	return page.Code, true
-}
-
-// errorDetail extracts FastAPI's "detail" or the NOVA "message" field, and
-// falls back to the (shortened) body.
-func errorDetail(b []byte) string {
-	var e struct {
-		Detail  any    `json:"detail"`
-		Message string `json:"message"`
-	}
-	if json.Unmarshal(b, &e) == nil {
-		switch d := e.Detail.(type) {
-		case string:
-			return d
-		case nil:
-		default:
-			if j, err := json.Marshal(d); err == nil {
-				return string(j)
-			}
-		}
-		if e.Message != "" {
-			return e.Message
-		}
-	}
-	s := strings.TrimSpace(string(b))
-	if len(s) > 300 {
-		s = s[:300] + "…"
-	}
-	return s
 }
 
 func (c *Client) appPath(app, path string) string {

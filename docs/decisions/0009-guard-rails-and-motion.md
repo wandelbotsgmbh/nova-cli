@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-31
 - **Status:** accepted
-- **Implementation:** not started
+- **Implementation:** not started; for `nova api` superseded by the addendum of 2026-11-09
 
 ## Context
 
@@ -173,3 +173,39 @@ What this changes elsewhere:
   holds for that prototype. It does not apply to a coding agent whose client is the
   developer's tool, and the local preview covers the "shows no preview" objection.
 - Protection against deliberate misuse is unchanged: physical safety at the cell.
+
+## Addendum 2026-11-09: no guard rails in `nova api`; labels belong in the spec
+
+`nova api` ships without the classification above: no read/write/severe/motion lists, no
+`--read-only`, no `--confirm`, no controller lookup. A first implementation had all of it
+(181 operations on four hand-kept lists) and was removed before release, because:
+
+- **The CLI is not a boundary.** An agent that runs `nova api` can also call the API
+  directly with the same credentials (the Context section above says so already). Guard
+  rails in the CLI only catch mistakes, and only on one of several paths to the API.
+- **The CLI is the wrong owner of the labels.** Which operation is safe for an agent is a
+  property of the API, versioned with it. A list in the CLI drifts with every NOVA
+  release and has to be maintained by people who don't own the endpoints.
+
+Instead, endpoints should be labeled in the instance's OpenAPI spec, by the team that owns
+them, so every client (CLI, MCP servers, SDKs, agent frameworks) reads the same labels.
+Options, to be decided with the platform team:
+
+- **A vendor extension per operation** (preferred), e.g. `x-nova-agent: read | write |
+  severe | motion`, or behaviour hints in the style of MCP tool annotations
+  (`readOnly`, `destructive`, `idempotent`, `moves-robot`). Extensions are the OpenAPI way
+  to carry machine-readable metadata; the spec already uses them (`x-scope`,
+  `x-serverstream`, `x-bidistream`).
+- **Tags:** visible in the docs and in generated SDKs, but tags are meant for grouping
+  (the API docs navigate by them), an operation would carry a functional and a safety tag,
+  and a tag has no value, only presence.
+- **An OpenAPI Overlay** maintained next to the spec: labels without touching the
+  generators, but a second file that drifts.
+- **Enforcement on the instance:** the spec's `x-scope` permissions per operation
+  (`can_operate_controllers`, `can_manage_cells`, …) are where real protection belongs: an
+  agent gets a token without the scopes it must not use. Labels inform clients; scopes are
+  what an agent can't work around.
+
+The motion policy above (virtual freely, physical only after a human approved a preview)
+stays the goal; it is enforced on the instance or in the app that moves the robot, not in
+`nova api`.
