@@ -268,7 +268,8 @@ func TestUnauthorizedPageWithStatus200(t *testing.T) {
 
 func TestJSONErrorPageWithStatus200(t *testing.T) {
 	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"error": true, "code": 401, "message": "Unauthorized"})
+		writeJSON(w, 200, map[string]any{"error": true, "code": 401, "message": "Unauthorized",
+			"details": map[string]any{"ingress_name": "api-gateway", "original_uri": r.URL.Path}})
 	}))
 	if _, err := c.FeatureFlags(context.Background()); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("an error page must not be read as feature flags, got %v", err)

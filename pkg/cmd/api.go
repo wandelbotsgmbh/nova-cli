@@ -179,7 +179,21 @@ func loadAPISpec(ctx context.Context) (*novaapi.Spec, error) {
 	if err != nil {
 		return nil, err
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, specTimeout())
+	defer cancel()
 	return c.LoadSpec(ctx, apiCacheDir())
+}
+
+// specTimeout bounds reading the NOVA version and the spec: --timeout, or a
+// minute when it is 0 (no limit applies to the request itself, not to this).
+func specTimeout() time.Duration {
+	if apiFlags.timeout > 0 {
+		return apiFlags.timeout
+	}
+	return time.Minute
 }
 
 func writeAPIJSON(cmd *cobra.Command, v any) error {
@@ -341,9 +355,11 @@ func apiOperation(ctx context.Context, client *novaapi.Client, method, path stri
 	if !strings.HasPrefix(path, novaapi.BasePath+"/") {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, specTimeout())
+	defer cancel()
 	spec, err := client.LoadSpec(ctx, apiCacheDir())
 	if err != nil {
-		debug.Logf("api: no spec, sending the request unchecked: %v", err)
+		fmt.Fprintf(os.Stderr, "Warning: can't read the instance's API spec, sending the request unchecked: %v\n", err)
 		return nil
 	}
 	op, _ := novaapi.Match(spec.Operations(), method, path)
@@ -379,17 +395,23 @@ func dryRunRequest(req *http.Request, op *novaapi.Operation, body []byte) apiReq
 }
 
 func sendAPIRequest(cmd *cobra.Command, client *novaapi.Client, req *http.Request) error {
-	// The timeout covers the wait for the headers, not the download of the body;
-	// 0 waits as long as the instance takes (long polls).
+	// The timeout covers the wait for the headers, not the body: the timer stops
+	// as soon as the headers are there. 0 waits as long as the instance takes.
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
-	timer := time.AfterFunc(apiFlags.timeout, cancel)
-	if apiFlags.timeout <= 0 {
-		timer.Stop()
+	var timer *time.Timer
+	if apiFlags.timeout > 0 {
+		timer = time.AfterFunc(apiFlags.timeout, cancel)
 	}
-	resp, err := client.Do(req.WithContext(ctx))
-	if !timer.Stop() && err != nil && apiFlags.timeout > 0 {
+	resp, err := client.RoundTrip(req.WithContext(ctx))
+	if timer != nil && !timer.Stop() {
+		if err == nil {
+			resp.Body.Close()
+		}
 		return fmt.Errorf("%s %s: no answer within %s (--timeout)", req.Method, req.URL, apiFlags.timeout)
+	}
+	if err == nil {
+		resp, err = novaapi.CheckAnswer(resp)
 	}
 	if errors.Is(err, novaapi.ErrUnauthorized) {
 		return &typedError{Code: "UNAUTHORIZED", Message: err.Error(), Hint: "run 'nova login'", exit: 1}

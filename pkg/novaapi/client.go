@@ -90,13 +90,25 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 	return req, nil
 }
 
-// Do sends req. The answer's body is wrapped so its start can be inspected
-// without consuming it; an answer that means "not logged in" is ErrUnauthorized.
+// Do sends req and checks the answer (see CheckAnswer).
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
-	resp, err := c.http.Do(req)
+	resp, err := c.RoundTrip(req)
 	if err != nil {
 		return nil, err
 	}
+	return CheckAnswer(resp)
+}
+
+// RoundTrip sends req and returns as soon as the answer's headers are there,
+// without looking at the body. Pass the answer to CheckAnswer.
+func (c *Client) RoundTrip(req *http.Request) (*http.Response, error) {
+	return c.http.Do(req)
+}
+
+// CheckAnswer turns an answer that means "not logged in" into ErrUnauthorized
+// (and closes it). It waits for the first bytes of the body only; the body is
+// wrapped so its start can be inspected again without consuming it.
+func CheckAnswer(resp *http.Response) (*http.Response, error) {
 	br := bufio.NewReaderSize(resp.Body, 4096)
 	head := PeekStart(br)
 	if ingress.IsUnauthorized(resp, head) {

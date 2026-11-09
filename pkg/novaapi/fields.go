@@ -1,9 +1,10 @@
 package novaapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
-	"strconv"
+	"regexp"
 	"strings"
 )
 
@@ -25,7 +26,10 @@ func ParseRawField(s string) (Field, error) {
 // ParseTypedField parses -F key=value: true, false, null and numbers become
 // JSON literals, @file (or @- for stdin) reads the value from a file, anything
 // else stays a string. (gh converts only integers; numbers with a fraction are
-// common in the NOVA API, poses and joints, so they are converted too.)
+// common in the NOVA API, poses and joints, so they are converted too.) A
+// number is passed on exactly as written (no rounding of large integers, no
+// reformatting in the query); forms JSON doesn't allow (0x10, +1, 01, NaN) stay
+// strings.
 func ParseTypedField(s string, readFile func(string) ([]byte, error)) (Field, error) {
 	f, err := ParseRawField(s)
 	if err != nil {
@@ -45,20 +49,14 @@ func ParseTypedField(s string, readFile func(string) ([]byte, error)) (Field, er
 			return f, fmt.Errorf("field %q: %w", f.Key, err)
 		}
 		f.Value = string(b)
-	default:
-		if i, err := strconv.ParseInt(v, 10, 64); err == nil {
-			f.Value = i
-		} else if x, err := strconv.ParseFloat(v, 64); err == nil && !strings.ContainsAny(v, "xXpP_") && !isSpecialFloat(v) {
-			f.Value = x
-		}
+	case jsonNumber.MatchString(v):
+		f.Value = json.Number(v)
 	}
 	return f, nil
 }
 
-func isSpecialFloat(v string) bool {
-	l := strings.ToLower(strings.TrimLeft(v, "+-"))
-	return l == "inf" || l == "infinity" || l == "nan"
-}
+// jsonNumber is the number grammar of JSON (RFC 8259).
+var jsonNumber = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
 // BuildBody turns fields into a JSON object. Keys use gh's syntax for nesting:
 // a[b]=1 sets {"a": {"b": 1}}, a[]=1 appends to the array a, a[][b]=1 starts a

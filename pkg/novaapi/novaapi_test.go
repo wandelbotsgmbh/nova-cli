@@ -46,7 +46,7 @@ func TestMatch(t *testing.T) {
 func TestBuildBody(t *testing.T) {
 	read := func(name string) ([]byte, error) { return []byte("content of " + name), nil }
 	var fields []Field
-	for _, s := range []string{"name=a", "n=3", "x=1.5", "ok=true", "none=null", "hex=0x10", "nan=NaN", "file=@f.txt", "pose[position][]=1", "pose[position][]=2", "items[][a]=1", "items[][b]=2", "items[][a]=3"} {
+	for _, s := range []string{"name=a", "n=3", "x=1.5", "ok=true", "none=null", "hex=0x10", "nan=NaN", "big=12345678901234567890", "exp=1e3", "dec=1.50", "lead=01", "plus=+1", "file=@f.txt", "pose[position][]=1", "pose[position][]=2", "items[][a]=1", "items[][b]=2", "items[][a]=3"} {
 		f, err := ParseTypedField(s, read)
 		if err != nil {
 			t.Fatal(err)
@@ -60,7 +60,7 @@ func TestBuildBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := json.Marshal(body)
-	want := `{"file":"content of f.txt","hex":"0x10","items":[{"a":1,"b":2},{"a":3}],"n":3,"name":"a","nan":"NaN","none":null,"ok":true,"pose":{"position":[1,2]},"raw":"true","x":1.5}`
+	want := `{"big":12345678901234567890,"dec":1.50,"exp":1e3,"file":"content of f.txt","hex":"0x10","items":[{"a":1,"b":2},{"a":3}],"lead":"01","n":3,"name":"a","nan":"NaN","none":null,"ok":true,"plus":"+1","pose":{"position":[1,2]},"raw":"true","x":1.5}`
 	if string(got) != want {
 		t.Errorf("body\n got %s\nwant %s", got, want)
 	}
@@ -78,7 +78,7 @@ func TestBuildBody(t *testing.T) {
 	if _, err := ParseRawField("novalue"); err == nil {
 		t.Error("field without = must fail")
 	}
-	if q := AddQuery("/p?x=1", []Field{{"a[]", int64(1)}, {"a[]", int64(2)}, {"s", "x y"}}); q != "/p?x=1&a=1&a=2&s=x+y" {
+	if q := AddQuery("/p?x=1", []Field{{"a[]", json.Number("1")}, {"a[]", json.Number("2")}, {"s", "x y"}, {"f", json.Number("0.00001")}}); q != "/p?x=1&a=1&a=2&f=0.00001&s=x+y" {
 		t.Errorf("query %s", q)
 	}
 }

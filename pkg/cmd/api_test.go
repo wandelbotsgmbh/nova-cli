@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,9 +49,11 @@ paths:
 // apiInstance is a fake instance for `nova api`; it records the requests it got
 // besides the spec and version lookups.
 type apiInstance struct {
-	mu       sync.Mutex
-	requests []string
-	bodies   []string
+	// hangVersion makes /api/v2/system/version hang until the test ends.
+	hangVersion atomic.Bool
+	mu          sync.Mutex
+	requests    []string
+	bodies      []string
 }
 
 func (a *apiInstance) got() []string {
@@ -65,6 +68,10 @@ func withAPIInstance(t *testing.T) *apiInstance {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v2/system/version":
+			if a.hangVersion.Load() {
+				<-r.Context().Done()
+				return
+			}
 			_, _ = io.WriteString(w, "26.8.0")
 			return
 		case "/api/v2/ui/public.openapi.yaml":
@@ -88,6 +95,15 @@ func withAPIInstance(t *testing.T) *apiInstance {
 		case "/api/v2/system/diagnosis-package/zip":
 			w.Header().Set("Content-Type", "application/zip")
 			_, _ = w.Write([]byte("PK\x03\x04\x00zip"))
+		case "/api/v2/slow-body":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			time.Sleep(300 * time.Millisecond)
+			_, _ = io.WriteString(w, `{"late":true}`)
+		case "/api/v2/cells/cell/store/objects/looks-like-error":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"error":true,"code":401,"message":"stored by a user"}`)
 		case "/api/v2/slow":
 			time.Sleep(300 * time.Millisecond)
 			_, _ = io.WriteString(w, "late")
@@ -246,5 +262,46 @@ func TestAPITimeout(t *testing.T) {
 	stdout, _, err := runAsProcess(t, "api", "/api/v2/slow", "--timeout", "0")
 	if err != nil || stdout != "late" {
 		t.Fatalf("err %v, stdout %q", err, stdout)
+	}
+}
+
+// A hanging instance must not block the spec lookup forever: it is bounded by
+// --timeout, then the request is sent unchecked (here: only printed).
+func TestAPISpecLookupIsBounded(t *testing.T) {
+	a := withAPIInstance(t)
+	a.hangVersion.Store(true)
+	done := make(chan error, 1)
+	var stdout, stderr string
+	go func() {
+		var err error
+		stdout, stderr, err = runAsProcess(t, "api", "/api/v2/cells/{cell}/store/objects/k", "-X", "PUT", "-f", "a=b", "--dry-run", "--timeout", "200ms")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil || !strings.Contains(stdout, `"method": "PUT"`) || !strings.Contains(stderr, "sending the request unchecked") {
+			t.Fatalf("err %v, stdout %q, stderr %q", err, stdout, stderr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("nova api hangs while the instance doesn't answer the version")
+	}
+}
+
+// --timeout limits the wait for the headers, not for the body.
+func TestAPITimeoutStopsAtTheHeaders(t *testing.T) {
+	withAPIInstance(t)
+	stdout, stderr, err := runAsProcess(t, "api", "/api/v2/slow-body", "--timeout", "100ms")
+	if err != nil || stdout != `{"late":true}` {
+		t.Fatalf("err %v, stdout %q, stderr %q", err, stdout, stderr)
+	}
+}
+
+// Answers of a service that look like an ingress error page (but lack its
+// markers) are data, not errors.
+func TestAPIServiceAnswerLikeAnErrorPage(t *testing.T) {
+	withAPIInstance(t)
+	stdout, stderr, err := runAsProcess(t, "api", "/api/v2/cells/{cell}/store/objects/looks-like-error")
+	if err != nil || !strings.Contains(stdout, "stored by a user") {
+		t.Fatalf("err %v, stdout %q, stderr %q", err, stdout, stderr)
 	}
 }
