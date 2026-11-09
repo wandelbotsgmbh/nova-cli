@@ -111,7 +111,7 @@ func AddAppV2Impl(host string, cell string, app string, config apiv2.App) error 
 			return nil, nil, err
 		}
 		return resp.HTTPResponse, resp.Body, nil
-	}, "failed to create new app")
+	}, func() error { return waitForCellRunning(host, cell, app) }, "failed to create new app")
 }
 
 func AddAppFromJsonV2Impl(host, cell, app string, config []byte) error {
@@ -127,7 +127,7 @@ func AddAppFromJsonV2Impl(host, cell, app string, config []byte) error {
 			return nil, nil, err
 		}
 		return resp.HTTPResponse, resp.Body, nil
-	}, "failed to create new app")
+	}, func() error { return waitForCellRunning(host, cell, app) }, "failed to create new app")
 }
 
 func AddAppFromYamlV2Impl(host, cell, app string, config []byte) error {
@@ -232,7 +232,7 @@ func CreateCellV2Impl(host string, cell string) error {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
 		return resp, body, nil
-	}, "failed to create cell")
+	}, func() error { return waitForCellRunning(host, cell, "") }, "failed to create cell")
 }
 
 func DeleteCellV2Impl(host string, cell string) error {

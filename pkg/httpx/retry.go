@@ -40,8 +40,19 @@ func IsConnectionDrop(err error) bool {
 		strings.HasSuffix(msg, ": EOF")
 }
 
+// FirstRetryDelay is the wait before resending a request whose connection dropped: the
+// ingress is usually still reloading right after the drop.
+func FirstRetryDelay() time.Duration { return retryDelays[0] }
+
 // idempotent reports whether sending req again can't do more than sending it once.
+// Conditional requests (If-Match, ...) are excluded: if the dropped attempt went
+// through, the resend fails its precondition and reads as someone else's change.
 func idempotent(req *http.Request) bool {
+	for _, h := range []string{"If-Match", "If-None-Match", "If-Unmodified-Since", "If-Modified-Since"} {
+		if req.Header.Get(h) != "" {
+			return false
+		}
+	}
 	switch req.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodPut, http.MethodDelete:
 		return req.Body == nil || req.Body == http.NoBody || req.GetBody != nil

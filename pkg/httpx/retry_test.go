@@ -111,3 +111,15 @@ func TestIsConnectionDrop(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+func TestRetry_ConditionalRequestNotResent(t *testing.T) {
+	srv, calls := dropFirst(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusPreconditionFailed) })
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/flows/x", strings.NewReader(`{}`))
+	req.Header.Set("If-Match", `"rev-1"`)
+	if _, err := Client().Do(req); err == nil || !IsConnectionDrop(err) {
+		t.Fatalf("expected the drop to surface, got %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("a conditional PUT must not be resent, got %d calls", calls.Load())
+	}
+}
