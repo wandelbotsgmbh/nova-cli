@@ -29,9 +29,7 @@ func dropFirst(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *atomi
 		handler(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	old := retryDelays
-	retryDelays = []time.Duration{time.Millisecond, time.Millisecond}
-	t.Cleanup(func() { retryDelays = old })
+	fastRetries(t, time.Millisecond, time.Second)
 	return srv, &calls
 }
 
@@ -128,9 +126,7 @@ func TestRetry_ConditionalRequestNotResent(t *testing.T) {
 // A refused connection never reached the instance: every method is resent, a POST too,
 // and the answer isn't marked as a resend (a 404 is a real 404).
 func TestRetry_RefusedConnectionResentForEveryMethod(t *testing.T) {
-	old := retryDelays
-	retryDelays = []time.Duration{20 * time.Millisecond, 20 * time.Millisecond}
-	t.Cleanup(func() { retryDelays = old })
+	fastRetries(t, 20*time.Millisecond, time.Second)
 
 	// a port nothing listens on yet; the server starts during the first retry delay
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -163,5 +159,58 @@ func TestRetry_RefusedConnectionResentForEveryMethod(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated || got != `{"name":"app"}` || Retried(resp) {
 		t.Errorf("status=%d body=%q retried=%v", resp.StatusCode, got, Retried(resp))
+	}
+}
+
+// fastRetries shortens the retry waits and budget for a test.
+func fastRetries(t *testing.T, delay, budget time.Duration) {
+	t.Helper()
+	oldDelays, oldBudget := retryDelays, retryBudget
+	retryDelays, retryBudget = []time.Duration{delay}, budget
+	t.Cleanup(func() { retryDelays, retryBudget = oldDelays, oldBudget })
+}
+
+// A cell install reloads the ingress several times: every drop is retried until the
+// budget is used up.
+func TestRetry_RepeatedDropsWithinBudget(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) <= 4 {
+			_, _ = io.ReadAll(r.Body)
+			conn, _, _ := w.(http.Hijacker).Hijack()
+			conn.Close()
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	fastRetries(t, time.Millisecond, time.Second)
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/cells/cell", strings.NewReader(`{}`))
+	resp, err := Client().Do(req)
+	if err != nil {
+		t.Fatalf("expected the PUT to get through after 4 drops, got %v", err)
+	}
+	resp.Body.Close()
+	if calls.Load() != 5 {
+		t.Errorf("calls=%d, want 5", calls.Load())
+	}
+}
+
+func TestRetry_GivesUpAfterBudget(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		conn, _, _ := w.(http.Hijacker).Hijack()
+		conn.Close()
+	}))
+	defer srv.Close()
+	fastRetries(t, 20*time.Millisecond, 100*time.Millisecond)
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/cells/cell", strings.NewReader(`{}`))
+	start := time.Now()
+	if _, err := Client().Do(req); err == nil || !IsConnectionDrop(err) {
+		t.Fatalf("expected the drop after the budget, got %v", err)
+	}
+	if took := time.Since(start); took > time.Second || calls.Load() < 3 {
+		t.Errorf("took %s with %d calls; want a few calls within the budget", took, calls.Load())
 	}
 }

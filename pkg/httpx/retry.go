@@ -20,8 +20,15 @@ func Retried(resp *http.Response) bool {
 	return resp != nil && resp.Header.Get(RetriedHeader) != ""
 }
 
-// retryDelays are the waits before the retries of a request whose connection dropped.
-var retryDelays = []time.Duration{time.Second, 3 * time.Second}
+// retryDelays are the waits before the retries of a dropped or refused request; the
+// last one repeats until retryBudget is used up.
+var retryDelays = []time.Duration{time.Second, 3 * time.Second, 5 * time.Second, 10 * time.Second}
+
+// retryBudget limits how long a request is retried. A cell install reloads the
+// instance's ingress several times in a row (each controller and service adds
+// routes), each reload cutting the long-running PUT again (seen in e2e: drop, refusal,
+// drop ~25 s later), so a fixed number of retries isn't enough.
+var retryBudget = 3 * time.Minute
 
 // IsConnectionDrop reports whether err means the connection was closed while the
 // request was in flight: an HTTP/2 GOAWAY for a stream the server had already
@@ -81,16 +88,21 @@ func retryRoundTrip(send func(*http.Request) (*http.Response, error), req *http.
 	// only a dropped attempt may have reached the instance: then a 404 on a resent
 	// DELETE means it went through (Retried); a refused one never arrived
 	dropped := false
-	for _, delay := range retryDelays {
+	start := time.Now()
+	for attempt := 0; ; attempt++ {
+		delay := retryDelays[min(attempt, len(retryDelays)-1)]
+		if time.Since(start)+delay > retryBudget {
+			return resp, err
+		}
 		if req.Context().Err() != nil || !rewindable(req) {
 			return resp, err
 		}
 		switch {
 		case IsConnectionRefused(err):
-			fmt.Fprintf(os.Stderr, "note: the instance refused the connection for %s %s, retrying in %s\n", req.Method, req.URL.Path, delay)
+			fmt.Fprintf(os.Stderr, "note: the instance refused the connection for %s %s, retrying in %s (attempt %d)\n", req.Method, req.URL.Path, delay, attempt+2)
 		case IsConnectionDrop(err) && idempotent(req):
 			dropped = true
-			fmt.Fprintf(os.Stderr, "note: the instance closed the connection during %s %s, retrying in %s\n", req.Method, req.URL.Path, delay)
+			fmt.Fprintf(os.Stderr, "note: the instance closed the connection during %s %s, retrying in %s (attempt %d)\n", req.Method, req.URL.Path, delay, attempt+2)
 		default:
 			return resp, err
 		}
@@ -112,5 +124,4 @@ func retryRoundTrip(send func(*http.Request) (*http.Response, error), req *http.
 			resp.Header.Set(RetriedHeader, "1")
 		}
 	}
-	return resp, err
 }
