@@ -106,6 +106,8 @@ func withAPIInstance(t *testing.T) *apiInstance {
 			_, _ = io.WriteString(w, page[100:])
 		case "/api/v2/moved":
 			http.Redirect(w, r, "/api/v2/cells/cell/controllers/kuka", http.StatusTemporaryRedirect)
+		case "/api/v2/moved-see-other":
+			http.Redirect(w, r, "/api/v2/cells/cell/controllers/kuka", http.StatusSeeOther)
 		case "/api/v2/elsewhere":
 			http.Redirect(w, r, "https://other.example/x", http.StatusTemporaryRedirect)
 		case "/api/v2/slow-body":
@@ -226,6 +228,14 @@ func TestAPIDryRunSendsNothing(t *testing.T) {
 	if got := a.got(); len(got) != 0 {
 		t.Errorf("requests sent: %v", got)
 	}
+	// numbers are shown as sent, not rounded through float64
+	stdout, stderr, err = runAsProcess(t, "api", "/x", "-X", "PUT", "-F", "id=12345678901234567890", "-F", "x=1.50", "--dry-run")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	if !strings.Contains(stdout, `"id": 12345678901234567890`) || !strings.Contains(stdout, `"x": 1.50`) {
+		t.Errorf("dry run changed numbers: %s", stdout)
+	}
 }
 
 func TestAPIBinaryNeedsOutput(t *testing.T) {
@@ -340,6 +350,15 @@ func TestAPIRedirects(t *testing.T) {
 	_, _, err = runAsProcess(t, "api", "/api/v2/elsewhere")
 	if err == nil || !strings.Contains(err.Error(), "https://other.example/x") {
 		t.Fatalf("redirect to another host: %v", err)
+	}
+	// a write is not turned into a GET: the 303 is reported, not the GET's answer
+	stdout, _, err = runAsProcess(t, "api", "/api/v2/moved-see-other", "-X", "POST", "-f", "a=b")
+	if err == nil || !strings.Contains(err.Error(), "303") || strings.Contains(stdout, "KukaController") {
+		t.Fatalf("write redirected with 303: err %v, stdout %q", err, stdout)
+	}
+	stdout, _, err = runAsProcess(t, "api", "/api/v2/moved-see-other")
+	if err != nil || !strings.Contains(stdout, "KukaController") {
+		t.Fatalf("GET redirected with 303: err %v, stdout %q", err, stdout)
 	}
 }
 

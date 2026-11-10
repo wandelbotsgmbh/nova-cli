@@ -47,10 +47,13 @@ func newClient(base string, hc *http.Client) (*Client, error) {
 	// Redirects on the instance (e.g. FastAPI's trailing slash) are followed, like
 	// gh api does. The login redirect and redirects to other hosts are not: the
 	// first would turn "not logged in" into the login page, the second would
-	// leave the instance (ADR-0006).
+	// leave the instance (ADR-0006). Neither is a redirect that changes the
+	// method: on 301/302/303 net/http resends a write as a GET without body, so
+	// the write would report the GET's answer although nothing was written.
 	h := *hc
 	h.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 || ingress.Strict.IsLoginRedirect(req.Response) ||
+			req.Method != via[0].Method ||
 			req.URL.Scheme != u.Scheme || req.URL.Host != u.Host {
 			return http.ErrUseLastResponse
 		}

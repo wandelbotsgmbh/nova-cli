@@ -433,9 +433,9 @@ func dryRunRequest(req *http.Request, op *novaapi.Operation, body []byte) apiReq
 		r.Headers[k] = strings.Join(vs, ", ")
 	}
 	if len(body) > 0 {
-		var v any
-		if json.Unmarshal(body, &v) == nil {
-			r.Body = v
+		// JSON goes out as sent (numbers unchanged), anything else as a string
+		if json.Valid(body) {
+			r.Body = json.RawMessage(body)
 		} else {
 			r.Body = string(body)
 		}
