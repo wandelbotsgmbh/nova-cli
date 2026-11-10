@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -185,6 +186,9 @@ type Call struct {
 	// NotFound is the message for a 404, built from the identifiers in the request
 	// (never echo the answer). Empty means "not found".
 	NotFound string
+	// AcceptStatus lists non-2xx statuses that are an answer, not an error, for this
+	// call (e.g. 403 with the license status in the body).
+	AcceptStatus []int
 }
 
 // Result of a successful call.
@@ -199,6 +203,45 @@ type Result struct {
 // FORBIDDEN with the API's own message, 401 UNAUTHENTICATED, 409 ALREADY_EXISTS,
 // unreachable UNAVAILABLE, anything else INTERNAL (details to the log).
 func (c *Client) Do(ctx context.Context, call Call) (*Result, *Error) {
+	resp, apiErr := c.send(ctx, call)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, c.transportError(ctx, call.Tool, err)
+	}
+	if apiErr := c.checkStatus(ctx, call, resp.StatusCode, raw); apiErr != nil {
+		return nil, apiErr
+	}
+	return &Result{Status: resp.StatusCode, Header: resp.Header, Body: raw}, nil
+}
+
+// Download is Do for answers too large to hold in memory: a 2xx body is copied to w,
+// at most max bytes (more is an error). It returns the number of bytes written.
+func (c *Client) Download(ctx context.Context, call Call, w io.Writer, max int64) (int64, *Error) {
+	resp, apiErr := c.send(ctx, call)
+	if apiErr != nil {
+		return 0, apiErr
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		return 0, c.checkStatus(ctx, call, resp.StatusCode, raw)
+	}
+	n, err := io.Copy(w, io.LimitReader(resp.Body, max+1))
+	if err != nil {
+		return n, c.transportError(ctx, call.Tool, err)
+	}
+	if n > max {
+		return n, &Error{Code: CodeInternal, Message: fmt.Sprintf("%s: the answer is larger than %d MiB", call.Tool, max>>20)}
+	}
+	return n, nil
+}
+
+// send builds and sends the request of call.
+func (c *Client) send(ctx context.Context, call Call) (*http.Response, *Error) {
 	var body io.Reader
 	if call.Body != nil {
 		raw, err := json.Marshal(call.Body)
@@ -230,18 +273,18 @@ func (c *Client) Do(ctx context.Context, call Call) (*Result, *Error) {
 	if err != nil {
 		return nil, c.transportError(ctx, call.Tool, err)
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, c.transportError(ctx, call.Tool, err)
+	return resp, nil
+}
+
+// checkStatus maps a status that is no answer for call to an *Error.
+func (c *Client) checkStatus(ctx context.Context, call Call, status int, raw []byte) *Error {
+	switch {
+	case status >= 200 && status <= 299, slices.Contains(call.AcceptStatus, status):
+		return nil
+	case status == http.StatusConflict:
+		return &Error{Code: CodeAlreadyExists, Message: call.Tool + ": " + apiMessage(raw, "the resource already exists or is in a conflicting state")}
 	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		if resp.StatusCode == http.StatusConflict {
-			return nil, &Error{Code: CodeAlreadyExists, Message: call.Tool + ": " + apiMessage(raw, "the resource already exists or is in a conflicting state")}
-		}
-		return nil, c.statusError(ctx, call.Tool, resp.StatusCode, raw, call.NotFound)
-	}
-	return &Result{Status: resp.StatusCode, Header: resp.Header, Body: raw}, nil
+	return c.statusError(ctx, call.Tool, status, raw, call.NotFound)
 }
 
 // JSON sends call and decodes a 2xx JSON answer into out (may be nil to ignore the body).

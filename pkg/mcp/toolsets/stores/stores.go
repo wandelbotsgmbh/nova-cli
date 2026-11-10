@@ -83,6 +83,20 @@ func storePath(cell string) string {
 	return "/cells/" + url.PathEscape(cell) + "/store"
 }
 
+// looksLikeErrorPage reports whether an object's content could be an error page of the
+// instance ingress: "Error 401: ..." or {"error": true, "code": 401, ...}.
+func looksLikeErrorPage(body []byte) bool {
+	s := bytes.TrimSpace(body)
+	if bytes.HasPrefix(s, []byte("Error ")) {
+		return true
+	}
+	var page struct {
+		Error bool `json:"error"`
+		Code  int  `json:"code"`
+	}
+	return json.Unmarshal(s, &page) == nil && page.Error && page.Code >= 400
+}
+
 // objectPath keeps "/" in keys unescaped, as the object store expects (see
 // pkg/novaflow).
 func objectPath(cell, key string) string {
@@ -262,7 +276,12 @@ func listItems(c *novaapi.Client) tool.Registration {
 			if in.Kind == KindObject {
 				var keys []string
 				_, err := c.JSON(ctx, novaapi.Call{Tool: name, Method: http.MethodGet, Path: storePath(in.Cell) + "/objects"}, &keys)
-				if err != nil && err.Code != novaapi.CodeNotFound { // the store is created on first write
+				if err != nil && err.Code == novaapi.CodeNotFound {
+					// the store is created on first write, so 404 is "empty", unless
+					// the cell itself doesn't exist
+					err = c.Get(ctx, name, "/cells/"+url.PathEscape(in.Cell), fmt.Sprintf("cell '%s' not found", in.Cell), nil)
+				}
+				if err != nil {
 					return tool.Fail[listOutput](err)
 				}
 				for _, key := range keys {
@@ -393,6 +412,14 @@ func getItem(c *novaapi.Client) tool.Registration {
 			body := res.Body
 			if len(body) > maxBodyBytes {
 				body = nil
+			}
+			// Object reads are exempt from the client's check for ingress error pages
+			// (served with HTTP 200), because an object may hold such text. So when the
+			// content looks like one, ask an endpoint that is checked.
+			if looksLikeErrorPage(body) {
+				if err := c.Get(ctx, name, "/cells/"+url.PathEscape(in.Cell), fmt.Sprintf("cell '%s' not found", in.Cell), nil); err != nil {
+					return tool.Fail[getOutput](err)
+				}
 			}
 			out.Size = len(res.Body)
 			var compact bytes.Buffer

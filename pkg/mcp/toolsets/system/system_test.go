@@ -56,6 +56,8 @@ func fake(t *testing.T, answers map[string]string) *novaapi.Client {
 			return
 		case "404":
 			w.WriteHeader(http.StatusNotFound)
+		case "403":
+			w.WriteHeader(http.StatusForbidden)
 		}
 		_, _ = w.Write([]byte(body))
 	}))
@@ -155,5 +157,20 @@ func TestLiveSystemTools(t *testing.T) {
 			t.Errorf("%s leaked the session id", name)
 		}
 		t.Logf("%s: %s", name, text)
+	}
+}
+
+// The API answers 403 with the license status when the license is not valid: that is
+// the answer, not a refusal.
+func TestGetLicenseStatus_InvalidLicenseIsAnAnswer(t *testing.T) {
+	cs := connect(t, fake(t, map[string]string{"GET /license/status": `403 {"status":"EXPIRED","message":"expired on 2026-01-01"}`}))
+	res, text, structured := call(t, cs, "get_license_status", nil)
+	if res.IsError || !strings.Contains(structured, `"EXPIRED"`) {
+		t.Errorf("expected the license status, got %q / %s", text, structured)
+	}
+
+	cs = connect(t, fake(t, map[string]string{"GET /license/status": `403 {"message":"no"}`}))
+	if res, text, _ := call(t, cs, "get_license_status", nil); !res.IsError || !strings.HasPrefix(text, "FORBIDDEN:") {
+		t.Errorf("a 403 without a status stays FORBIDDEN, got %q", text)
 	}
 }

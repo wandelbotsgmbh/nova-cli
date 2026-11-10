@@ -719,7 +719,8 @@ func deleteDataset(c *novaapi.Client) tool.Registration {
 			Description: "Delete one revision of a dataset (the latest unless 'revision' is set) with its poses and command " +
 				"routines; older revisions stay and are listed in the result. DESTRUCTIVE and not undoable: confirm with the " +
 				"user first, naming cell, dataset and revision.",
-			Annotations: tool.Destructive("Delete dataset"),
+			// not idempotent: without 'revision' every call deletes the then-latest one
+			Annotations: tool.Annotations("Delete dataset", false, false, true, false),
 		}, func(ctx context.Context, _ *sdk.CallToolRequest, in datasetInput) (*sdk.CallToolResult, deleteDatasetOutput, error) {
 			if err := tool.Required(name, "cell", in.Cell, "dataset", in.Dataset); err != nil {
 				return tool.Fail[deleteDatasetOutput](err)
@@ -730,11 +731,16 @@ func deleteDataset(c *novaapi.Client) tool.Registration {
 			}, nil); err != nil {
 				return tool.Fail[deleteDatasetOutput](err)
 			}
+			// the delete is done: a failing listing must not make it look failed (a
+			// repeated call would delete the next revision)
+			fields := map[string]any{"cell": in.Cell, "dataset": in.Dataset}
 			remaining, err := listRevisions(ctx, c, name, in.Cell, in.Dataset)
 			if err != nil {
-				return tool.Fail[deleteDatasetOutput](err)
+				remaining = []int{}
+				fields["remaining_revisions"] = "unknown (listing failed, see list_datasets)"
+			} else {
+				fields["remaining_revisions"] = len(remaining)
 			}
-			fields := map[string]any{"cell": in.Cell, "dataset": in.Dataset, "remaining_revisions": len(remaining)}
 			if in.Revision > 0 {
 				fields["revision"] = in.Revision
 			} else {

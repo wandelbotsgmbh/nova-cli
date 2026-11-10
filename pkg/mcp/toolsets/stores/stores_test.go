@@ -143,10 +143,44 @@ func TestListStoreItems_ObjectsPrefixAndMissingStore(t *testing.T) {
 		t.Errorf("unexpected items %+v", out.Items)
 	}
 
-	empty, _ := fake(t, nil) // 404: the store is created on first write
+	// 404 for the objects of an existing cell: the store is created on first write
+	empty, _ := fake(t, map[string]func(http.ResponseWriter){"GET /cells/cell": answer(200, "application/json", `{"name":"cell"}`)})
 	res, text := call(t, connect(t, empty, false), "list_store_items", map[string]any{"cell": "cell", "kind": "object"})
 	if res.IsError || !strings.Contains(text, "total=0") {
 		t.Errorf("expected an empty list, got %q", text)
+	}
+
+	// ... but not for a cell that doesn't exist (typo)
+	missing, _ := fake(t, nil)
+	res, text = call(t, connect(t, missing, false), "list_store_items", map[string]any{"cell": "cel", "kind": "object"})
+	if !res.IsError || !strings.HasPrefix(text, "NOT_FOUND:") || !strings.Contains(text, "cell 'cel'") {
+		t.Errorf("expected NOT_FOUND for the cell, got %q", text)
+	}
+}
+
+// Object reads are exempt from the ingress page check, so a login page served with
+// HTTP 200 for both HEAD and GET must not come back as the object's content.
+func TestGetStoreItem_IngressPageIsNotObjectContent(t *testing.T) {
+	page := "Error 401: Unauthorized"
+	c, _ := fake(t, map[string]func(http.ResponseWriter){
+		"HEAD /cells/cell/store/objects/a.txt": answer(200, "text/plain", "", "Content-Length", "23"),
+		"GET /cells/cell/store/objects/a.txt":  answer(200, "text/plain", page),
+		"GET /cells/cell":                      answer(200, "text/plain", page),
+	})
+	res, text := call(t, connect(t, c, false), "get_store_item", map[string]any{"cell": "cell", "kind": "object", "key": "a.txt"})
+	if !res.IsError || !strings.HasPrefix(text, "UNAUTHENTICATED:") {
+		t.Errorf("expected UNAUTHENTICATED, got %q", text)
+	}
+
+	// a real object with that text, on an instance that answers normally
+	c, _ = fake(t, map[string]func(http.ResponseWriter){
+		"HEAD /cells/cell/store/objects/a.txt": answer(200, "text/plain", "", "Content-Length", "23"),
+		"GET /cells/cell/store/objects/a.txt":  answer(200, "text/plain", page),
+		"GET /cells/cell":                      answer(200, "application/json", `{"name":"cell"}`),
+	})
+	res, text = call(t, connect(t, c, false), "get_store_item", map[string]any{"cell": "cell", "kind": "object", "key": "a.txt"})
+	if res.IsError || !strings.HasPrefix(text, "OK:") {
+		t.Errorf("expected the object, got %q", text)
 	}
 }
 

@@ -78,10 +78,13 @@ func Approval(ctx context.Context, req *sdk.CallToolRequest, toolName, message s
 	}
 }
 
+// canElicit reports whether the client can ask the human. On MCP 2026-07-28 the
+// capabilities come with each request, on older versions with initialize; the SDK
+// reads both.
 func canElicit(req *sdk.CallToolRequest) bool {
-	if req == nil || req.Session == nil {
+	if req == nil {
 		return false
 	}
-	params := req.Session.InitializeParams()
-	return params != nil && params.Capabilities != nil && params.Capabilities.Elicitation != nil
+	caps := req.ClientCapabilities()
+	return caps != nil && caps.Elicitation != nil
 }

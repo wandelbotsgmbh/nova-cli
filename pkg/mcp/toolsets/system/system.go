@@ -127,10 +127,17 @@ type LicenseStatus struct {
 	Message string `json:"message"`
 }
 
-// FetchLicenseStatus returns the status of the instance's license.
+// FetchLicenseStatus returns the status of the instance's license. The API answers
+// 403 with the status in the body when the license is not valid: that is an answer.
 func FetchLicenseStatus(ctx context.Context, c *novaapi.Client, toolName string) (LicenseStatus, *novaapi.Error) {
 	var out LicenseStatus
-	err := c.Get(ctx, toolName, "/license/status", "no license status on this instance", &out)
+	call := novaapi.Call{Tool: toolName, Method: http.MethodGet, Path: "/license/status",
+		NotFound: "no license status on this instance", AcceptStatus: []int{http.StatusForbidden}}
+	status, err := c.JSON(ctx, call, &out)
+	if err == nil && status == http.StatusForbidden && out.Status == "" {
+		// a 403 without a license status is a plain refusal
+		err = &novaapi.Error{Code: novaapi.CodeForbidden, Message: toolName + ": this operation is not allowed"}
+	}
 	return out, err
 }
 

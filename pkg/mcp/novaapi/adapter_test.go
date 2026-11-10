@@ -249,7 +249,7 @@ func TestValidationDetailIsPassedOn(t *testing.T) {
 	}
 }
 
-func TestSwitchBaseURL_RedirectsEveryRequest(t *testing.T) {
+func TestSwitchTarget_RedirectsEveryRequest(t *testing.T) {
 	var hitA, hitB []string
 	a := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		hitA = append(hitA, r.URL.Path)

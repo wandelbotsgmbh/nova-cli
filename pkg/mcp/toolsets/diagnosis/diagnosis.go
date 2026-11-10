@@ -9,7 +9,6 @@ package diagnosis
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -109,7 +108,9 @@ func diagnoseInstance(c *novaapi.Client) tool.Registration {
 				return tool.Fail[diagnoseOutput](err)
 			}
 			out.Version = version
-			if license, err := system.FetchLicenseStatus(ctx, c, name); err == nil {
+			if license, err := system.FetchLicenseStatus(ctx, c, name); err != nil {
+				out.Findings = append(out.Findings, "the license status could not be read: "+err.Message)
+			} else {
 				out.License = license.Status
 				if license.Status != "OK" {
 					out.Findings = append(out.Findings, fmt.Sprintf("license %s: %s", license.Status, license.Message))
@@ -228,14 +229,6 @@ func createDiagnosisPackage(c *novaapi.Client, downloadDir string) tool.Registra
 			if downloadDir == "" {
 				return tool.Fail[packageOutput](&novaapi.Error{Code: novaapi.CodeInternal, Message: name + ": no download directory configured, start nova mcp with --download-dir"})
 			}
-			res, err := c.Do(ctx, novaapi.Call{Tool: name, Method: http.MethodGet, Path: "/system/diagnosis-package/zip"})
-			if err != nil {
-				return tool.Fail[packageOutput](err)
-			}
-			zr, zerr := zip.NewReader(bytes.NewReader(res.Body), int64(len(res.Body)))
-			if zerr != nil {
-				return tool.Fail[packageOutput](c.UnexpectedAnswer(ctx, name, res.Status, res.Body))
-			}
 			if err := tool.PrepareDownloadDir(downloadDir); err != nil {
 				return tool.Fail[packageOutput](localError(name, err))
 			}
@@ -246,16 +239,28 @@ func createDiagnosisPackage(c *novaapi.Client, downloadDir string) tool.Registra
 				return tool.Fail[packageOutput](localError(name, ferr))
 			}
 			path := f.Name()
-			if _, werr := f.Write(res.Body); werr != nil {
-				f.Close()
-				os.Remove(path)
-				return tool.Fail[packageOutput](localError(name, werr))
+			// streamed to the file: a package holds the logs of all services
+			size, err := c.Download(ctx, novaapi.Call{Tool: name, Method: http.MethodGet, Path: "/system/diagnosis-package/zip"}, f, maxPackageBytes)
+			if cerr := f.Close(); err == nil && cerr != nil {
+				err = localError(name, cerr)
 			}
-			if cerr := f.Close(); cerr != nil {
+			if err != nil {
 				os.Remove(path)
-				return tool.Fail[packageOutput](localError(name, cerr))
+				return tool.Fail[packageOutput](err)
 			}
-			out := packageOutput{Path: path, SizeBytes: int64(len(res.Body))}
+			zr, zerr := zip.OpenReader(path)
+			if zerr != nil {
+				head := make([]byte, 512)
+				if hf, oerr := os.Open(path); oerr == nil {
+					n, _ := io.ReadFull(hf, head)
+					head = head[:n]
+					hf.Close()
+				}
+				os.Remove(path)
+				return tool.Fail[packageOutput](c.UnexpectedAnswer(ctx, name, http.StatusOK, head))
+			}
+			defer zr.Close()
+			out := packageOutput{Path: path, SizeBytes: size}
 			for _, f := range zr.File {
 				if readable(f.Name) {
 					out.LogFiles++
@@ -266,6 +271,9 @@ func createDiagnosisPackage(c *novaapi.Client, downloadDir string) tool.Registra
 	}
 	return tool.Registration{Toolset: tool.Diagnosis, ReadOnly: false, Add: add}
 }
+
+// maxPackageBytes bounds a diagnosis package on disk.
+const maxPackageBytes = 4 << 30
 
 func localError(toolName string, err error) *novaapi.Error {
 	return &novaapi.Error{Code: novaapi.CodeInternal, Message: fmt.Sprintf("%s: %v", toolName, err)}
