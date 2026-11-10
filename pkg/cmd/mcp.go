@@ -117,9 +117,7 @@ Diagnostics go to stderr; stdout carries only the MCP protocol.`,
 			switcher = session
 			// without them an agent can't pick an instance, and with no instance
 			// selected every other tool would only say "call use_instance first"
-			if !slices.Contains(toolsets, tool.Instances) {
-				toolsets = append(toolsets, tool.Instances)
-			}
+			toolsets = withInstanceTools(toolsets)
 		}
 		api, err := novaapi.NewFromClient(client)
 		if err != nil {
@@ -147,6 +145,18 @@ Diagnostics go to stderr; stdout carries only the MCP protocol.`,
 			Instances:   switcher,
 		})
 	},
+}
+
+// withInstanceTools adds the instances toolset to the selection of an unpinned session.
+// An empty selection means the defaults, and must still mean them afterwards.
+func withInstanceTools(toolsets []string) []string {
+	if len(toolsets) == 0 {
+		toolsets = mcp.DefaultToolsets()
+	}
+	if !slices.Contains(toolsets, tool.Instances) {
+		toolsets = append(slices.Clone(toolsets), tool.Instances)
+	}
+	return toolsets
 }
 
 // mcpSession holds the target of one `nova mcp` server: the instance it talks to
