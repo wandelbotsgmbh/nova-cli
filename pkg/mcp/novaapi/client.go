@@ -240,6 +240,13 @@ func (c *Client) Download(ctx context.Context, call Call, w io.Writer, max int64
 	return n, nil
 }
 
+// Refused maps an answer that was let through by call.AcceptStatus to the error it is
+// after all, e.g. a 403 whose body isn't the expected answer.
+func (c *Client) Refused(ctx context.Context, call Call, res *Result) *Error {
+	call.AcceptStatus = nil
+	return c.checkStatus(ctx, call, res.Status, res.Body)
+}
+
 // send builds and sends the request of call.
 func (c *Client) send(ctx context.Context, call Call) (*http.Response, *Error) {
 	var body io.Reader

@@ -133,12 +133,17 @@ func FetchLicenseStatus(ctx context.Context, c *novaapi.Client, toolName string)
 	var out LicenseStatus
 	call := novaapi.Call{Tool: toolName, Method: http.MethodGet, Path: "/license/status",
 		NotFound: "no license status on this instance", AcceptStatus: []int{http.StatusForbidden}}
-	status, err := c.JSON(ctx, call, &out)
-	if err == nil && status == http.StatusForbidden && out.Status == "" {
-		// a 403 without a license status is a plain refusal
-		err = &novaapi.Error{Code: novaapi.CodeForbidden, Message: toolName + ": this operation is not allowed"}
+	res, err := c.Do(ctx, call)
+	if err != nil {
+		return out, err
 	}
-	return out, err
+	if json.Unmarshal(res.Body, &out) != nil || out.Status == "" {
+		if res.Status == http.StatusForbidden {
+			return out, c.Refused(ctx, call, res) // a plain refusal, with the API's message
+		}
+		return out, c.UnexpectedAnswer(ctx, toolName, res.Status, res.Body)
+	}
+	return out, nil
 }
 
 // CheckUpdate asks for a newer version on channel at path ("/system/update" or

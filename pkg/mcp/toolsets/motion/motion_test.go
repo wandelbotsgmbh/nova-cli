@@ -431,3 +431,15 @@ func TestExecute_ConnectionLost(t *testing.T) {
 		t.Errorf("the lost connection was noticed after %s", took)
 	}
 }
+
+// ... but when the movement has ended by the time the connection closes, that is the
+// result: a closed connection alone is no failure.
+func TestExecute_ConnectionClosedAfterTheEnd(t *testing.T) {
+	f := newVirtual()
+	f.runPolls, f.dropAfterStart = 0, true
+	cs := connect(t, f.server(t))
+	res, text := call(t, cs, "execute_trajectory", execArgs)
+	if res.IsError || !strings.Contains(text, "state=END_OF_TRAJECTORY") {
+		t.Fatalf("unexpected result %q", text)
+	}
+}

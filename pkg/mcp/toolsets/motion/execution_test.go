@@ -29,10 +29,21 @@ func TestRunning_FindsExecutionOfAnotherInstance(t *testing.T) {
 		t.Fatal("register failed")
 	}
 	t.Cleanup(func() { unregister("https://a/api/v2#cell", "sim", exec) })
-	if got := running("https://b/api/v2#cell", "cell", "sim"); got != exec {
+	if got := running("https://b/api/v2#cell", "cell", "sim"); len(got) != 1 || got[0] != exec {
 		t.Errorf("expected the execution started on instance a, got %v", got)
 	}
-	if got := running("https://b/api/v2#cell", "cell", "other"); got != nil {
+	if got := running("https://b/api/v2#cell", "cell", "other"); len(got) != 0 {
 		t.Errorf("another controller must not match, got %v", got)
+	}
+	// the same cell and controller name on a second instance: a stop from a third
+	// instance reaches both
+	other := &execution{trajectory: "t2"}
+	register("https://c/api/v2#cell", "sim", other)
+	t.Cleanup(func() { unregister("https://c/api/v2#cell", "sim", other) })
+	if got := running("https://b/api/v2#cell", "cell", "sim"); len(got) != 2 {
+		t.Errorf("expected both executions, got %v", got)
+	}
+	if got := running("https://c/api/v2#cell", "cell", "sim"); len(got) != 1 || got[0] != other {
+		t.Errorf("the execution of the current instance comes first and alone, got %v", got)
 	}
 }

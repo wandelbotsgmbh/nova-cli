@@ -79,6 +79,7 @@ type execution struct {
 	conn       *websocket.Conn // nil until the connection is up
 	stopped    bool
 	lost       bool // the connection broke: nothing can be sent any more
+	ending     bool // the execution is over and closes its connection itself
 }
 
 // pause stops the movement. An execution is registered before its connection is up
@@ -88,6 +89,9 @@ func (e *execution) pause(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.stopped = true
+	if e.ending {
+		return nil // it ended on its own
+	}
 	if e.lost {
 		return errConnectionLost
 	}
@@ -109,10 +113,22 @@ func (e *execution) pauseNote() string {
 	return "the movement was paused"
 }
 
-func (e *execution) markLost() {
+// markLost records that the connection broke. It reports false when the execution is
+// ending and closed the connection itself.
+func (e *execution) markLost() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.ending {
+		return false
+	}
 	e.lost = true
+	return true
+}
+
+func (e *execution) end() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.ending = true
 }
 
 // send writes a request of the start sequence, unless the execution was stopped.
@@ -162,21 +178,22 @@ func unregister(cell, controller string, e *execution) {
 	}
 }
 
-// running returns the execution on controller in scope. If there is none, it looks for
-// one on the same cell and controller name of another instance (the session may have
-// switched with use_instance since the movement was started).
-func running(scope, cell, controller string) *execution {
+// running returns the execution on controller in scope. If there is none, it returns
+// those on the same cell and controller name of other instances (the session may have
+// switched with use_instance since a movement was started): a stop must reach them.
+func running(scope, cell, controller string) []*execution {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	if e := registry[key(scope, controller)]; e != nil {
-		return e
+		return []*execution{e}
 	}
+	var found []*execution
 	for k, e := range registry {
 		if strings.HasSuffix(k, "#"+cell+"/"+controller) {
-			return e
+			found = append(found, e)
 		}
 	}
-	return nil
+	return found
 }
 
 // --- execute_trajectory ---
@@ -335,6 +352,7 @@ func addExecute(s *sdk.Server, c *novaapi.Client) {
 		exec.conn = conn
 		exec.mu.Unlock()
 		finish := func() {
+			exec.end()
 			_ = conn.Close(websocket.StatusNormalClosure, "")
 			runCancel()
 			connCancel()
@@ -357,8 +375,7 @@ func addExecute(s *sdk.Server, c *novaapi.Client) {
 			for {
 				msg, err := readMessage(connCtx, conn)
 				if err != nil {
-					if connCtx.Err() == nil { // not closed by finish: the connection broke
-						exec.markLost()
+					if connCtx.Err() == nil && exec.markLost() { // not closed by finish: the connection broke
 						select {
 						case wsErr <- lostMessage:
 						default:
@@ -534,13 +551,13 @@ func watch(ctx context.Context, c *novaapi.Client, name, statePath string, exec 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
+		lost := false
 		select {
 		case msg := <-wsErr:
-			if msg == lostMessage {
-				return last, fail(name, "the connection of the execution to the instance was lost at location %.3f, so it can't be stopped from here any more: "+
-					"the robot may still be moving, check get_motion_group_state and stop it in the NOVA UI", last.location)
+			if msg != lostMessage {
+				return last, fail(name, "the controller aborted the movement: %s", msg)
 			}
-			return last, fail(name, "the controller aborted the movement: %s", msg)
+			lost = true // one more look at the state: the movement may just have ended
 		case <-cancel:
 			return last, fail(name, "the call was cancelled at location %.3f; %s", last.location, exec.pauseNote())
 		case <-ctx.Done():
@@ -549,6 +566,9 @@ func watch(ctx context.Context, c *novaapi.Client, name, statePath string, exec 
 		}
 		var state motionGroupState
 		if err := c.Get(ctx, name, statePath, "motion group not found", &state); err != nil {
+			if lost {
+				return last, lostError(name, last)
+			}
 			if ctx.Err() != nil {
 				continue // the timeout is handled by the select
 			}
@@ -581,6 +601,9 @@ func watch(ctx context.Context, c *novaapi.Client, name, statePath string, exec 
 					return last, nil
 				}
 			}
+			if lost {
+				return last, lostError(name, last)
+			}
 			continue
 		}
 		// a short trajectory may end between two polls; then only the position tells
@@ -595,7 +618,15 @@ func watch(ctx context.Context, c *novaapi.Client, name, statePath string, exec 
 			last.state = "PAUSED_BY_USER"
 			return last, nil
 		}
+		if lost {
+			return last, lostError(name, last)
+		}
 	}
+}
+
+func lostError(name string, last *finalState) *novaapi.Error {
+	return fail(name, "the connection of the execution to the instance was lost at location %.3f, so it can't be stopped from here any more: "+
+		"the robot may still be moving, check get_motion_group_state and stop it in the NOVA UI", last.location)
 }
 
 // --- stop_execution ---
@@ -622,28 +653,38 @@ func addStop(s *sdk.Server, c *novaapi.Client) {
 		if err := tool.Required(name, "cell", in.Cell, "controller", in.Controller); err != nil {
 			return tool.Fail[stopOutput](err)
 		}
-		exec := running(instanceScope(ctx, c, in.Cell), in.Cell, in.Controller)
-		if exec == nil {
+		execs := running(instanceScope(ctx, c, in.Cell), in.Cell, in.Controller)
+		if len(execs) == 0 {
 			return tool.Fail[stopOutput](&novaapi.Error{Code: novaapi.CodeNotFound, Message: fmt.Sprintf(
 				"%s: no movement started by this server is running on controller '%s' in cell '%s'", name, in.Controller, in.Cell)})
 		}
-		if err := exec.pause(ctx); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return tool.Fail[stopOutput](tool.AsAPIError(err))
+		// more than one only after use_instance, for movements on equally named cells
+		// and controllers of other instances: a stop reaches them all
+		var hosts, trajectories []string
+		for _, exec := range execs {
+			hosts, trajectories = append(hosts, exec.host), append(trajectories, exec.trajectory)
+			if err := exec.pause(ctx); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return tool.Fail[stopOutput](tool.AsAPIError(err))
+				}
+				return tool.Fail[stopOutput](fail(name, "sending the pause to %s failed: %v; the robot may still be moving, stop it in the NOVA UI", exec.host, err))
 			}
-			return tool.Fail[stopOutput](fail(name, "sending the pause failed: %v; the robot may still be moving, stop it in the NOVA UI", err))
 		}
-		// the watcher of the execution ends it when the robot reports the pause
-		select {
-		case <-exec.done:
-		case <-ctx.Done():
-			return tool.Fail[stopOutput](tool.AsAPIError(ctx.Err()))
-		case <-time.After(stopConfirm):
-			return tool.Fail[stopOutput](fail(name, "the pause was sent, but the robot on %s didn't report a standstill within %s: "+
-				"check get_motion_group_state and stop it in the NOVA UI", exec.host, stopConfirm))
+		// the watcher of an execution ends it when the robot reports the pause
+		confirm := time.After(stopConfirm)
+		for _, exec := range execs {
+			select {
+			case <-exec.done:
+			case <-ctx.Done():
+				return tool.Fail[stopOutput](tool.AsAPIError(ctx.Err()))
+			case <-confirm:
+				return tool.Fail[stopOutput](fail(name, "the pause was sent, but the robot on %s didn't report a standstill within %s: "+
+					"check get_motion_group_state and stop it in the NOVA UI", exec.host, stopConfirm))
+			}
 		}
-		return tool.OK("movement paused", map[string]any{"controller": in.Controller, "trajectory": exec.trajectory, "instance": exec.host},
-			stopOutput{Controller: in.Controller, Trajectory: exec.trajectory, Instance: exec.host})
+		instance, trajectory := strings.Join(hosts, ", "), strings.Join(trajectories, ", ")
+		return tool.OK("movement paused", map[string]any{"controller": in.Controller, "trajectory": trajectory, "instance": instance},
+			stopOutput{Controller: in.Controller, Trajectory: trajectory, Instance: instance})
 	})
 }
 

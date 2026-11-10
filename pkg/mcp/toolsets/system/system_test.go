@@ -169,8 +169,14 @@ func TestGetLicenseStatus_InvalidLicenseIsAnAnswer(t *testing.T) {
 		t.Errorf("expected the license status, got %q / %s", text, structured)
 	}
 
-	cs = connect(t, fake(t, map[string]string{"GET /license/status": `403 {"message":"no"}`}))
-	if res, text, _ := call(t, cs, "get_license_status", nil); !res.IsError || !strings.HasPrefix(text, "FORBIDDEN:") {
-		t.Errorf("a 403 without a status stays FORBIDDEN, got %q", text)
+	for _, body := range []string{`{"message":"your role may not read the license"}`, `Forbidden`} {
+		cs = connect(t, fake(t, map[string]string{"GET /license/status": "403 " + body}))
+		res, text, _ := call(t, cs, "get_license_status", nil)
+		if !res.IsError || !strings.HasPrefix(text, "FORBIDDEN:") {
+			t.Errorf("a 403 without a status stays FORBIDDEN, got %q", text)
+		}
+		if strings.HasPrefix(body, "{") && !strings.Contains(text, "your role") {
+			t.Errorf("the API's message is passed on, got %q", text)
+		}
 	}
 }
