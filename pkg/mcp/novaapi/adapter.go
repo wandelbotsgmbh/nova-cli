@@ -138,7 +138,7 @@ func projectController(robot apiv2.RobotController) ControllerInfo {
 // in use doesn't have yet.
 func (a *adapter) ListRobotConfigurations(ctx context.Context) ([]string, error) {
 	const tool = "list_robot_configurations"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.BaseURL()+"/robot-configurations", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.BaseURL(ctx)+"/robot-configurations", nil)
 	if err != nil {
 		return nil, a.transportError(ctx, tool, err)
 	}

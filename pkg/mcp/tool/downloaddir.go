@@ -17,8 +17,9 @@ func DefaultDownloadDir() (string, error) {
 	return filepath.Join(cache, "nova", "mcp-downloads"), nil
 }
 
-// PrepareDownloadDir creates dir (0700) and refuses one that belongs to another user or
-// is open to others: tools write backups and logs there, which can contain credentials.
+// PrepareDownloadDir creates dir (0700) and refuses one that belongs to another user, is
+// writable by others or is a symlink: tools write backups and logs there, which can
+// contain credentials. Called when a tool first saves a file, not at startup.
 func PrepareDownloadDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

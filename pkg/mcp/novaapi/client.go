@@ -29,7 +29,7 @@ type Client struct {
 	// (by the generated client) are redirected to the current target in edit.
 	origin  string
 	mu      sync.RWMutex
-	baseURL string
+	current Target
 	http    *http.Client
 	editor  RequestEditor
 	logger  *slog.Logger
@@ -52,18 +52,68 @@ func NewClient(baseURL string, httpClient *http.Client, editor RequestEditor, lo
 	if origin == "" {
 		origin = noTargetOrigin
 	}
-	return &Client{origin: origin, baseURL: baseURL, http: &withIngress, editor: editor, logger: logger}
+	return &Client{origin: origin, current: Target{BaseURL: baseURL}, http: &withIngress, editor: editor, logger: logger}
+}
+
+// Target is the instance requests go to: the API root and the portal environment of its
+// login ("" for the process default).
+type Target struct {
+	BaseURL string
+	Env     string
+}
+
+type targetKey struct{}
+
+// Pin fixes the current target for everything done with ctx: one tool call sends all
+// its requests (gate checks, the write, WebSocket dials, background watchers) to the
+// same instance even if use_instance switches meanwhile. A ctx that is already pinned
+// keeps its target.
+func (c *Client) Pin(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(targetKey{}).(Target); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, targetKey{}, c.Current())
+}
+
+// Detach returns a background context (not cancelled with ctx) pinned to ctx's target,
+// for work that outlives a tool call, like watching a movement.
+func (c *Client) Detach(ctx context.Context) context.Context {
+	return context.WithValue(context.Background(), targetKey{}, c.TargetOf(ctx))
+}
+
+// TargetOf returns the target pinned in ctx, or the current one.
+func (c *Client) TargetOf(ctx context.Context) Target {
+	if t, ok := ctx.Value(targetKey{}).(Target); ok {
+		return t
+	}
+	return c.Current()
+}
+
+// PinnedTarget returns the target pinned in ctx, if any (e.g. for the login environment
+// in a RequestEditor).
+func PinnedTarget(ctx context.Context) (Target, bool) {
+	t, ok := ctx.Value(targetKey{}).(Target)
+	return t, ok
 }
 
 // noTargetOrigin stands in for the base URL of a client created without a target.
 const noTargetOrigin = "http://no-instance.invalid/api/v2"
 
-// SwitchBaseURL points every later request at another instance ("https://<host>/api/v2").
-// Requests in flight keep their target.
-func (c *Client) SwitchBaseURL(baseURL string) {
+// SwitchTarget points later tool calls at another instance (base URL
+// "https://<host>/api/v2" and portal environment). Calls already running keep the target
+// they pinned.
+func (c *Client) SwitchTarget(t Target) {
+	t.BaseURL = strings.TrimSuffix(t.BaseURL, "/")
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.baseURL = strings.TrimSuffix(baseURL, "/")
+	c.current = t
+}
+
+// Current is the target new tool calls pin.
+func (c *Client) Current() Target {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.current
 }
 
 // noTargetError is returned for requests while no instance is targeted.
@@ -73,12 +123,9 @@ func (noTargetError) Error() string {
 	return "no instance selected: call list_instances and use_instance first"
 }
 
-// BaseURL is the API root, e.g. "https://host/api/v2".
-func (c *Client) BaseURL() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.baseURL
-}
+// BaseURL is the API root of the target pinned in ctx (or the current one), e.g.
+// "https://host/api/v2". Build every URL from the ctx of the tool call.
+func (c *Client) BaseURL(ctx context.Context) string { return c.TargetOf(ctx).BaseURL }
 
 // HTTPClient is the client used for all requests (debug logging, ingress handling).
 func (c *Client) HTTPClient() *http.Client { return c.http }
@@ -102,7 +149,7 @@ func (e *authError) Error() string { return e.err.Error() }
 func (e *authError) Unwrap() error { return e.err }
 
 func (c *Client) edit(ctx context.Context, req *http.Request) error {
-	base := c.BaseURL()
+	base := c.BaseURL(ctx)
 	if base == "" {
 		return noTargetError{}
 	}
@@ -160,7 +207,7 @@ func (c *Client) Do(ctx context.Context, call Call) (*Result, *Error) {
 		}
 		body = bytes.NewReader(raw)
 	}
-	base := c.BaseURL()
+	base := c.BaseURL(ctx)
 	if base == "" {
 		return nil, c.transportError(ctx, call.Tool, noTargetError{})
 	}
@@ -366,10 +413,11 @@ func (t ingressTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 const maxIngressPage = 2048
 
 // mayBeIngressPage reports whether resp could be an error page of the instance ingress:
-// HTTP 200 with a text or JSON content type. Object-store contents are user data and
-// never checked: an object may well start with "Error 404:".
+// HTTP 200 with a text or JSON content type. Object contents (GET of a store object) are
+// user data and never checked: an object may well start with "Error 404:". Writes to
+// object paths are checked, so a login page never reads as "saved".
 func mayBeIngressPage(req *http.Request, resp *http.Response) bool {
-	if resp.StatusCode != http.StatusOK || strings.Contains(req.URL.Path, "/store/objects/") {
+	if resp.StatusCode != http.StatusOK || req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/store/objects/") {
 		return false
 	}
 	ct := resp.Header.Get("Content-Type")

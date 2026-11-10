@@ -39,8 +39,25 @@ func NewServer(api novaapi.API, client *novaapi.Client, opts Options) *sdk.Serve
 	}
 	server := sdk.NewServer(&sdk.Implementation{Name: "nova-cli", Version: opts.Version},
 		&sdk.ServerOptions{Instructions: instructions})
+	if client != nil {
+		server.AddReceivingMiddleware(pinTarget(client))
+	}
 	Register(server, api, tool.Env{Client: client, DownloadDir: opts.DownloadDir, Instances: opts.Instances}, toolsets, opts.ReadOnly)
 	return server
+}
+
+// pinTarget fixes the instance of every tool call when it starts: gate checks,
+// approvals, the write itself and any background watcher all go to that instance, even
+// if use_instance switches while the call runs.
+func pinTarget(client *novaapi.Client) sdk.Middleware {
+	return func(next sdk.MethodHandler) sdk.MethodHandler {
+		return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
+			if method == "tools/call" {
+				ctx = client.Pin(ctx)
+			}
+			return next(ctx, method, req)
+		}
+	}
 }
 
 // ServeStdio runs the server on stdin/stdout until the client disconnects or ctx ends.

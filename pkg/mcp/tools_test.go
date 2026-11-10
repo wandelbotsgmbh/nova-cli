@@ -354,3 +354,46 @@ func TestDeleteController_PhysicalNeedsApproval(t *testing.T) {
 		t.Errorf("virtual controller: %v %+v, deleted %v", err, result, virtual.deletedNames)
 	}
 }
+
+// An approval belongs to the instance it was asked on: if use_instance switches while
+// the dialog is open, the retried call (pinned to the new instance) must not act.
+func TestApproval_BoundToInstance(t *testing.T) {
+	for name, switchDuringDialog := range map[string]bool{"same instance": false, "switched": true} {
+		t.Run(name, func(t *testing.T) {
+			api := &fakeAPI{controller: novaapi.ControllerInfo{Name: "kuka-1", Manufacturer: "KukaController", Physical: true},
+				deployResult: novaapi.DeployResult{Name: "kuka-1", Status: novaapi.StatusCompleted}}
+			client := novaapi.NewClient("http://a.example/api/v2", nil, nil, nil)
+			server := novamcp.NewServer(api, client, novamcp.Options{Toolsets: novamcp.AllToolsets()})
+			ct, st := sdk.NewInMemoryTransports()
+			if _, err := server.Connect(context.Background(), st, nil); err != nil {
+				t.Fatal(err)
+			}
+			cs, err := sdk.NewClient(&sdk.Implementation{Name: "c", Version: "c"}, &sdk.ClientOptions{
+				ElicitationHandler: func(context.Context, *sdk.ElicitRequest) (*sdk.ElicitResult, error) {
+					if switchDuringDialog {
+						client.SwitchTarget(novaapi.Target{BaseURL: "http://b.example/api/v2"})
+					}
+					return &sdk.ElicitResult{Action: "accept", Content: map[string]any{"approve": true}}, nil
+				},
+			}).Connect(context.Background(), ct, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cs.Close()
+			res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{
+				Name: "delete_controller", Arguments: map[string]any{"cell": "cell", "controller": "kuka-1"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := res.Content[0].(*sdk.TextContent).Text
+			if switchDuringDialog {
+				if !strings.HasPrefix(text, "APPROVAL_REQUIRED:") || len(api.deletedNames) != 0 {
+					t.Errorf("an approval from instance a must not delete after a switch: %q, deleted %v", text, api.deletedNames)
+				}
+			} else if res.IsError || len(api.deletedNames) != 1 {
+				t.Errorf("approved delete: %q, deleted %v", text, api.deletedNames)
+			}
+		})
+	}
+}

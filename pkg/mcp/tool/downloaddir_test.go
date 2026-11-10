@@ -19,10 +19,16 @@ func TestPrepareDownloadDir(t *testing.T) {
 	if info, _ := os.Stat(dir); info.Mode().Perm() != 0o700 {
 		t.Errorf("mode %s, want 0700", info.Mode().Perm())
 	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := tool.PrepareDownloadDir(dir); err != nil {
+		t.Errorf("a dir only readable by others is fine (files are 0600): %v", err)
+	}
 	if err := os.Chmod(dir, 0o777); err != nil {
 		t.Fatal(err)
 	}
-	if err := tool.PrepareDownloadDir(dir); err == nil || !strings.Contains(err.Error(), "accessible by other users") {
+	if err := tool.PrepareDownloadDir(dir); err == nil || !strings.Contains(err.Error(), "writable by other users") {
 		t.Errorf("an open dir must be refused, got %v", err)
 	}
 	link := filepath.Join(t.TempDir(), "link")

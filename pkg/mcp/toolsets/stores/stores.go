@@ -628,7 +628,7 @@ func putObject(ctx context.Context, c *novaapi.Client, name, cell, key string, d
 	if err != nil {
 		return &novaapi.Error{Code: novaapi.CodeInternal, Message: name + ": could not build the upload"}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.BaseURL()+objectPath(cell, key), &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.BaseURL(ctx)+objectPath(cell, key), &buf)
 	if err != nil {
 		return &novaapi.Error{Code: novaapi.CodeInvalidArgument, Message: fmt.Sprintf("%s: invalid object key '%s'", name, key)}
 	}

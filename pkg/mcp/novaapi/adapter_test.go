@@ -267,7 +267,7 @@ func TestSwitchBaseURL_RedirectsEveryRequest(t *testing.T) {
 	if cells, _ := api.ListCells(context.Background()); len(cells) != 1 || cells[0] != "a" {
 		t.Fatalf("before the switch: %v", cells)
 	}
-	c.SwitchBaseURL(b + "/api/v2")
+	c.SwitchTarget(novaapi.Target{BaseURL: b + "/api/v2"})
 	if cells, _ := api.ListCells(context.Background()); len(cells) != 1 || cells[0] != "b" {
 		t.Errorf("generated client not redirected: %v", cells)
 	}
@@ -321,5 +321,54 @@ func TestIngressPage_OnlyShortTextOrJSONOutsideObjectStore(t *testing.T) {
 				t.Errorf("body changed: %q", res.Body)
 			}
 		})
+	}
+}
+
+// A tool call pins its target: a switch while it runs must not split its requests over
+// two instances (gate checked on one, write sent to the other).
+func TestPin_KeepsTheCallOnItsInstance(t *testing.T) {
+	var hitA, hitB int
+	a := serve(t, func(w http.ResponseWriter, r *http.Request) { hitA++; jsonAnswer(`["a"]`)(w, r) })
+	b := serve(t, func(w http.ResponseWriter, r *http.Request) { hitB++; jsonAnswer(`["b"]`)(w, r) })
+	c := novaapi.NewClient(a+"/api/v2", nil, nil, nil)
+	api, err := novaapi.NewFromClient(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := c.Pin(context.Background())
+	c.SwitchTarget(novaapi.Target{BaseURL: b + "/api/v2"})
+
+	if cells, _ := api.ListCells(call); len(cells) != 1 || cells[0] != "a" {
+		t.Errorf("generated client left the pinned instance: %v", cells)
+	}
+	var out []string
+	if err := c.Get(call, "t", "/cells", "", &out); err != nil || out[0] != "a" {
+		t.Errorf("Do left the pinned instance: %v %v", out, err)
+	}
+	if err := c.Get(c.Detach(call), "t", "/cells", "", &out); err != nil || out[0] != "a" {
+		t.Errorf("a detached watcher left the pinned instance: %v %v", out, err)
+	}
+	if c.BaseURL(call) != a+"/api/v2" || c.BaseURL(context.Background()) != b+"/api/v2" {
+		t.Errorf("BaseURL: pinned %s, new calls %s", c.BaseURL(call), c.BaseURL(context.Background()))
+	}
+	if err := c.Get(c.Pin(context.Background()), "t", "/cells", "", &out); err != nil || out[0] != "b" {
+		t.Errorf("a new call must use the new instance: %v %v", out, err)
+	}
+	if hitA != 3 || hitB != 1 {
+		t.Errorf("hits a=%d b=%d", hitA, hitB)
+	}
+}
+
+// Writes to object paths still get the ingress check; only object reads are data.
+func TestIngressPage_ObjectWritesAreChecked(t *testing.T) {
+	cl := novaapi.NewClient(serve(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("Error 401: Unauthorized"))
+	}), nil, nil, nil)
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		_, err := cl.Do(context.Background(), novaapi.Call{Tool: "t", Method: method, Path: "/cells/cell/store/objects/x"})
+		if err == nil || err.Code != novaapi.CodeUnauthenticated {
+			t.Errorf("%s to an object path: got %v, want UNAUTHENTICATED", method, err)
+		}
 	}
 }

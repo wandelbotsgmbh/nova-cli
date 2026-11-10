@@ -107,6 +107,9 @@ Diagnostics go to stderr; stdout carries only the MCP protocol.`,
 			fmt.Fprintln(os.Stderr, "note: no instance selected; the agent can pick one with list_instances and use_instance")
 		}
 		client := novaapi.NewClient(base, httpx.Client(), session.auth, logger)
+		// the startup target with its login environment, so calls pinned to it keep it
+		// after a switch
+		client.SwitchTarget(novaapi.Target{BaseURL: base, Env: string(oauth.ActiveEnvironment())})
 		session.client = client
 		var switcher tool.InstanceSwitcher
 		if !pinned {
@@ -116,17 +119,19 @@ Diagnostics go to stderr; stdout carries only the MCP protocol.`,
 		if err != nil {
 			return err
 		}
+		// checked when a tool first saves a file, so a missing cache dir never keeps the
+		// server from starting (most toolsets never download)
 		downloadDir := mcpDownloadDir
 		if downloadDir == "" {
 			if downloadDir, err = tool.DefaultDownloadDir(); err != nil {
-				return err
+				fmt.Fprintf(os.Stderr, "note: no download dir (%v); tools that save files need --download-dir\n", err)
+				downloadDir = ""
 			}
 		}
-		if downloadDir, err = filepath.Abs(downloadDir); err != nil {
-			return err
-		}
-		if err := tool.PrepareDownloadDir(downloadDir); err != nil {
-			return err
+		if downloadDir != "" {
+			if downloadDir, err = filepath.Abs(downloadDir); err != nil {
+				return err
+			}
 		}
 		return mcp.ServeStdio(cmd.Context(), api, client, mcp.Options{
 			Version:     version.GetCliVersion(),
@@ -156,6 +161,11 @@ type mcpSession struct {
 func (m *mcpSession) auth(ctx context.Context, req *http.Request) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// the login environment of the instance this call is pinned to; LoadToken in
+	// SetAuthForRequest reads the active one, which is only changed under mu
+	if t, ok := novaapi.PinnedTarget(ctx); ok && t.Env != "" {
+		oauth.SetActiveEnvironment(oauth.AuthEnvironment(t.Env))
+	}
 	if oauth.SendsTokenTo(req.URL.Host) {
 		env := oauth.ActiveEnvironment()
 		err := oauth.RefreshToken(ctx, env)
@@ -237,8 +247,8 @@ func (m *mcpSession) Use(name string) (tool.InstanceInfo, error) {
 	if err != nil {
 		return tool.InstanceInfo{}, err
 	}
-	oauth.SetActiveEnvironment(env)
-	m.client.SwitchBaseURL(nova.HostWithProtocol(i.Host) + nova.API_BASE_V2)
+	// tool calls already running keep their pinned target (and its environment)
+	m.client.SwitchTarget(novaapi.Target{BaseURL: nova.HostWithProtocol(i.Host) + nova.API_BASE_V2, Env: string(env)})
 	m.current = i.Name
 	debug.Logf("mcp: session target switched to instance %q (host %q, env %s)", i.Name, i.Host, env)
 	return instanceInfo(i, m.current), nil

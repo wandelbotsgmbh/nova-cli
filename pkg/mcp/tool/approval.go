@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"fmt"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -17,16 +18,29 @@ const approvalID = "approval"
 //
 // Use it at the top of a handler, after validating the arguments:
 //
-//	if res := tool.Approval(req, toolName, "Restore the configuration from ..."); res != nil {
+//	if res := tool.Approval(ctx, req, toolName, "Restore the configuration from ..."); res != nil {
 //		return res, Out{}, nil
 //	}
 //
 // It returns nil when the human accepted. Otherwise it returns the result to hand back
 // unchanged: the input request, a decline, or APPROVAL_REQUIRED when the client can't
 // ask (no elicitation support). The message must name exactly what will happen.
-func Approval(req *sdk.CallToolRequest, toolName, message string) *sdk.CallToolResult {
+//
+// The approval is bound to the instance the call is pinned to (novaapi.Client.Pin): a
+// retry that arrives after use_instance switched elsewhere is refused, so a "yes" for
+// one instance never deletes or restores something on another.
+func Approval(ctx context.Context, req *sdk.CallToolRequest, toolName, message string) *sdk.CallToolResult {
+	state := toolName
+	if t, ok := novaapi.PinnedTarget(ctx); ok {
+		state += " " + t.BaseURL
+	}
 	if req != nil && req.Params != nil {
 		if resp, ok := req.Params.InputResponses[approvalID]; ok {
+			if req.Params.RequestState != state {
+				res, _, _ := Fail[any](&novaapi.Error{Code: novaapi.CodeApprovalRequired,
+					Message: toolName + ": the instance changed since the user was asked; call the tool again to ask again"})
+				return res
+			}
 			if r, ok := resp.(*sdk.ElicitResult); ok && r.Action == "accept" {
 				if approved, _ := r.Content["approve"].(bool); approved || r.Content == nil {
 					return nil
@@ -53,7 +67,7 @@ func Approval(req *sdk.CallToolRequest, toolName, message string) *sdk.CallToolR
 				"required": []string{"approve"},
 			},
 		}},
-		RequestState: toolName,
+		RequestState: state,
 	}
 }
 

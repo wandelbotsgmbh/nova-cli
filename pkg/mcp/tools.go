@@ -184,7 +184,7 @@ func deleteControllerTool(api novaapi.API) tool.Registration {
 				return tool.Fail[deployOutput](tool.AsAPIError(err))
 			}
 			if controller.Physical {
-				if res := tool.Approval(req, "delete_controller", fmt.Sprintf(
+				if res := tool.Approval(ctx, req, "delete_controller", fmt.Sprintf(
 					"Delete the PHYSICAL %s controller '%s' from cell '%s'? Its configuration is removed and has to be commissioned again.",
 					controller.Manufacturer, in.Controller, in.Cell)); res != nil {
 					return res, deployOutput{}, nil

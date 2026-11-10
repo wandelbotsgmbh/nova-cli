@@ -226,7 +226,7 @@ func createDiagnosisPackage(c *novaapi.Client, downloadDir string) tool.Registra
 			Annotations: tool.Write("Create diagnosis package", false),
 		}, func(ctx context.Context, _ *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, packageOutput, error) {
 			if downloadDir == "" {
-				return tool.Fail[packageOutput](&novaapi.Error{Code: novaapi.CodeInternal, Message: name + ": no download directory configured"})
+				return tool.Fail[packageOutput](&novaapi.Error{Code: novaapi.CodeInternal, Message: name + ": no download directory configured, start nova mcp with --download-dir"})
 			}
 			res, err := c.Do(ctx, novaapi.Call{Tool: name, Method: http.MethodGet, Path: "/system/diagnosis-package/zip"})
 			if err != nil {
@@ -236,7 +236,7 @@ func createDiagnosisPackage(c *novaapi.Client, downloadDir string) tool.Registra
 			if zerr != nil {
 				return tool.Fail[packageOutput](c.UnexpectedAnswer(ctx, name, res.Status, res.Body))
 			}
-			if err := os.MkdirAll(downloadDir, 0o700); err != nil {
+			if err := tool.PrepareDownloadDir(downloadDir); err != nil {
 				return tool.Fail[packageOutput](localError(name, err))
 			}
 			// exclusive creation: never follows a planted symlink or overwrites an

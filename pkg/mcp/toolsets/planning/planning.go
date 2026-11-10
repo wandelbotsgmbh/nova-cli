@@ -204,7 +204,7 @@ func post(ctx context.Context, c *novaapi.Client, name, path string, body any, o
 	if err != nil {
 		return tool.AsAPIError(err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL()+path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL(ctx)+path, bytes.NewReader(raw))
 	if err != nil {
 		return tool.AsAPIError(err)
 	}

@@ -276,7 +276,7 @@ func deleteCell(c *novaapi.Client) tool.Registration {
 			}
 			message := fmt.Sprintf("Delete cell '%s' with %d controller(s) and %d app(s)? This removes all its data and can't be undone.",
 				in.Cell, len(cell.Controllers), len(cell.Apps))
-			if res := tool.Approval(req, name, message); res != nil {
+			if res := tool.Approval(ctx, req, name, message); res != nil {
 				return res, deployOutput{}, nil
 			}
 			status, err := c.JSON(ctx, novaapi.Call{Tool: name, Method: http.MethodDelete, Path: cellPath(in.Cell), NotFound: notFound(in.Cell)}, nil)

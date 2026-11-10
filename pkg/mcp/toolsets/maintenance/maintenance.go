@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -40,12 +41,13 @@ type maintenance struct {
 	downloadDir string
 }
 
-// host names the instance in approval messages.
-func (m *maintenance) host() string {
-	if u, err := url.Parse(m.client.BaseURL()); err == nil && u.Host != "" {
+// host names the instance of the call in approval messages and file names.
+func (m *maintenance) host(ctx context.Context) string {
+	base := m.client.BaseURL(ctx)
+	if u, err := url.Parse(base); err == nil && u.Host != "" {
 		return u.Host
 	}
-	return m.client.BaseURL()
+	return base
 }
 
 // --- list_backup_resources ---
@@ -160,7 +162,7 @@ func (m *maintenance) addCreateBackup(s *sdk.Server) {
 		if !isGzip(res.Body) {
 			return tool.Fail[createBackupOutput](m.client.UnexpectedAnswer(ctx, name, res.Status, res.Body))
 		}
-		path, err := m.save(res.Body)
+		path, err := m.save(ctx, res.Body)
 		if err != nil {
 			m.client.Logger().ErrorContext(ctx, "saving backup failed", "error", err)
 			return tool.Fail[createBackupOutput](&novaapi.Error{Code: novaapi.CodeInternal,
@@ -172,19 +174,19 @@ func (m *maintenance) addCreateBackup(s *sdk.Server) {
 }
 
 // save writes a backup with owner-only permissions; it can hold secrets.
-func (m *maintenance) save(data []byte) (string, error) {
-	dir := m.downloadDir
-	if dir == "" {
-		dir = filepath.Join(os.TempDir(), "nova-mcp")
+func (m *maintenance) save(ctx context.Context, data []byte) (string, error) {
+	// never fall back to the shared temp dir: other local users could prepare it
+	if m.downloadDir == "" {
+		return "", errors.New("no download directory configured, start nova mcp with --download-dir")
 	}
-	dir, err := filepath.Abs(dir)
+	dir, err := filepath.Abs(m.downloadDir)
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := tool.PrepareDownloadDir(dir); err != nil {
 		return "", err
 	}
-	host := strings.NewReplacer(":", "_", "/", "_").Replace(m.host())
+	host := strings.NewReplacer(":", "_", "/", "_").Replace(m.host(ctx))
 	f, err := os.CreateTemp(dir, fmt.Sprintf("nova-backup-%s-%s-*.tar.gz", host, time.Now().UTC().Format("20060102-150405")))
 	if err != nil {
 		return "", err
@@ -262,8 +264,8 @@ func (m *maintenance) addRestoreBackup(s *sdk.Server) {
 			scope = strings.Join(resources, ", ")
 		}
 		message := fmt.Sprintf("Restore the configuration of NOVA instance %s from %s (%d bytes)? Restores: %s. "+
-			"This overwrites the current configuration of the instance.", m.host(), path, len(data), scope)
-		if res := tool.Approval(req, name, message); res != nil {
+			"This overwrites the current configuration of the instance.", m.host(ctx), path, len(data), scope)
+		if res := tool.Approval(ctx, req, name, message); res != nil {
 			return res, restoreBackupOutput{}, nil
 		}
 
@@ -326,8 +328,8 @@ func (m *maintenance) addUpdateNovaVersion(s *sdk.Server) {
 			cells = "cells keep their version"
 		}
 		message := fmt.Sprintf("Update NOVA on instance %s from %s to %s (channel %s, %s)? Services and cells restart during the update.",
-			m.host(), current, target, channel, cells)
-		if res := tool.Approval(req, name, message); res != nil {
+			m.host(ctx), current, target, channel, cells)
+		if res := tool.Approval(ctx, req, name, message); res != nil {
 			return res, updateOutput{}, nil
 		}
 
@@ -365,7 +367,7 @@ func (m *maintenance) text(ctx context.Context, toolName, path string, query url
 // send makes a request with a non-JSON or pre-encoded body, which novaapi.Call can't
 // carry, and maps failures like novaapi.Client.Do.
 func (m *maintenance) send(ctx context.Context, toolName, method, path string, query url.Values, contentType string, body []byte, status *int) *novaapi.Error {
-	u := m.client.BaseURL() + path
+	u := m.client.BaseURL(ctx) + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}

@@ -16,8 +16,8 @@ func session(t *testing.T, elicit func(context.Context, *sdk.ElicitRequest) (*sd
 	ran := 0
 	server := sdk.NewServer(&sdk.Implementation{Name: "t", Version: "t"}, nil)
 	sdk.AddTool(server, &sdk.Tool{Name: "restore", Annotations: tool.Destructive("Restore")},
-		func(_ context.Context, req *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, empty, error) {
-			if res := tool.Approval(req, "restore", "Restore the configuration of instance x?"); res != nil {
+		func(ctx context.Context, req *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, empty, error) {
+			if res := tool.Approval(ctx, req, "restore", "Restore the configuration of instance x?"); res != nil {
 				return res, empty{}, nil
 			}
 			ran++

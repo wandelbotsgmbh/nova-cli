@@ -91,7 +91,9 @@ func key(scope, controller string) string { return scope + "/" + controller }
 
 // instanceScope identifies a cell on the targeted instance, so executions on equally
 // named cells of different instances (use_instance) don't mix.
-func instanceScope(c *novaapi.Client, cell string) string { return c.BaseURL() + "#" + cell }
+func instanceScope(ctx context.Context, c *novaapi.Client, cell string) string {
+	return c.BaseURL(ctx) + "#" + cell
+}
 
 func register(cell, controller string, e *execution) bool {
 	registryMu.Lock()
@@ -250,7 +252,7 @@ func addExecute(s *sdk.Server, c *novaapi.Client) {
 		}
 
 		exec := &execution{trajectory: in.Trajectory}
-		scope := instanceScope(c, in.Cell) // fixed for this execution, even if use_instance switches
+		scope := instanceScope(ctx, c, in.Cell)
 		if !register(scope, in.Controller, exec) {
 			return tool.Fail[ExecuteOutput](fail(name, "an execution started by this server is still running on controller '%s'; stop it with stop_execution or wait", in.Controller))
 		}
@@ -258,7 +260,8 @@ func addExecute(s *sdk.Server, c *novaapi.Client) {
 		// The movement outlives a wait=false call, so it gets its own contexts: connCtx
 		// keeps the WebSocket open (coder/websocket closes the connection when a read's
 		// context ends, which would make the pause impossible), runCtx is the timeout.
-		connCtx, connCancel := context.WithCancel(context.Background())
+		// Detach keeps the pinned instance: the watcher polls the instance it moves
+		connCtx, connCancel := context.WithCancel(c.Detach(ctx))
 		runCtx, runCancel := context.WithTimeout(connCtx, timeout)
 		conn, apiErr := dial(runCtx, c, name, in.Cell, in.Controller)
 		if apiErr != nil {
@@ -330,7 +333,7 @@ func addExecute(s *sdk.Server, c *novaapi.Client) {
 
 // dial opens the executeTrajectory WebSocket with the client's login.
 func dial(ctx context.Context, c *novaapi.Client, name, cell, controller string) (*websocket.Conn, *novaapi.Error) {
-	u := c.BaseURL() + controllerPath(cell, controller) + "/execution/trajectory"
+	u := c.BaseURL(ctx) + controllerPath(cell, controller) + "/execution/trajectory"
 	switch {
 	case strings.HasPrefix(u, "https://"):
 		u = "wss://" + strings.TrimPrefix(u, "https://")
@@ -504,7 +507,7 @@ func addStop(s *sdk.Server, c *novaapi.Client) {
 		if err := tool.Required(name, "cell", in.Cell, "controller", in.Controller); err != nil {
 			return tool.Fail[stopOutput](err)
 		}
-		exec := running(instanceScope(c, in.Cell), in.Controller)
+		exec := running(instanceScope(ctx, c, in.Cell), in.Controller)
 		if exec == nil {
 			return tool.Fail[stopOutput](&novaapi.Error{Code: novaapi.CodeNotFound, Message: fmt.Sprintf(
 				"%s: no movement started by this server is running on controller '%s' in cell '%s'", name, in.Controller, in.Cell)})

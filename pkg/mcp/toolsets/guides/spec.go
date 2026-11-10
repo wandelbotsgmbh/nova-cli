@@ -30,7 +30,7 @@ type specCache struct {
 func (c *specCache) get(ctx context.Context, toolName string) (*apiSpec, *novaapi.Error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	base := c.client.BaseURL()
+	base := c.client.BaseURL(ctx)
 	if c.spec != nil && c.base == base {
 		return c.spec, nil
 	}
