@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/cli/browser"
 	"github.com/spf13/viper"
@@ -81,12 +82,10 @@ func LoginWithRefreshToken(ctx context.Context, env AuthEnvironment, force bool)
 	config := NewAuth0Config(env)
 
 	if !force {
-		// Try to load existing token
-		if oldToken, err := LoadTokenFor(env); err == nil && oldToken.OAuth2Token.RefreshToken != "" {
-			tokenSource := config.TokenSource(ctx, &oldToken.OAuth2Token)
-			if newToken, err := tokenSource.Token(); err == nil {
-				return StoreToken(newToken, env)
-			}
+		// refresh the stored login, under the config lock like every refresh: two
+		// processes must not use the same (rotating) refresh token
+		if RefreshToken(ctx, env) == nil {
+			return nil
 		}
 	}
 
@@ -141,7 +140,7 @@ func RefreshToken(ctx context.Context, env AuthEnvironment) error {
 		case err != nil:
 		case onDisk.OAuth2Token.Valid() && !onDisk.OAuth2Token.Expiry.Before(memory.OAuth2Token.Expiry):
 			if onDisk.OAuth2Token.AccessToken != memory.OAuth2Token.AccessToken {
-				return v.ReadInConfig() // refreshed elsewhere: use it
+				return configfile.Reload(v) // refreshed elsewhere: use it
 			}
 			return nil
 		case !loggedIn(onDisk) && memory.OAuth2Token.Valid():
@@ -167,13 +166,23 @@ func RefreshToken(ctx context.Context, env AuthEnvironment) error {
 			if fromDisk {
 				return configfile.ErrUnchanged // refreshed while waiting for the lock
 			}
-		} else if token, err = refreshConfig(env).TokenSource(ctx, token).Token(); err != nil {
-			return fmt.Errorf("login of the %s environment expired, run 'nova login --env %s': %w", env, env, err)
+		} else {
+			// other nova processes wait for the lock meanwhile: never hold it for
+			// longer than a stalled request is worth
+			refreshCtx, cancel := context.WithTimeout(ctx, refreshTimeout)
+			defer cancel()
+			if token, err = refreshConfig(env).TokenSource(refreshCtx, token).Token(); err != nil {
+				return fmt.Errorf("login of the %s environment expired, run 'nova login --env %s': %w", env, env, err)
+			}
 		}
 		setToken(disk, token, env)
 		return nil
 	})
 }
+
+// refreshTimeout bounds the token request made under the config lock; it is well
+// below the time other processes wait for the lock.
+const refreshTimeout = 15 * time.Second
 
 func LoginWithProvidedRefreshToken(ctx context.Context, env AuthEnvironment, refreshToken string) error {
 	ctx = withHTTPClient(ctx)

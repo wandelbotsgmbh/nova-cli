@@ -220,12 +220,10 @@ func TestMerge3(t *testing.T) {
 }
 
 // viper.WriteConfig writes the whole in-memory copy of a process over the file: every
-// write has to go through Update. The only exception creates the file.
+// write has to go through Update.
 func TestNoDirectConfigWrites(t *testing.T) {
 	root := filepath.Join("..", "..")
-	allowed := map[string]bool{
-		filepath.Join("pkg", "cmd", "root.go"): true, // createConfigFileIfMissing
-	}
+	allowed := map[string]bool{}
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -253,5 +251,37 @@ func TestNoDirectConfigWrites(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUpdate_WithoutConfigFile(t *testing.T) {
+	v := viper.New()
+	if err := Update(v, func(*viper.Viper) error { return ErrUnchanged }); err != nil {
+		t.Errorf("ErrUnchanged is no failure without a file either, got %v", err)
+	}
+	if err := Set(v, "editor", "vi"); err != nil || v.GetString("editor") != "vi" {
+		t.Errorf("expected the change in memory, got %v / %q", err, v.GetString("editor"))
+	}
+}
+
+// An older CLI version truncated the file and hasn't written it yet: a process that
+// reloads in that moment keeps what it has.
+func TestReload_KeepsContentWhileFileIsEmpty(t *testing.T) {
+	old := legacyWriteWait
+	legacyWriteWait = 50 * time.Millisecond
+	t.Cleanup(func() { legacyWriteWait = old })
+	file := newConfig(t, "editor: vi\n")
+	v := open(t, file)
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reload(v); err != nil || v.GetString("editor") != "vi" {
+		t.Errorf("expected the old content, got %v / %q", err, v.GetString("editor"))
+	}
+	if err := os.WriteFile(file, []byte("editor: emacs\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reload(v); err != nil || v.GetString("editor") != "emacs" {
+		t.Errorf("expected the new content, got %v / %q", err, v.GetString("editor"))
 	}
 }

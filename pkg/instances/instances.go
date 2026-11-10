@@ -224,7 +224,7 @@ func (r *Registry) Save(v *viper.Viper) error {
 		disk.Set(keyCurrent, r.Current)
 		if cur, ok := r.Get(r.Current); ok {
 			disk.Set(legacyHost, cur.Host)
-			disk.Set(legacyCell, cur.CellName)
+			disk.Set(legacyCell, cur.Cell()) // older versions have no default for an empty cell
 			disk.Set(legacyID, cur.ID)
 		} else {
 			disk.Set(legacyHost, "")

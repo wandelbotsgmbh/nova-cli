@@ -31,7 +31,8 @@
 * Shells, agents and long-running commands (`nova mcp`, keep-alive) share `~/.nova/config.yaml`. Never call `viper.WriteConfig()`: it writes the process's whole, possibly minutes-old copy over the file (lost update) and truncates it first. Every write goes through `configfile.Update(v, func(disk *viper.Viper) error)` or `configfile.Set`: lock (`config.yaml.lock`), read the file as it is now, apply the change to `disk`, replace the file atomically, then `v` re-reads it. Don't `viper.Set` persisted keys on the global config either: an override hides later changes of the file. `TestNoDirectConfigWrites` enforces the first rule.
 * The function runs under the lock: keep it short (the token refresh is the one request made there, on purpose: two processes must not refresh with the same refresh token), and never nest two updates.
 * Lists of named entries (`instances`, `nucleus-servers`) are merged, not replaced: `Registry.Save` applies what this process added, changed or removed since `Load` to the file's current list (`configfile.Merge3`), and writes the selection only if it was changed here. So `Load` → long operation (instance create) → `Save` is safe without holding the lock.
-* Older CLI versions still truncate and rewrite without the lock; `Update` waits up to a second for an empty file to get its content.
+* Older CLI versions still truncate and rewrite without the lock; `Update` and `configfile.Reload` wait up to a second for an empty file to get its content.
+* The lock file and the temporary file live next to the config, so `~/.nova` must be writable (a writable `config.yaml` in a read-only directory no longer works).
 
 ## `nova api` (ADR-0013)
 

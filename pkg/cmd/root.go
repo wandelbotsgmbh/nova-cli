@@ -189,12 +189,8 @@ func createConfigFileIfMissing(configFile string, configPath string) {
 				fmt.Fprintln(os.Stderr, "Can't create config:", err)
 				os.Exit(1)
 			}
-			// a new, empty file of this process: the only write that doesn't go
-			// through configfile.Update
-			if err := viper.WriteConfig(); err != nil {
-				fmt.Fprintln(os.Stderr, "Can't write config:", err)
-				os.Exit(1)
-			}
+			// The file stays empty: every version sets its defaults itself, and
+			// writing them here could overwrite what another process just stored.
 		}
 	}
 	restrictPermissions(configPath, configDirMode)

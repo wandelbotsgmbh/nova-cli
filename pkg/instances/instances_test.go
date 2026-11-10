@@ -341,3 +341,20 @@ func TestSaveDropsSelectionOfRemovedEntry(t *testing.T) {
 		t.Errorf("got %+v, want only lab and no selection", got)
 	}
 }
+
+// A legacy config without a cell: the migrated entry has none, and the legacy key gets
+// the cell older CLI versions should use, not an empty one.
+func TestSaveMirrorsTheDefaultCellForOlderVersions(t *testing.T) {
+	v, path := newViper(t, "host: 10.0.0.1\n")
+	r, err := Load(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Add(Instance{Name: "lab", Kind: KindHost, Host: "10.0.0.2"})
+	if err := r.Save(v); err != nil {
+		t.Fatal(err)
+	}
+	if cell := reload(t, path).GetString("cellname"); cell != DefaultCell {
+		t.Errorf("legacy cellname = %q, want %q", cell, DefaultCell)
+	}
+}

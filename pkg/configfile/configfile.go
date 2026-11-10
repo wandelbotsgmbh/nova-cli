@@ -39,10 +39,16 @@ var ErrUnchanged = errors.New("config unchanged")
 // fn runs under the file lock: keep it short, and never start another Update in it.
 //
 // A v without a config file (tests) is changed in memory only.
+//
+// The lock file and the temporary file are created next to the config, so its
+// directory must be writable.
 func Update(v *viper.Viper, fn func(disk *viper.Viper) error) error {
 	file := v.ConfigFileUsed()
 	if file == "" {
-		return fn(v)
+		if err := fn(v); !errors.Is(err, ErrUnchanged) {
+			return err
+		}
+		return nil
 	}
 	// a symlinked config (dotfiles) keeps its link: the target is replaced
 	if resolved, err := filepath.EvalSymlinks(file); err == nil {
@@ -65,6 +71,26 @@ func Update(v *viper.Viper, fn func(disk *viper.Viper) error) error {
 	default:
 		if err := replace(disk, file); err != nil {
 			return fmt.Errorf("can't write config: %w", err)
+		}
+	}
+	return Reload(v)
+}
+
+// Reload makes v read its config file again, to see what other processes changed. An
+// empty file although v has content from it is being written by an older CLI version
+// (see legacyWriteWait): v keeps what it has if the content doesn't show up in time.
+func Reload(v *viper.Viper) error {
+	file := v.ConfigFileUsed()
+	if file == "" {
+		return nil
+	}
+	if hasFileContent(v) {
+		disk, err := read(file, true)
+		if err != nil {
+			return fmt.Errorf("can't read config: %w", err)
+		}
+		if len(disk.AllKeys()) == 0 {
+			return nil
 		}
 	}
 	if err := v.ReadInConfig(); err != nil {
