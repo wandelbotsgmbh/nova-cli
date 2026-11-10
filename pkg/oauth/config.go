@@ -167,10 +167,11 @@ func configOnDisk() *viper.Viper {
 	return v
 }
 
+func loggedIn(t WaboAuthToken) bool {
+	return t.OAuth2Token.AccessToken != "" || t.OAuth2Token.RefreshToken != ""
+}
+
 // adoptToken makes a login read from disk the one this process uses, without writing.
 func adoptToken(token WaboAuthToken, env AuthEnvironment) {
-	viper.Set(loginsKey+"."+string(env), token)
-	if env == DefaultEnvironment() {
-		viper.Set(tokenKey, token)
-	}
+	setToken(viper.GetViper(), &token.OAuth2Token, env)
 }

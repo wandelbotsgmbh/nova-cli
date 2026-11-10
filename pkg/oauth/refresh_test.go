@@ -100,3 +100,71 @@ func TestRefreshToken_WithoutConfigFile(t *testing.T) {
 		t.Errorf("expected 'not logged in', got %v", err)
 	}
 }
+
+// The file was overwritten with an older copy (another process saved its snapshot):
+// the newer, still valid login of this process counts and is written back, without a
+// refresh with the stale, possibly rotated refresh token.
+func TestRefreshToken_NewerLoginInMemoryWins(t *testing.T) {
+	calls := tokenServer(t)
+	path := withConfig(t, configHead+"logins:\n  prod:\n"+loginYAML("fresh", time.Now().Add(time.Hour)))
+	older := strings.Replace(configHead, "current-instance: a", "current-instance: b", 1) +
+		"logins:\n  prod:\n" + loginYAML("stale", time.Now().Add(-time.Hour))
+	if err := os.WriteFile(path, []byte(older), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RefreshToken(context.Background(), AuthProd); err != nil {
+		t.Fatalf("RefreshToken: %v", err)
+	}
+	if *calls != 0 {
+		t.Errorf("expected no refresh, got %d", *calls)
+	}
+	if token, _ := LoadTokenFor(AuthProd); token.OAuth2Token.AccessToken != "fresh" {
+		t.Errorf("expected the login of this process, got %q", token.OAuth2Token.AccessToken)
+	}
+	written, _ := os.ReadFile(path)
+	for _, want := range []string{"current-instance: b", "accesstoken: fresh"} {
+		if !strings.Contains(string(written), want) {
+			t.Errorf("config lacks %q:\n%s", want, written)
+		}
+	}
+}
+
+// Another process is writing the config right now (viper truncates the file first):
+// the empty file is neither "not logged in" nor a copy to write back.
+func TestRefreshToken_IgnoresFileBeingWritten(t *testing.T) {
+	calls := tokenServer(t)
+	path := withConfig(t, configHead+"logins:\n  prod:\n"+loginYAML("fresh", time.Now().Add(time.Hour)))
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RefreshToken(context.Background(), AuthProd); err != nil {
+		t.Fatalf("RefreshToken: %v", err)
+	}
+	if *calls != 0 {
+		t.Errorf("expected no refresh, got %d", *calls)
+	}
+	if after, _ := os.ReadFile(path); len(after) != 0 {
+		t.Errorf("the file must be left to its writer, got:\n%s", after)
+	}
+}
+
+// A login of another environment that only exists in the legacy key (older CLI
+// versions) survives when a login from the file replaces that key.
+func TestRefreshToken_AdoptingKeepsLegacyLogin(t *testing.T) {
+	tokenServer(t)
+	legacyStg := "token:\n" + strings.Replace(loginYAML("stg-login", time.Now().Add(time.Hour)), "authenvironment: prod", "authenvironment: stg", 1)
+	path := withConfig(t, configHead+legacyStg+"logins:\n  prod:\n"+loginYAML("stale", time.Now().Add(-time.Hour)))
+	fresh := configHead + legacyStg + "logins:\n  prod:\n" + loginYAML("fresh", time.Now().Add(time.Hour))
+	if err := os.WriteFile(path, []byte(fresh), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RefreshToken(context.Background(), AuthProd); err != nil {
+		t.Fatalf("RefreshToken: %v", err)
+	}
+	if token, _ := LoadTokenFor(AuthStg); token.OAuth2Token.AccessToken != "stg-login" {
+		t.Errorf("the stg login is gone, got %q", token.OAuth2Token.AccessToken)
+	}
+}
