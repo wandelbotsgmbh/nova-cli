@@ -7,6 +7,7 @@ import (
 
 	"github.com/cli/browser"
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/configfile"
 	"golang.org/x/oauth2"
 )
 
@@ -143,11 +144,9 @@ func AccessToken(ctx context.Context) (token string, endpoints Endpoints, err er
 
 // Logout removes the stored simulation login.
 func Logout() error {
-	viper.Set(tokenKey, nil)
-	return viper.WriteConfig()
+	return configfile.Set(viper.GetViper(), tokenKey, nil)
 }
 
 func storeToken(token *oauth2.Token, env Environment) error {
-	viper.Set(tokenKey, storedToken{OAuth2Token: *token, Environment: env})
-	return viper.WriteConfig()
+	return configfile.Set(viper.GetViper(), tokenKey, storedToken{OAuth2Token: *token, Environment: env})
 }

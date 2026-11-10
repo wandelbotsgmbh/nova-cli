@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/configfile"
 	"golang.org/x/oauth2"
 )
 
@@ -69,19 +70,23 @@ func defaultEnvironment(v *viper.Viper) AuthEnvironment {
 // SetDefaultEnvironment makes env the default and mirrors its login into the legacy
 // key. Called after an explicit 'nova login', never on token refresh.
 func SetDefaultEnvironment(env AuthEnvironment) error {
-	keepLegacyLogin(viper.GetViper())
-	viper.Set(defaultEnvKey, string(env))
-	if token, err := LoadTokenFor(env); err == nil && token.OAuth2Token.AccessToken != "" {
-		viper.Set(tokenKey, token)
-	}
-	return viper.WriteConfig()
+	return configfile.Update(viper.GetViper(), func(disk *viper.Viper) error {
+		keepLegacyLogin(disk)
+		disk.Set(defaultEnvKey, string(env))
+		if token, err := loadTokenFor(disk, env); err == nil && token.OAuth2Token.AccessToken != "" {
+			disk.Set(tokenKey, token)
+		}
+		return nil
+	})
 }
 
 // StoreToken stores the login of env. It doesn't change the default environment; the
 // legacy key is only updated if env is the default.
 func StoreToken(token *oauth2.Token, env AuthEnvironment) error {
-	setToken(viper.GetViper(), token, env)
-	return viper.WriteConfig()
+	return configfile.Update(viper.GetViper(), func(disk *viper.Viper) error {
+		setToken(disk, token, env)
+		return nil
+	})
 }
 
 // setToken sets the login of env in v without writing it.
@@ -169,9 +174,4 @@ func configOnDisk() *viper.Viper {
 
 func loggedIn(t WaboAuthToken) bool {
 	return t.OAuth2Token.AccessToken != "" || t.OAuth2Token.RefreshToken != ""
-}
-
-// adoptToken makes a login read from disk the one this process uses, without writing.
-func adoptToken(token WaboAuthToken, env AuthEnvironment) {
-	setToken(viper.GetViper(), &token.OAuth2Token, env)
 }

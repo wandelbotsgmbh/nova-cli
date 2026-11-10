@@ -266,3 +266,78 @@ func TestFreeName(t *testing.T) {
 		t.Errorf("taken twice: got %q", got)
 	}
 }
+
+// Two processes load the registry, each changes something else, both save: the second
+// save must not drop what the first one wrote (two shells, or two parallel
+// 'nova instance create --no-select').
+func TestSaveKeepsChangesOfOtherProcesses(t *testing.T) {
+	a, path := newViper(t, "instances:\n  - name: lab\n    kind: host\n    host: 10.0.0.1\n  - name: old\n    kind: host\n    host: 10.0.0.9\ncurrent-instance: lab\n")
+	b := reload(t, path)
+	ra, _ := Load(a)
+	rb, _ := Load(b)
+
+	// process a: adds sim-a and selects it
+	_ = ra.Add(Instance{Name: "sim-a", Kind: KindK8sRun, Host: "a.example"})
+	_ = ra.Select("sim-a")
+	if err := ra.Save(a); err != nil {
+		t.Fatal(err)
+	}
+	// process b, still with the old list: adds sim-b, removes old, changes lab's cell
+	_ = rb.Add(Instance{Name: "sim-b", Kind: KindK8sRun, Host: "b.example"})
+	_ = rb.Remove("old")
+	lab, _ := rb.Get("lab")
+	lab.CellName = "line1"
+	_ = rb.Put(lab)
+	if err := rb.Save(b); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load(reload(t, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, i := range got.Instances {
+		names = append(names, i.Name)
+	}
+	if strings.Join(names, ",") != "lab,sim-a,sim-b" {
+		t.Errorf("instances = %v, want lab, sim-a, sim-b", names)
+	}
+	if lab, _ := got.Get("lab"); lab.CellName != "line1" {
+		t.Errorf("b's change to lab was lost: %+v", lab)
+	}
+	if got.Current != "sim-a" {
+		t.Errorf("current = %q: b didn't change the selection, a's must stay", got.Current)
+	}
+	// b holds the merged result, and sees it through its config too
+	if _, ok := rb.Get("sim-a"); !ok || rb.Current != "sim-a" {
+		t.Errorf("b's registry lacks a's change: %+v", rb)
+	}
+	if fresh, _ := Load(b); len(fresh.Instances) != 3 {
+		t.Errorf("b's config wasn't re-read: %+v", fresh.Instances)
+	}
+	// legacy keys follow the selection
+	if host := reload(t, path).GetString("host"); host != "a.example" {
+		t.Errorf("legacy host = %q, want the selected instance's", host)
+	}
+}
+
+// The selected entry was removed by another process: nothing is selected then.
+func TestSaveDropsSelectionOfRemovedEntry(t *testing.T) {
+	a, path := newViper(t, "instances:\n  - name: lab\n    kind: host\n    host: 10.0.0.1\n  - name: sim\n    kind: host\n    host: 10.0.0.2\ncurrent-instance: lab\n")
+	b := reload(t, path)
+	ra, _ := Load(a)
+	rb, _ := Load(b)
+	_ = ra.Select("sim")
+	if err := ra.Save(a); err != nil {
+		t.Fatal(err)
+	}
+	_ = rb.Remove("sim")
+	if err := rb.Save(b); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := Load(reload(t, path))
+	if len(got.Instances) != 1 || got.Current != "" {
+		t.Errorf("got %+v, want only lab and no selection", got)
+	}
+}

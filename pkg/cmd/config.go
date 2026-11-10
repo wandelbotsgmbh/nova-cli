@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/configfile"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/credentials"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/docker"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
@@ -69,8 +70,7 @@ var setCmd = &cobra.Command{
 			return setInstanceValue(cmd, args[0], args[1])
 		}
 
-		viper.Set(args[0], args[1])
-		return viper.WriteConfig()
+		return configfile.Set(viper.GetViper(), args[0], args[1])
 	},
 }
 

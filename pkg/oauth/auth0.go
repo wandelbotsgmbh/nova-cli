@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/cli/browser"
+	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/configfile"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"golang.org/x/oauth2"
 )
@@ -120,59 +122,57 @@ var refreshConfig = NewAuth0Config
 // RefreshToken refreshes the stored login of env without any interaction; it fails if
 // there is none or it can't be refreshed.
 //
-// It works on the config file as it is now, not only on this process's copy:
-// long-running processes (nova mcp, keep-alive) see logins other processes refreshed
-// meanwhile (refresh tokens can be rotated), and writing back changes only the login,
-// so it never reverts what others changed in the config (selected instance, new
-// instances). Of the login in the file and the one in memory the newer one counts: the
-// file may have been overwritten with an older copy.
+// The login in the config file counts, not only this process's copy: long-running
+// processes (nova mcp, keep-alive) see logins other processes refreshed meanwhile.
+// The refresh itself runs under the config lock (configfile.Update), so two processes
+// never refresh with the same refresh token (they can be rotated: the second one
+// would be left with a dead login); the one that waited finds the new login.
 func RefreshToken(ctx context.Context, env AuthEnvironment) error {
 	ctx = withHTTPClient(ctx)
-	login, err := LoadTokenFor(env)
+	v := viper.GetViper()
+	memory, err := LoadTokenFor(env)
 	if err != nil {
 		return err
 	}
-	disk := configOnDisk()
-	fromMemory := true
-	if disk != nil {
+	// the common cases without the lock
+	if disk := configOnDisk(); disk != nil {
 		onDisk, err := loadTokenFor(disk, env)
 		switch {
-		case err != nil || !loggedIn(onDisk):
-			// no login in the file although this process has one: the file is being
-			// written right now (viper truncates it first). Don't build on that copy.
-			if loggedIn(login) {
-				disk = nil
+		case err != nil:
+		case onDisk.OAuth2Token.Valid() && !onDisk.OAuth2Token.Expiry.Before(memory.OAuth2Token.Expiry):
+			if onDisk.OAuth2Token.AccessToken != memory.OAuth2Token.AccessToken {
+				return v.ReadInConfig() // refreshed elsewhere: use it
 			}
-		case !loggedIn(login) || !onDisk.OAuth2Token.Expiry.Before(login.OAuth2Token.Expiry):
-			login, fromMemory = onDisk, false
+			return nil
+		case !loggedIn(onDisk) && memory.OAuth2Token.Valid():
+			// no login in the file (an older CLI version is writing it right now, or
+			// it was removed), but this process has a valid one: nothing to do
+			return nil
 		}
 	}
-	if !loggedIn(login) {
-		return fmt.Errorf("not logged in to the %s environment", env)
-	}
-	token, refreshed := &login.OAuth2Token, false
-	if !token.Valid() {
-		token, err = refreshConfig(env).TokenSource(ctx, token).Token()
-		if err != nil {
+	return configfile.Update(v, func(disk *viper.Viper) error {
+		// of the login in the file and the one of this process the newer one counts:
+		// an older CLI version may have written its older copy over the file
+		login := memory
+		onDisk, err := loadTokenFor(disk, env)
+		fromDisk := err == nil && loggedIn(onDisk) && (!loggedIn(login) || !onDisk.OAuth2Token.Expiry.Before(login.OAuth2Token.Expiry))
+		if fromDisk {
+			login = onDisk
+		}
+		if !loggedIn(login) {
+			return fmt.Errorf("not logged in to the %s environment", env)
+		}
+		token := &login.OAuth2Token
+		if token.Valid() {
+			if fromDisk {
+				return configfile.ErrUnchanged // refreshed while waiting for the lock
+			}
+		} else if token, err = refreshConfig(env).TokenSource(ctx, token).Token(); err != nil {
 			return fmt.Errorf("login of the %s environment expired, run 'nova login --env %s': %w", env, env, err)
 		}
-		refreshed = true
-	}
-	if disk == nil {
-		if refreshed {
-			return StoreToken(token, env)
-		}
-		return nil
-	}
-	if refreshed || !fromMemory {
-		adoptToken(WaboAuthToken{OAuth2Token: *token, AuthEnvironment: env}, env)
-	}
-	if refreshed || fromMemory {
-		// the file lacks the newest login: only the login is written, see above
 		setToken(disk, token, env)
-		return disk.WriteConfig()
-	}
-	return nil
+		return nil
+	})
 }
 
 func LoginWithProvidedRefreshToken(ctx context.Context, env AuthEnvironment, refreshToken string) error {

@@ -178,18 +178,23 @@ func createConfigFileIfMissing(configFile string, configPath string) {
 			os.Exit(1)
 		}
 		f, err := os.OpenFile(configFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, configFileMode)
-		if err != nil {
+		switch {
+		case os.IsExist(err):
+			// another nova process created it in this moment: leave it alone
+		case err != nil:
 			fmt.Fprintln(os.Stderr, "Can't create config:", err)
 			os.Exit(1)
-		}
-		if err := f.Close(); err != nil {
-			fmt.Fprintln(os.Stderr, "Can't create config:", err)
-			os.Exit(1)
-		}
-		err = viper.WriteConfig()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Can't write config:", err)
-			os.Exit(1)
+		default:
+			if err := f.Close(); err != nil {
+				fmt.Fprintln(os.Stderr, "Can't create config:", err)
+				os.Exit(1)
+			}
+			// a new, empty file of this process: the only write that doesn't go
+			// through configfile.Update
+			if err := viper.WriteConfig(); err != nil {
+				fmt.Fprintln(os.Stderr, "Can't write config:", err)
+				os.Exit(1)
+			}
 		}
 	}
 	restrictPermissions(configPath, configDirMode)

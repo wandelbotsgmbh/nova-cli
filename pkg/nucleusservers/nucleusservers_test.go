@@ -192,3 +192,41 @@ func TestAddValidates(t *testing.T) {
 		t.Error("server without host accepted")
 	}
 }
+
+// Two processes load the servers, each adds one, both save: both entries stay.
+func TestSaveKeepsChangesOfOtherProcesses(t *testing.T) {
+	a, path := loadYAML(t, "nucleus-servers:\n  - name: dev\n    host: nucleus.dev.example\ncurrent-nucleus: dev\n")
+	b := viper.New()
+	b.SetConfigFile(path)
+	if err := b.ReadInConfig(); err != nil {
+		t.Fatal(err)
+	}
+	ra, _ := Load(a)
+	rb, _ := Load(b)
+	if err := ra.Add(Server{Name: "lab", Host: "nucleus.lab.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ra.Save(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := rb.Add(Server{Name: "prod", Host: "nucleus.prod.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rb.Save(b); err != nil {
+		t.Fatal(err)
+	}
+
+	fresh := viper.New()
+	fresh.SetConfigFile(path)
+	if err := fresh.ReadInConfig(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := Load(fresh)
+	var names []string
+	for _, s := range got.Servers {
+		names = append(names, s.Name)
+	}
+	if strings.Join(names, ",") != "dev,lab,prod" || got.Current != "dev" {
+		t.Errorf("servers = %v, current = %q", names, got.Current)
+	}
+}

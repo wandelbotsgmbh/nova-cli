@@ -2,6 +2,7 @@ package credentials
 
 import (
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/configfile"
 	"github.com/zalando/go-keyring"
 )
 
@@ -17,9 +18,7 @@ type Credentials struct {
 
 // SetBasicAuth sets the credentials for the basic auth
 func SetBasicAuth(user string, pwd string) error {
-	viper.Set(basicAuthUserKey, user)
-	err := viper.WriteConfig()
-	if err != nil {
+	if err := configfile.Set(viper.GetViper(), basicAuthUserKey, user); err != nil {
 		return err
 	}
 	return keyring.Set(basicAuthKey, user, pwd)

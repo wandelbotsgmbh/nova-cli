@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/configfile"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
 )
 
@@ -60,6 +62,14 @@ type Registry struct {
 	// Migrated is true when the entries were derived from the Nucleus keys of
 	// instance entries or the top level and haven't been saved yet.
 	Migrated bool
+
+	// what Load read, to tell this process's changes from those of others in Save
+	base        []Server
+	baseCurrent string
+}
+
+func sameServer(a, b Server) bool {
+	return a.Name == b.Name && a.Host == b.Host && a.Token == b.Token && a.UseTLS() == b.UseTLS() && (a.TLS == nil) == (b.TLS == nil)
 }
 
 // Load reads the registry from v. Without a nucleus-servers list, the Nucleus keys of
@@ -67,6 +77,15 @@ type Registry struct {
 // in memory, one entry per host; they are persisted on the next Save. The old keys are
 // never changed, older CLI versions keep reading them.
 func Load(v *viper.Viper) (*Registry, error) {
+	r, err := load(v)
+	if err != nil {
+		return nil, err
+	}
+	r.base, r.baseCurrent = slices.Clone(r.Servers), r.Current
+	return r, nil
+}
+
+func load(v *viper.Viper) (*Registry, error) {
 	r := &Registry{Current: v.GetString(keyCurrent)}
 	if v.IsSet(keyServers) {
 		if err := v.UnmarshalKey(keyServers, &r.Servers); err != nil {
@@ -123,24 +142,47 @@ func Load(v *viper.Viper) (*Registry, error) {
 	return r, nil
 }
 
-// Save writes the registry into v and persists v's config file. The old Nucleus keys
-// are left as they are.
+// Save persists the registry in v's config file. Other processes may have changed the
+// file since Load: only what this registry added, changed or removed is applied to the
+// file's current list (configfile.Merge3). The old Nucleus keys are left as they are.
 func (r *Registry) Save(v *viper.Viper) error {
-	list := make([]map[string]any, 0, len(r.Servers))
-	for _, s := range r.Servers {
-		m := map[string]any{"name": s.Name, "host": s.Host}
-		if s.Token != "" {
-			m["token"] = s.Token
+	err := configfile.Update(v, func(disk *viper.Viper) error {
+		onDisk, err := load(disk)
+		if err != nil {
+			return err
 		}
-		if s.TLS != nil {
-			m["tls"] = *s.TLS
+		if onDisk.Migrated && !r.Migrated {
+			// the file has no list of its own yet: its entries are derived, not saved
+			onDisk.Servers, onDisk.Current = nil, ""
 		}
-		list = append(list, m)
+		r.Servers = configfile.Merge3(r.base, r.Servers, onDisk.Servers, func(s Server) string { return s.Name }, sameServer)
+		if r.Current == r.baseCurrent && !onDisk.Migrated {
+			r.Current = onDisk.Current
+		}
+		if _, ok := r.Get(r.Current); !ok {
+			r.Current = ""
+		}
+		list := make([]map[string]any, 0, len(r.Servers))
+		for _, s := range r.Servers {
+			m := map[string]any{"name": s.Name, "host": s.Host}
+			if s.Token != "" {
+				m["token"] = s.Token
+			}
+			if s.TLS != nil {
+				m["tls"] = *s.TLS
+			}
+			list = append(list, m)
+		}
+		disk.Set(keyServers, list)
+		disk.Set(keyCurrent, r.Current)
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-	v.Set(keyServers, list)
-	v.Set(keyCurrent, r.Current)
 	r.Migrated = false
-	return v.WriteConfig()
+	r.base, r.baseCurrent = slices.Clone(r.Servers), r.Current
+	return nil
 }
 
 // NameFromHost derives an entry name from a host: its first label that isn't
