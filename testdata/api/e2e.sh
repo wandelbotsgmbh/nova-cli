@@ -13,6 +13,10 @@ work=${1:-$(mktemp -d)}
 key="nova-api-e2e-$$"
 collider="/api/v2/cells/{cell}/store/collision/colliders/$key"
 
+# temporary, see testdata/retry.sh: every nova call is run again if the connection drops
+retry=$(cd "$(dirname "$0")/.." && pwd)/retry.sh
+nova() { "$retry" nova "$@"; }
+
 step() { printf '\n== %s\n' "$*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
