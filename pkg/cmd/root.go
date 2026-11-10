@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
+	"golang.org/x/term"
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -42,6 +44,10 @@ func Execute() {
 		if errors.As(err, &exit) {
 			os.Exit(exit.code)
 		}
+		var typed *typedError
+		if errors.As(err, &typed) && typed.exit != 0 {
+			os.Exit(typed.exit)
+		}
 		os.Exit(1)
 	}
 }
@@ -58,12 +64,35 @@ func executeRoot() error {
 	cmd, err := rootCmd.ExecuteC()
 	if err != nil && !errors.As(err, new(exitCodeError)) {
 		cmd.PrintErrln(cmd.ErrPrefix(), err.Error())
+		var typed *typedError
+		if errors.As(err, &typed) {
+			printTypedError(typed)
+		}
 		if !argsAccepted {
 			cmd.PrintErrf("Run '%s --help' for usage.\n", cmd.CommandPath())
 		}
 	}
 	return err
 }
+
+// printTypedError adds the hint of an ADR-0010 error and, when stderr is no
+// terminal (agents, CI), the error as one JSON line:
+// {"error": {"code": "APPROVAL_REQUIRED", "message": …, "hint": …, "retryable": false}}
+func printTypedError(e *typedError) {
+	if e.Hint != "" {
+		fmt.Fprintf(os.Stderr, "Hint: %s\n", e.Hint)
+	}
+	if stderrIsTerminal() {
+		return
+	}
+	b, err := json.Marshal(map[string]any{"error": e})
+	if err == nil {
+		fmt.Fprintln(os.Stderr, string(b))
+	}
+}
+
+// stderrIsTerminal is replaced in tests.
+var stderrIsTerminal = func() bool { return term.IsTerminal(int(os.Stderr.Fd())) }
 
 // insecureSkipTLSVerify is bound to the --insecure-skip-tls-verify flag only.
 // It is intentionally NOT bound to viper so it is never read from or persisted
