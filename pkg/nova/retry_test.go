@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -74,57 +75,66 @@ func TestDeletedByEarlierAttempt(t *testing.T) {
 	}
 }
 
-func TestWaitForCellRunning(t *testing.T) {
+// statusServer replays cell status answers (the last one repeats) and serves the cell
+// configuration with the given controllers and apps.
+func statusServer(t *testing.T, config string, answers ...string) (string, *int) {
+	t.Helper()
 	old := cellStatusPoll
 	cellStatusPoll = time.Millisecond
 	t.Cleanup(func() { cellStatusPoll = old })
 	polls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v2/cells/cell/status" {
-			http.NotFound(w, r)
-			return
-		}
-		polls++
 		w.Header().Set("Content-Type", "application/json")
-		if polls == 1 {
-			// just accepted: no services listed yet, must not count as ready
-			fmt.Fprint(w, `{"operating_state":"ACTIVE","service_status":[]}`)
-			return
+		switch r.URL.Path {
+		case "/api/v2/cells/cell":
+			fmt.Fprint(w, config)
+		case "/api/v2/cells/cell/status":
+			answer := answers[min(polls, len(answers)-1)]
+			polls++
+			fmt.Fprintf(w, `{"operating_state":"ACTIVE","service_status":[%s]}`, answer)
+		default:
+			http.NotFound(w, r)
 		}
-		code := "Running"
-		if polls < 4 {
-			code = "Pending"
-		}
-		fmt.Fprintf(w, `{"operating_state":"ACTIVE","service_status":[{"group":"CellService","service":"ApiGateway","status":{"code":"Running","severity":"INFO"}},{"group":"App","service":"myapp","status":{"code":%q,"severity":"INFO"}}]}`, code)
 	}))
-	defer srv.Close()
-	if err := waitForCellRunning(srv.URL, "cell", "myapp"); err != nil {
+	t.Cleanup(srv.Close)
+	return srv.URL, &polls
+}
+
+func svc(name, code string) string {
+	return fmt.Sprintf(`{"group":"CellService","service":%q,"status":{"code":%q,"severity":"INFO"}}`, name, code)
+}
+
+func list(s ...string) string { return strings.Join(s, ",") }
+
+// The status of a rolling-out cell lists its services gradually (measured on 26.8:
+// none, one, then all); a partial list where the listed ones run must not count.
+func TestWaitForCellRunning_PartialListIsNotReady(t *testing.T) {
+	full := list(svc("ApiGateway", "Running"), svc("Storage", "Running"), svc("robot", "Running"), svc("myapp", "Running"))
+	url, polls := statusServer(t, `{"name":"cell","controllers":[{"name":"robot","configuration":{"kind":"VirtualController","manufacturer":"universalrobots"}}]}`,
+		"",                                 // just accepted
+		list(svc("ApiGateway", "Running")), // partial, but everything listed runs
+		list(svc("ApiGateway", "Running"), svc("Storage", "Pending"), svc("robot", "Pending")),
+		list(svc("ApiGateway", "Running"), svc("Storage", "Running"), svc("robot", "Running")), // app missing
+		full)
+	if err := waitForCellRunning(url, "cell", "myapp"); err != nil {
 		t.Fatal(err)
 	}
-	if polls != 4 {
-		t.Errorf("expected to poll past the empty list until the app runs, got %d polls", polls)
+	// ready only from the 5th answer on, and then stablePolls times in a row
+	if want := 4 + stablePolls; *polls != want {
+		t.Errorf("returned after %d polls, want %d", *polls, want)
 	}
 }
 
-func TestWaitForCellRunning_EmptyListIsNotReady(t *testing.T) {
-	old := cellStatusPoll
-	cellStatusPoll = time.Millisecond
-	t.Cleanup(func() { cellStatusPoll = old })
-	polls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		polls++
-		w.Header().Set("Content-Type", "application/json")
-		if polls < 3 {
-			fmt.Fprint(w, `{"operating_state":"ACTIVE","service_status":[]}`)
-			return
-		}
-		fmt.Fprint(w, `{"operating_state":"ACTIVE","service_status":[{"group":"CellService","service":"ApiGateway","status":{"code":"Running","severity":"INFO"}}]}`)
-	}))
-	defer srv.Close()
-	if err := waitForCellRunning(srv.URL, "cell", ""); err != nil {
+func TestWaitForCellRunning_ExpectedControllerMissing(t *testing.T) {
+	url, polls := statusServer(t, `{"name":"cell","controllers":[{"name":"robot","configuration":{"kind":"VirtualController","manufacturer":"universalrobots"}}]}`,
+		list(svc("ApiGateway", "Running")),
+		list(svc("ApiGateway", "Running")),
+		list(svc("ApiGateway", "Running")),
+		list(svc("ApiGateway", "Running"), svc("robot", "Running")))
+	if err := waitForCellRunning(url, "cell", ""); err != nil {
 		t.Fatal(err)
 	}
-	if polls != 3 {
-		t.Errorf("a cell without listed services must not count as ready, got %d polls", polls)
+	if want := 3 + stablePolls; *polls != want {
+		t.Errorf("a configured controller must be listed before the cell counts as ready: %d polls, want %d", *polls, want)
 	}
 }

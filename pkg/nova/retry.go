@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
+	apiv2 "github.com/wandelbotsgmbh/nova-api-client-go/v25/pkg/nova/v2"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 )
 
@@ -49,17 +52,43 @@ func deletedByEarlierAttempt(resp *http.Response) bool {
 // cellStatusPoll is the interval of waitForCellRunning (replaced in tests).
 var cellStatusPoll = 2 * time.Second
 
-// waitForCellRunning waits until every service of the cell is running and, with app,
-// that the app is among them; at most the default completion timeout.
+// stablePolls is how many polls in a row the cell must look ready with the same
+// services: the status lists services gradually while a cell rolls out (measured:
+// none, then one, then all six within ~2 s), so one "all listed are running" can be a
+// partial list.
+const stablePolls = 3
+
+// waitForCellRunning waits for the rollout a create with completion_timeout would have
+// waited for: every controller and app of the cell's configuration (and app, if given)
+// is listed, every listed service is running, and the list stayed the same for
+// stablePolls polls. At most the default completion timeout.
 func waitForCellRunning(host, cell, app string) error {
 	client, err := NewV2ClientWithToken(host)
 	if err != nil {
 		return err
 	}
+	expected := map[string]bool{}
+	if app != "" {
+		expected[app] = true
+	}
+	if resp, err := client.GetCellWithResponse(context.Background(), cell); err == nil && resp.JSON200 != nil {
+		if resp.JSON200.Controllers != nil {
+			for _, c := range *resp.JSON200.Controllers {
+				expected[c.Name] = true
+			}
+		}
+		if resp.JSON200.Apps != nil {
+			for _, a := range *resp.JSON200.Apps {
+				expected[a.Name] = true
+			}
+		}
+	}
+
 	timeout := time.Duration(*GetDefaultCompletionTimeoutSeconds()) * time.Second
 	deadline := time.Now().Add(timeout)
-	last := "no status yet"
+	last, previous, stable := "no status yet", "", 0
 	for {
+		ready := false
 		resp, err := client.GetCellStatusWithResponse(context.Background(), cell)
 		switch {
 		case err != nil:
@@ -67,29 +96,58 @@ func waitForCellRunning(host, cell, app string) error {
 		case resp.JSON200 == nil:
 			last = resp.Status()
 		case len(resp.JSON200.ServiceStatus) == 0:
-			// a cell that was only just accepted may not list its services yet
 			last = "no services listed yet"
 		default:
-			ready, foundApp := true, app == ""
-			for _, s := range resp.JSON200.ServiceStatus {
-				if s.Service == app {
-					foundApp = true
+			ready, last = cellReady(resp.JSON200.ServiceStatus, expected)
+			if ready {
+				set := serviceSet(resp.JSON200.ServiceStatus)
+				if set != previous {
+					previous, stable = set, 0
 				}
-				if s.Status.Code != "Running" {
-					ready = false
-					last = fmt.Sprintf("%s is %s", s.Service, s.Status.Code)
+				stable++
+				if stable >= stablePolls {
+					return nil
 				}
 			}
-			if ready && foundApp {
-				return nil
-			}
-			if !foundApp {
-				last = fmt.Sprintf("app %s not listed yet", app)
-			}
+		}
+		if !ready {
+			previous, stable = "", 0
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("cell %s not ready after %s (%s)", cell, timeout, last)
 		}
 		time.Sleep(cellStatusPoll)
 	}
+}
+
+// cellReady reports whether every expected service is listed and every listed one is
+// running; otherwise it says what is missing.
+func cellReady(services []apiv2.ServiceStatus, expected map[string]bool) (bool, string) {
+	listed := map[string]bool{}
+	for _, s := range services {
+		listed[s.Service] = true
+		if s.Status.Code != "Running" {
+			return false, fmt.Sprintf("%s is %s", s.Service, s.Status.Code)
+		}
+	}
+	missing := []string{}
+	for name := range expected {
+		if !listed[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return false, "not listed yet: " + strings.Join(missing, ", ")
+	}
+	return true, "all services running"
+}
+
+func serviceSet(services []apiv2.ServiceStatus) string {
+	names := make([]string, 0, len(services))
+	for _, s := range services {
+		names = append(names, s.Service)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
 }
