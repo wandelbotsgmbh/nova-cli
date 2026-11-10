@@ -10,6 +10,7 @@ import (
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/configfile"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
@@ -154,7 +155,7 @@ func initConfig() {
 
 	createConfigFileIfMissing(configFile, configPath)
 
-	err = viper.ReadInConfig()
+	err = configfile.Read(viper.GetViper())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Can't read config:", err)
 		os.Exit(1)

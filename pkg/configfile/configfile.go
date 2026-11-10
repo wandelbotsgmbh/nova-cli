@@ -93,10 +93,27 @@ func Reload(v *viper.Viper) error {
 			return nil
 		}
 	}
-	if err := v.ReadInConfig(); err != nil {
+	if err := Read(v); err != nil {
 		return fmt.Errorf("can't read config: %w", err)
 	}
 	return nil
+}
+
+// Read is v.ReadInConfig for a file other processes replace: on Windows the file can't
+// be opened for the moment of a rename ("used by another process"), so a failed read
+// is tried again. A file that can't be parsed fails at once.
+func Read(v *viper.Viper) error {
+	var err error
+	for attempt := 0; attempt < 20; attempt++ {
+		err = v.ReadInConfig()
+		var parseErr viper.ConfigParseError
+		var notFound viper.ConfigFileNotFoundError
+		if err == nil || errors.As(err, &parseErr) || errors.As(err, &notFound) || errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return err
 }
 
 // hasFileContent reports whether v read anything from its config file (defaults and
@@ -119,7 +136,7 @@ func read(file string, expectContent bool) (*viper.Viper, error) {
 		disk := viper.New()
 		disk.SetConfigFile(file)
 		disk.SetConfigType("yaml")
-		if err := disk.ReadInConfig(); err != nil {
+		if err := Read(disk); err != nil {
 			return nil, err
 		}
 		if len(disk.AllKeys()) > 0 || !expectContent || time.Now().After(deadline) {

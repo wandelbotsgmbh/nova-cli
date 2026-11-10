@@ -166,7 +166,7 @@ func configOnDisk() *viper.Viper {
 	}
 	v := viper.New()
 	v.SetConfigFile(file)
-	if err := v.ReadInConfig(); err != nil {
+	if err := configfile.Read(v); err != nil {
 		return nil
 	}
 	return v

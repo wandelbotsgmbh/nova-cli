@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,13 @@ func open(t *testing.T, file string) *viper.Viper {
 	if err := v.ReadInConfig(); err != nil {
 		t.Fatal(err)
 	}
+	return v
+}
+
+// open2 is open without reading, for use outside the test goroutine.
+func open2(file string) *viper.Viper {
+	v := viper.New()
+	v.SetConfigFile(file)
 	return v
 }
 
@@ -83,8 +91,16 @@ func TestUpdate_ManyWritersAtOnce(t *testing.T) {
 			default:
 			}
 			raw, err := os.ReadFile(file)
-			if err != nil || !strings.Contains(string(raw), "editor: vi") {
-				readerDone <- fmt.Errorf("partial config read (%v): %q", err, raw)
+			if err != nil {
+				continue // Windows: not readable in the moment of a rename, see Read
+			}
+			if !strings.Contains(string(raw), "editor: vi") {
+				readerDone <- fmt.Errorf("partial config read: %q", raw)
+				return
+			}
+			// and a process starting now can read it
+			if err := Read(open2(file)); err != nil {
+				readerDone <- fmt.Errorf("config not readable while others write: %w", err)
 				return
 			}
 		}
@@ -143,7 +159,8 @@ func TestUpdate_KeepsSymlinkAndPermissions(t *testing.T) {
 	if got := open(t, file).GetString("editor"); got != "emacs" {
 		t.Errorf("the link's target wasn't changed, editor = %q", got)
 	}
-	if info, _ := os.Stat(file); info.Mode().Perm()&0o077 != 0 {
+	// Windows doesn't use these bits
+	if info, _ := os.Stat(file); runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		t.Errorf("config readable by others: %v", info.Mode().Perm())
 	}
 }
