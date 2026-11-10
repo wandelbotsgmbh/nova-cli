@@ -85,18 +85,46 @@ func TestWaitForCellRunning(t *testing.T) {
 			return
 		}
 		polls++
+		w.Header().Set("Content-Type", "application/json")
+		if polls == 1 {
+			// just accepted: no services listed yet, must not count as ready
+			fmt.Fprint(w, `{"operating_state":"ACTIVE","service_status":[]}`)
+			return
+		}
 		code := "Running"
-		if polls < 3 {
+		if polls < 4 {
 			code = "Pending"
 		}
-		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"operating_state":"ACTIVE","service_status":[{"group":"CellService","service":"ApiGateway","status":{"code":"Running","severity":"INFO"}},{"group":"App","service":"myapp","status":{"code":%q,"severity":"INFO"}}]}`, code)
 	}))
 	defer srv.Close()
 	if err := waitForCellRunning(srv.URL, "cell", "myapp"); err != nil {
 		t.Fatal(err)
 	}
+	if polls != 4 {
+		t.Errorf("expected to poll past the empty list until the app runs, got %d polls", polls)
+	}
+}
+
+func TestWaitForCellRunning_EmptyListIsNotReady(t *testing.T) {
+	old := cellStatusPoll
+	cellStatusPoll = time.Millisecond
+	t.Cleanup(func() { cellStatusPoll = old })
+	polls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		polls++
+		w.Header().Set("Content-Type", "application/json")
+		if polls < 3 {
+			fmt.Fprint(w, `{"operating_state":"ACTIVE","service_status":[]}`)
+			return
+		}
+		fmt.Fprint(w, `{"operating_state":"ACTIVE","service_status":[{"group":"CellService","service":"ApiGateway","status":{"code":"Running","severity":"INFO"}}]}`)
+	}))
+	defer srv.Close()
+	if err := waitForCellRunning(srv.URL, "cell", ""); err != nil {
+		t.Fatal(err)
+	}
 	if polls != 3 {
-		t.Errorf("expected to poll until the app runs, got %d polls", polls)
+		t.Errorf("a cell without listed services must not count as ready, got %d polls", polls)
 	}
 }

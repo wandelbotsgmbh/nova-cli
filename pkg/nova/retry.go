@@ -66,6 +66,9 @@ func waitForCellRunning(host, cell, app string) error {
 			last = err.Error()
 		case resp.JSON200 == nil:
 			last = resp.Status()
+		case len(resp.JSON200.ServiceStatus) == 0:
+			// a cell that was only just accepted may not list its services yet
+			last = "no services listed yet"
 		default:
 			ready, foundApp := true, app == ""
 			for _, s := range resp.JSON200.ServiceStatus {
