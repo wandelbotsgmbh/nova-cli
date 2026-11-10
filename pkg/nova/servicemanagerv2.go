@@ -92,7 +92,7 @@ func DeleteAppV2Impl(host string, cell string, app string) error {
 		return err
 	}
 
-	if !StatusSuccessfull(resp.StatusCode()) && !deletedByEarlierAttempt(resp.HTTPResponse) {
+	if !StatusSuccessfull(resp.StatusCode()) {
 		return fmt.Errorf("failed to delete app: %s %s", resp.Status(), string(resp.Body))
 	}
 	return nil
@@ -111,7 +111,7 @@ func AddAppV2Impl(host string, cell string, app string, config apiv2.App) error 
 			return nil, nil, err
 		}
 		return resp.HTTPResponse, resp.Body, nil
-	}, func() error { return waitForCellRunning(host, cell, app) }, "failed to create new app")
+	}, func() error { return UpdateAppConfigurationV2Impl(host, cell, app, config) }, "failed to create new app")
 }
 
 func AddAppFromJsonV2Impl(host, cell, app string, config []byte) error {
@@ -127,7 +127,7 @@ func AddAppFromJsonV2Impl(host, cell, app string, config []byte) error {
 			return nil, nil, err
 		}
 		return resp.HTTPResponse, resp.Body, nil
-	}, func() error { return waitForCellRunning(host, cell, app) }, "failed to create new app")
+	}, func() error { return UpdateAppConfigurationFromJsonV2Impl(host, cell, app, config) }, "failed to create new app")
 }
 
 func AddAppFromYamlV2Impl(host, cell, app string, config []byte) error {
@@ -224,15 +224,19 @@ func CreateCellV2Impl(host string, cell string) error {
 	}
 
 	params := &apiv2.DeployCellParams{CompletionTimeout: GetDefaultCompletionTimeoutSeconds()}
-	return createWithRetry("cell "+cell, func() (*http.Response, []byte, error) {
-		resp, err := client.DeployCell(context.TODO(), params, apiv2.Cell{Name: cell})
-		if err != nil {
-			return nil, nil, err
-		}
-		defer resp.Body.Close()
+	resp, err := client.DeployCell(context.TODO(), params, apiv2.Cell{Name: cell})
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	if !StatusSuccessfull(resp.StatusCode) {
 		body, _ := io.ReadAll(resp.Body)
-		return resp, body, nil
-	}, func() error { return waitForCellRunning(host, cell, "") }, "failed to create cell")
+		return fmt.Errorf("failed to create cell: %s %s", resp.Status, string(body))
+	}
+
+	return nil
 }
 
 func DeleteCellV2Impl(host string, cell string) error {
@@ -249,7 +253,7 @@ func DeleteCellV2Impl(host string, cell string) error {
 
 	defer resp.Body.Close()
 
-	if !StatusSuccessfull(resp.StatusCode) && !deletedByEarlierAttempt(resp) {
+	if !StatusSuccessfull(resp.StatusCode) {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("failed to delete cell: %s %s", resp.Status, string(body))
 	}
