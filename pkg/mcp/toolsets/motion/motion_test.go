@@ -62,6 +62,10 @@ type fakeController struct {
 	polls      int
 	wsOpened   bool
 	requests   []string
+	// knobs and records of the execution WebSocket
+	startAckDelay  time.Duration // wait before START_RECEIVED
+	dropAfterStart bool          // close the connection after the start
+	wsGot          []string      // message types received
 }
 
 var (
@@ -120,6 +124,9 @@ func (f *fakeController) server(t *testing.T) *novaapi.Client {
 				return
 			}
 			f.mu.Lock()
+			if mt, ok := msg["message_type"].(string); ok {
+				f.wsGot = append(f.wsGot, mt)
+			}
 			var answer map[string]any
 			switch msg["message_type"] {
 			case "InitializeMovementRequest":
@@ -136,12 +143,20 @@ func (f *fakeController) server(t *testing.T) *novaapi.Client {
 				f.paused = true
 				answer = map[string]any{"kind": "PAUSE_RECEIVED"}
 			}
-			motionErr := f.motionErr && msg["message_type"] == "StartMovementRequest"
+			isStart := msg["message_type"] == "StartMovementRequest"
+			motionErr := f.motionErr && isStart
+			delay, drop := f.startAckDelay, f.dropAfterStart
 			f.mu.Unlock()
+			if isStart && delay > 0 {
+				time.Sleep(delay)
+			}
 			// the instance wraps every answer in {"result": …}
 			_ = wsjson.Write(ctx, conn, map[string]any{"result": answer})
 			if motionErr {
 				_ = wsjson.Write(ctx, conn, map[string]any{"result": map[string]any{"kind": "MOTION_ERROR", "message": "controller disconnected"}})
+			}
+			if isStart && drop {
+				return // the connection breaks while the robot moves
 			}
 		}
 	})
@@ -373,4 +388,46 @@ func TestLiveExecute(t *testing.T) {
 		t.Fatalf("execute home: %s", text)
 	}
 	t.Log(text)
+}
+
+func (f *fakeController) received() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return strings.Join(f.wsGot, ",")
+}
+
+// The start request went out but its acknowledgement is late: the movement may have
+// started, so it is paused before the connection is closed.
+func TestExecute_TimeoutDuringStartPauses(t *testing.T) {
+	f := newVirtual()
+	f.runPolls, f.startAckDelay = -1, 1500*time.Millisecond
+	cs := connect(t, f.server(t))
+	_, text := call(t, cs, "execute_trajectory", map[string]any{"cell": "cell", "controller": "sim", "trajectory": "t1", "timeout_seconds": 1})
+	if !strings.HasPrefix(text, "EXECUTION_FAILED:") || !strings.Contains(text, "the movement was paused") {
+		t.Fatalf("unexpected result %q", text)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for !strings.HasSuffix(f.received(), "PauseMovementRequest") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the instance never got a pause, received %s", f.received())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// The WebSocket breaks after the start: the call fails at once and says that the
+// movement can't be stopped from here, instead of polling to the timeout and claiming
+// a pause nobody received.
+func TestExecute_ConnectionLost(t *testing.T) {
+	f := newVirtual()
+	f.runPolls, f.dropAfterStart = -1, true
+	cs := connect(t, f.server(t))
+	begin := time.Now()
+	_, text := call(t, cs, "execute_trajectory", map[string]any{"cell": "cell", "controller": "sim", "trajectory": "t1", "timeout_seconds": 20})
+	if !strings.HasPrefix(text, "EXECUTION_FAILED:") || !strings.Contains(text, "connection") || !strings.Contains(text, "may still be moving") {
+		t.Fatalf("unexpected result %q", text)
+	}
+	if took := time.Since(begin); took > 5*time.Second {
+		t.Errorf("the lost connection was noticed after %s", took)
+	}
 }

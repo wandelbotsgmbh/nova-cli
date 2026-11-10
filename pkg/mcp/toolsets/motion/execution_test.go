@@ -16,7 +16,23 @@ func TestExecution_StopBeforeTheConnectionIsUp(t *testing.T) {
 	if !exec.wasStopped() {
 		t.Fatal("the stop must be recorded")
 	}
-	if apiErr := start(context.Background(), exec, "execute_trajectory", "t", 100); apiErr == nil || !strings.Contains(apiErr.Message, "stopped") {
+	if apiErr := start(context.Background(), context.Background(), exec, "execute_trajectory", "t", 100); apiErr == nil || !strings.Contains(apiErr.Message, "stopped") {
 		t.Fatalf("start must not move a stopped execution, got %v", apiErr)
+	}
+}
+
+// After use_instance the stop call is pinned to another instance than the movement:
+// it must still find the execution on that cell and controller.
+func TestRunning_FindsExecutionOfAnotherInstance(t *testing.T) {
+	exec := &execution{trajectory: "t"}
+	if !register("https://a/api/v2#cell", "sim", exec) {
+		t.Fatal("register failed")
+	}
+	t.Cleanup(func() { unregister("https://a/api/v2#cell", "sim", exec) })
+	if got := running("https://b/api/v2#cell", "cell", "sim"); got != exec {
+		t.Errorf("expected the execution started on instance a, got %v", got)
+	}
+	if got := running("https://b/api/v2#cell", "cell", "other"); got != nil {
+		t.Errorf("another controller must not match, got %v", got)
 	}
 }
