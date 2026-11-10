@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 )
@@ -107,6 +108,9 @@ func TestDebugTruncatesLargeAndSkipsBinaryBodies(t *testing.T) {
 }
 
 func TestDebugLogsTransportErrors(t *testing.T) {
+	old := retryDelays // a refused connection is retried; keep the test fast
+	retryDelays = []time.Duration{time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { retryDelays = old })
 	log := captureDebug(t)
 	_, err := Client().Get("http://127.0.0.1:1/x")
 	if err == nil {

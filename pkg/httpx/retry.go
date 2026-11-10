@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// RetriedHeader is set on responses to requests that were sent more than once because
-// the connection dropped. A 404 on a retried DELETE means the first attempt went through.
+// RetriedHeader is set on responses to requests that were sent again after a dropped
+// connection (not after a refused one, which never reached the instance). A 404 on a retried DELETE means the first attempt went through.
 const RetriedHeader = "X-Nova-Cli-Retried"
 
 // Retried reports whether resp answers a request that was resent (see RetriedHeader).
@@ -44,6 +44,19 @@ func IsConnectionDrop(err error) bool {
 // ingress is usually still reloading right after the drop.
 func FirstRetryDelay() time.Duration { return retryDelays[0] }
 
+// IsConnectionRefused reports whether err means no connection was made at all: the
+// request never reached the instance, so resending is safe for every method. The
+// instance's load balancer refuses connections for a moment while an ingress or app
+// rolls out.
+func IsConnectionRefused(err error) bool {
+	return err != nil && errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// rewindable reports whether req's body can be sent again.
+func rewindable(req *http.Request) bool {
+	return req.Body == nil || req.Body == http.NoBody || req.GetBody != nil
+}
+
 // idempotent reports whether sending req again can't do more than sending it once.
 // Conditional requests (If-Match, ...) are excluded: if the dropped attempt went
 // through, the resend fails its precondition and reads as someone else's change.
@@ -65,14 +78,22 @@ func idempotent(req *http.Request) bool {
 // with completion_timeout is often cut off mid-way by an ingress reload.
 func retryRoundTrip(send func(*http.Request) (*http.Response, error), req *http.Request) (*http.Response, error) {
 	resp, err := send(req)
-	if !idempotent(req) {
-		return resp, err
-	}
+	// only a dropped attempt may have reached the instance: then a 404 on a resent
+	// DELETE means it went through (Retried); a refused one never arrived
+	dropped := false
 	for _, delay := range retryDelays {
-		if !IsConnectionDrop(err) || req.Context().Err() != nil {
+		if req.Context().Err() != nil || !rewindable(req) {
 			return resp, err
 		}
-		fmt.Fprintf(os.Stderr, "note: the instance closed the connection during %s %s, retrying in %s\n", req.Method, req.URL.Path, delay)
+		switch {
+		case IsConnectionRefused(err):
+			fmt.Fprintf(os.Stderr, "note: the instance refused the connection for %s %s, retrying in %s\n", req.Method, req.URL.Path, delay)
+		case IsConnectionDrop(err) && idempotent(req):
+			dropped = true
+			fmt.Fprintf(os.Stderr, "note: the instance closed the connection during %s %s, retrying in %s\n", req.Method, req.URL.Path, delay)
+		default:
+			return resp, err
+		}
 		select {
 		case <-time.After(delay):
 		case <-req.Context().Done():
@@ -87,7 +108,7 @@ func retryRoundTrip(send func(*http.Request) (*http.Response, error), req *http.
 			retry.Body = body
 		}
 		resp, err = send(retry)
-		if resp != nil {
+		if resp != nil && dropped {
 			resp.Header.Set(RetriedHeader, "1")
 		}
 	}

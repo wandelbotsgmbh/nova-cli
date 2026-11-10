@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -121,5 +122,46 @@ func TestRetry_ConditionalRequestNotResent(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Errorf("a conditional PUT must not be resent, got %d calls", calls.Load())
+	}
+}
+
+// A refused connection never reached the instance: every method is resent, a POST too,
+// and the answer isn't marked as a resend (a 404 is a real 404).
+func TestRetry_RefusedConnectionResentForEveryMethod(t *testing.T) {
+	old := retryDelays
+	retryDelays = []time.Duration{20 * time.Millisecond, 20 * time.Millisecond}
+	t.Cleanup(func() { retryDelays = old })
+
+	// a port nothing listens on yet; the server starts during the first retry delay
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	var got string
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = string(b)
+		w.WriteHeader(http.StatusCreated)
+	})}
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			return
+		}
+		_ = srv.Serve(l)
+	}()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/cells/cell/apps", strings.NewReader(`{"name":"app"}`))
+	resp, err := Client().Do(req)
+	if err != nil {
+		t.Fatalf("expected the POST to be resent after the refusal, got %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated || got != `{"name":"app"}` || Retried(resp) {
+		t.Errorf("status=%d body=%q retried=%v", resp.StatusCode, got, Retried(resp))
 	}
 }
