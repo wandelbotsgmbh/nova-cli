@@ -9,6 +9,10 @@ dir=$(cd "$(dirname "$0")" && pwd)
 work=${1:-$(mktemp -d)}
 id="ci-flow-$$"
 
+# temporary, see testdata/retry.sh: every nova call is run again if the connection drops
+retry=$(cd "$(dirname "$0")/.." && pwd)/retry.sh
+nova() { "$retry" nova "$@"; }
+
 step() { printf '\n== %s\n' "$*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 has_flow() { nova flow list | awk 'NR > 1 { print $1 }' | grep -qx "$id"; }

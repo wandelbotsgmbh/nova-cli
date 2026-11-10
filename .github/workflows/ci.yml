@@ -215,12 +215,12 @@ jobs:
       - name: Install cell
         run: |
           cat testdata/cell.yaml
-          nova cell install testdata/cell.yaml
+          testdata/retry.sh nova cell install testdata/cell.yaml
       - name: Create and install app
         run: |
           nova config set image-registry ghcr.io/wandelbotsgmbh/nova-cli-e2e
           nova app create your-nova-app
-          nova app install your-nova-app
+          testdata/retry.sh nova app install your-nova-app
       - name: Check app is reachable
         run: |
           INSTANCE_TOKEN=$(nova login token)
