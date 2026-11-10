@@ -64,16 +64,32 @@ func Tools(env tool.Env) []tool.Registration {
 
 type execution struct {
 	trajectory string
-	conn       *websocket.Conn
-	mu         sync.Mutex // serializes writes to conn
+	mu         sync.Mutex      // guards the fields below and serializes writes to conn
+	conn       *websocket.Conn // nil until the connection is up
 	stopped    bool
 }
 
+// pause stops the movement. An execution is registered before its connection is up
+// (so a second one is refused): a stop in that window is recorded, and start doesn't
+// send anything any more.
 func (e *execution) pause(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.stopped = true
+	if e.conn == nil {
+		return nil
+	}
 	return wsjson.Write(ctx, e.conn, map[string]string{"message_type": "PauseMovementRequest"})
+}
+
+// send writes a request of the start sequence, unless the execution was stopped.
+func (e *execution) send(ctx context.Context, request map[string]any) (stopped bool, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.stopped {
+		return true, nil
+	}
+	return false, wsjson.Write(ctx, e.conn, request)
 }
 
 func (e *execution) wasStopped() bool {
@@ -270,7 +286,9 @@ func addExecute(s *sdk.Server, c *novaapi.Client) {
 			unregister(scope, in.Controller, exec)
 			return tool.Fail[ExecuteOutput](apiErr)
 		}
+		exec.mu.Lock()
 		exec.conn = conn
+		exec.mu.Unlock()
 		finish := func() {
 			_ = conn.Close(websocket.StatusNormalClosure, "")
 			runCancel()
@@ -390,14 +408,18 @@ func start(ctx context.Context, exec *execution, name, trajectory string, speed 
 		ack     string
 	}{map[string]any{"message_type": "StartMovementRequest", "direction": "DIRECTION_FORWARD"}, "START_RECEIVED"})
 
+	exec.mu.Lock()
+	conn := exec.conn
+	exec.mu.Unlock()
 	for _, step := range steps {
-		exec.mu.Lock()
-		err := wsjson.Write(ctx, exec.conn, step.request)
-		exec.mu.Unlock()
+		stopped, err := exec.send(ctx, step.request)
+		if stopped {
+			return fail(name, "stopped with stop_execution before the movement started")
+		}
 		if err != nil {
 			return fail(name, "sending %s failed: %v", step.request["message_type"], err)
 		}
-		msg, err := readMessage(ctx, exec.conn)
+		msg, err := readMessage(ctx, conn)
 		if err != nil {
 			return fail(name, "no answer to %s: %v", step.request["message_type"], err)
 		}
