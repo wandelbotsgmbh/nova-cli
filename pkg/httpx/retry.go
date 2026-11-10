@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -30,9 +29,16 @@ var (
 	// later), so a fixed number of retries isn't enough.
 	dropBudget = 3 * time.Minute
 	// refusedBudget is shorter: a refusal during a reload passes within seconds, and a
-	// host that is really down should fail soon.
+	// host that is really down should fail soon. It counts from the first refusal in a
+	// row, so a refusal that follows a long resent request still gets its retries.
 	refusedBudget = 30 * time.Second
+
+	retriesDisabled bool
 )
+
+// DisableRetries makes Transport fail on the first error. For shell completion, where
+// a TAB must not wait for an instance that is down.
+func DisableRetries() { retriesDisabled = true }
 
 // IsConnectionDrop reports whether err means the connection was closed while the
 // request was in flight: an HTTP/2 GOAWAY for a stream the server had already started,
@@ -42,7 +48,7 @@ func IsConnectionDrop(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, errConnReset) || errors.Is(err, errPipe) {
 		return true
 	}
 	msg := err.Error()
@@ -53,7 +59,7 @@ func IsConnectionDrop(err error) bool {
 // IsConnectionRefused reports whether err means no connection was made at all: the
 // request never reached the instance, so resending is safe for every method.
 func IsConnectionRefused(err error) bool {
-	return err != nil && errors.Is(err, syscall.ECONNREFUSED)
+	return err != nil && errors.Is(err, errConnRefused)
 }
 
 // rewindable reports whether req's body can be sent again.
@@ -84,22 +90,28 @@ func resendableAfterDrop(req *http.Request) bool {
 func retryRoundTrip(send func(*http.Request) (*http.Response, error), req *http.Request) (*http.Response, error) {
 	resp, err := send(req)
 	start := time.Now()
+	var refusedSince time.Time // start of the current row of refusals, zero outside one
 	for attempt := 0; ; attempt++ {
 		if req.Context().Err() != nil || !rewindable(req) {
 			return resp, err
 		}
-		delay := RetryDelay(attempt)
 		var what string
-		var budget time.Duration
+		budget, since := dropBudget, start
 		switch {
 		case IsConnectionRefused(err):
-			what, budget = "refused the connection for", refusedBudget
+			if refusedSince.IsZero() {
+				refusedSince, attempt = time.Now(), 0
+			}
+			what, budget, since = "refused the connection for", refusedBudget, refusedSince
 		case IsConnectionDrop(err) && resendableAfterDrop(req):
-			what, budget = "closed the connection during", dropBudget
+			refusedSince = time.Time{}
+			what = "closed the connection during"
 		default:
 			return resp, err
 		}
-		if time.Since(start)+delay > budget {
+		delay := RetryDelay(attempt)
+		// dropBudget also limits the whole sequence
+		if time.Since(since)+delay > budget || time.Since(start)+delay > dropBudget {
 			return resp, err
 		}
 		fmt.Fprintf(os.Stderr, "note: the instance %s %s %s, retrying in %s\n", what, req.Method, req.URL.Path, delay)

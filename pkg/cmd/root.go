@@ -39,6 +39,9 @@ var argsAccepted bool
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	rejectUnknownSubcommands(rootCmd)
+	if len(os.Args) > 1 && (os.Args[1] == cobra.ShellCompRequestCmd || os.Args[1] == cobra.ShellCompNoDescRequestCmd) {
+		httpx.DisableRetries() // a TAB must not wait for an instance that is down
+	}
 	if err := executeRoot(); err != nil {
 		var exit exitCodeError
 		if errors.As(err, &exit) {

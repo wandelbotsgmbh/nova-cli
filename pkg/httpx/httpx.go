@@ -45,18 +45,22 @@ func InsecureSkipTLSVerify() bool {
 // instance's ingress refuses or drops new connections for a while (GOAWAY on the
 // first stream, which Go can't retry for a PUT/POST). --insecure-skip-tls-verify
 // patches http.DefaultTransport itself (SetInsecureSkipTLSVerify).
+//
+// Requests the server refuses or drops are retried (see retry.go).
 func Transport() http.RoundTripper {
-	return WithUserAgent(http.DefaultTransport)
+	return userAgentTransport{next: http.DefaultTransport, retry: true}
 }
 
 // WithUserAgent wraps rt so that requests without a User-Agent get the CLI's.
-// A User-Agent set by the caller is kept.
+// A User-Agent set by the caller is kept. Unlike Transport it doesn't retry: it is for
+// clients with their own transport and retry policy (Nucleus downloads).
 func WithUserAgent(rt http.RoundTripper) http.RoundTripper {
-	return userAgentTransport{rt}
+	return userAgentTransport{next: rt}
 }
 
 type userAgentTransport struct {
-	next http.RoundTripper
+	next  http.RoundTripper
+	retry bool
 }
 
 func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -64,6 +68,9 @@ func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		// a RoundTripper must not modify the caller's request
 		req = req.Clone(req.Context())
 		req.Header.Set("User-Agent", version.UserAgent())
+	}
+	if !t.retry || retriesDisabled {
+		return t.send(req)
 	}
 	return retryRoundTrip(t.send, req)
 }

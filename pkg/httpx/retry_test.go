@@ -1,6 +1,8 @@
 package httpx
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -179,3 +181,67 @@ func TestIsConnectionDrop(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// Drop, a resend that runs for a while and is dropped too, then a refusal by the next
+// reload: the refusal gets its own budget, not what the long resend left over.
+func TestRetry_RefusalAfterLongResendIsRetried(t *testing.T) {
+	fastRetries(t, time.Millisecond, time.Second)
+	refusedBudget = 50 * time.Millisecond
+	refused := fmt.Errorf("dial: %w", errConnRefused)
+	calls := 0
+	send := func(*http.Request) (*http.Response, error) {
+		calls++
+		switch calls {
+		case 1:
+			return nil, io.ErrUnexpectedEOF
+		case 2:
+			time.Sleep(2 * refusedBudget)
+			return nil, io.ErrUnexpectedEOF
+		case 3:
+			return nil, refused
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+	}
+	req, _ := http.NewRequest(http.MethodPut, "http://instance/cells/cell", nil)
+	resp, err := retryRoundTrip(send, req)
+	if err != nil || resp.StatusCode != http.StatusOK || calls != 4 {
+		t.Fatalf("expected the 4th attempt to get through, got %v after %d calls", err, calls)
+	}
+}
+
+// A host that is down still fails after refusedBudget, not dropBudget.
+func TestRetry_RefusedGivesUpAfterItsBudget(t *testing.T) {
+	fastRetries(t, 10*time.Millisecond, 10*time.Second)
+	refusedBudget = 50 * time.Millisecond
+	send := func(*http.Request) (*http.Response, error) { return nil, fmt.Errorf("dial: %w", errConnRefused) }
+	req, _ := http.NewRequest(http.MethodGet, "http://instance/cells", nil)
+	start := time.Now()
+	if _, err := retryRoundTrip(send, req); !IsConnectionRefused(err) {
+		t.Fatalf("expected the refusal, got %v", err)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("gave up after %s, expected about %s", took, refusedBudget)
+	}
+}
+
+// Clients with their own transport and retry policy (Nucleus downloads) and shell
+// completion get the first error.
+func TestRetry_OnlyTransportRetries(t *testing.T) {
+	fastRetries(t, time.Millisecond, time.Second)
+	calls := 0
+	failing := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, io.ErrUnexpectedEOF
+	})
+	req, _ := http.NewRequest(http.MethodGet, "http://lft/file", nil)
+	if _, err := WithUserAgent(failing).RoundTrip(req); !errors.Is(err, io.ErrUnexpectedEOF) || calls != 1 {
+		t.Fatalf("WithUserAgent: expected one attempt, got %d (%v)", calls, err)
+	}
+
+	calls = 0
+	retriesDisabled = true
+	t.Cleanup(func() { retriesDisabled = false })
+	if _, err := (userAgentTransport{next: failing, retry: true}).RoundTrip(req); err == nil || calls != 1 {
+		t.Fatalf("DisableRetries: expected one attempt, got %d (%v)", calls, err)
+	}
+}
