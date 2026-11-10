@@ -48,6 +48,17 @@ jobs:
           echo "Total coverage: $total"
           echo "**Total coverage:** $total" >> "$GITHUB_STEP_SUMMARY"
 
+  # The CLI ships for Windows, and the config file handling is platform code there
+  # (file lock, rename over an open file): run the packages that write the config.
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go test ./pkg/configfile/... ./pkg/instances/... ./pkg/nucleusservers/... ./pkg/oauth/... ./pkg/catalog/...
+
   govulncheck:
     runs-on: ubuntu-latest
     steps:
