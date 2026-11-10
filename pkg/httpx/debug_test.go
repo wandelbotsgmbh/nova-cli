@@ -108,7 +108,7 @@ func TestDebugTruncatesLargeAndSkipsBinaryBodies(t *testing.T) {
 }
 
 func TestDebugLogsTransportErrors(t *testing.T) {
-	fastRetries(t, time.Millisecond, 10*time.Millisecond) // a refused connection is retried
+	fastRetries(t, time.Millisecond) // a refused connection is retried
 	log := captureDebug(t)
 	_, err := Client().Get("http://127.0.0.1:1/x")
 	if err == nil {

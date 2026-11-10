@@ -15,26 +15,17 @@ import (
 // completion_timeout, and for a moment the load balancer refuses new connections. Go
 // only retries requests the server never started on, so the transport retries itself.
 
-// retryDelays are the waits before the retries; the last one repeats.
-var retryDelays = []time.Duration{time.Second, 3 * time.Second, 5 * time.Second, 10 * time.Second}
+// retryDelays are the waits before the retries. A cell install reloads the ingress
+// several times in a row (seen in e2e: drop, refusal, another drop 25 s later), and a
+// host that is really down should still fail within about half a minute.
+var retryDelays = []time.Duration{time.Second, 3 * time.Second, 5 * time.Second, 10 * time.Second, 10 * time.Second, 10 * time.Second}
 
-// RetryDelay is the wait before retry number attempt (0-based).
+// RetryDelay is the wait before retry number attempt (0-based); the last one repeats.
 func RetryDelay(attempt int) time.Duration {
 	return retryDelays[min(attempt, len(retryDelays)-1)]
 }
 
-var (
-	// dropBudget limits how long a dropped request is retried. A cell install reloads
-	// the ingress several times in a row (seen in e2e: drop, refusal, another drop 25 s
-	// later), so a fixed number of retries isn't enough.
-	dropBudget = 3 * time.Minute
-	// refusedBudget is shorter: a refusal during a reload passes within seconds, and a
-	// host that is really down should fail soon. It counts from the first refusal in a
-	// row, so a refusal that follows a long resent request still gets its retries.
-	refusedBudget = 30 * time.Second
-
-	retriesDisabled bool
-)
+var retriesDisabled bool
 
 // DisableRetries makes Transport fail on the first error. For shell completion, where
 // a TAB must not wait for an instance that is down.
@@ -86,32 +77,19 @@ func resendableAfterDrop(req *http.Request) bool {
 }
 
 // retryRoundTrip sends req and resends it while the connection is refused (every
-// method) or dropped (see resendableAfterDrop), within the budgets.
+// method) or dropped (see resendableAfterDrop).
 func retryRoundTrip(send func(*http.Request) (*http.Response, error), req *http.Request) (*http.Response, error) {
 	resp, err := send(req)
-	start := time.Now()
-	var refusedSince time.Time // start of the current row of refusals, zero outside one
-	for attempt := 0; ; attempt++ {
-		if req.Context().Err() != nil || !rewindable(req) {
-			return resp, err
-		}
+	for _, delay := range retryDelays {
 		var what string
-		budget, since := dropBudget, start
 		switch {
+		case req.Context().Err() != nil || !rewindable(req):
+			return resp, err
 		case IsConnectionRefused(err):
-			if refusedSince.IsZero() {
-				refusedSince, attempt = time.Now(), 0
-			}
-			what, budget, since = "refused the connection for", refusedBudget, refusedSince
+			what = "refused the connection for"
 		case IsConnectionDrop(err) && resendableAfterDrop(req):
-			refusedSince = time.Time{}
 			what = "closed the connection during"
 		default:
-			return resp, err
-		}
-		delay := RetryDelay(attempt)
-		// dropBudget also limits the whole sequence
-		if time.Since(since)+delay > budget || time.Since(start)+delay > dropBudget {
 			return resp, err
 		}
 		fmt.Fprintf(os.Stderr, "note: the instance %s %s %s, retrying in %s\n", what, req.Method, req.URL.Path, delay)
@@ -130,4 +108,5 @@ func retryRoundTrip(send func(*http.Request) (*http.Response, error), req *http.
 		}
 		resp, err = send(retry)
 	}
+	return resp, err
 }

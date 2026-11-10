@@ -2,7 +2,6 @@ package httpx
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -13,12 +12,12 @@ import (
 	"time"
 )
 
-// fastRetries shortens the retry waits and budgets for a test.
-func fastRetries(t *testing.T, delay, budget time.Duration) {
+// fastRetries shortens the retry waits for a test.
+func fastRetries(t *testing.T, delay time.Duration) {
 	t.Helper()
-	oldDelays, oldDrop, oldRefused := retryDelays, dropBudget, refusedBudget
-	retryDelays, dropBudget, refusedBudget = []time.Duration{delay}, budget, budget
-	t.Cleanup(func() { retryDelays, dropBudget, refusedBudget = oldDelays, oldDrop, oldRefused })
+	old := retryDelays
+	retryDelays = []time.Duration{delay, delay, delay, delay, delay, delay}
+	t.Cleanup(func() { retryDelays = old })
 }
 
 // dropping answers like handler, but closes the connection without an answer on the
@@ -40,7 +39,7 @@ func dropping(t *testing.T, drops int32, handler http.HandlerFunc) (*httptest.Se
 		handler(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	fastRetries(t, time.Millisecond, time.Second)
+	fastRetries(t, time.Millisecond)
 	return srv, &calls
 }
 
@@ -100,16 +99,14 @@ func TestRetry_NotResentAfterDrop(t *testing.T) {
 	}
 }
 
-func TestRetry_GivesUpAfterBudget(t *testing.T) {
+func TestRetry_GivesUpAfterTheLastRetry(t *testing.T) {
 	srv, calls := dropping(t, 1<<30, nil)
-	fastRetries(t, 20*time.Millisecond, 100*time.Millisecond)
 	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/cells/cell", strings.NewReader(`{}`))
-	start := time.Now()
 	if _, err := Client().Do(req); err == nil || !IsConnectionDrop(err) {
-		t.Fatalf("expected the drop after the budget, got %v", err)
+		t.Fatalf("expected the drop, got %v", err)
 	}
-	if took := time.Since(start); took > time.Second || calls.Load() < 3 {
-		t.Errorf("took %s with %d calls; want a few calls within the budget", took, calls.Load())
+	if want := int32(len(retryDelays) + 1); calls.Load() != want {
+		t.Errorf("got %d calls, want %d", calls.Load(), want)
 	}
 }
 
@@ -128,7 +125,7 @@ func TestRetry_AnsweredRequestNotResent(t *testing.T) {
 
 // A refused connection never reached the instance: every method is resent, a POST too.
 func TestRetry_RefusedConnectionResentForEveryMethod(t *testing.T) {
-	fastRetries(t, 20*time.Millisecond, time.Second)
+	fastRetries(t, 20*time.Millisecond)
 
 	// a port nothing listens on yet; the server starts during the first retry delay
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -182,52 +179,10 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
-// Drop, a resend that runs for a while and is dropped too, then a refusal by the next
-// reload: the refusal gets its own budget, not what the long resend left over.
-func TestRetry_RefusalAfterLongResendIsRetried(t *testing.T) {
-	fastRetries(t, time.Millisecond, time.Second)
-	refusedBudget = 50 * time.Millisecond
-	refused := fmt.Errorf("dial: %w", errConnRefused)
-	calls := 0
-	send := func(*http.Request) (*http.Response, error) {
-		calls++
-		switch calls {
-		case 1:
-			return nil, io.ErrUnexpectedEOF
-		case 2:
-			time.Sleep(2 * refusedBudget)
-			return nil, io.ErrUnexpectedEOF
-		case 3:
-			return nil, refused
-		}
-		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
-	}
-	req, _ := http.NewRequest(http.MethodPut, "http://instance/cells/cell", nil)
-	resp, err := retryRoundTrip(send, req)
-	if err != nil || resp.StatusCode != http.StatusOK || calls != 4 {
-		t.Fatalf("expected the 4th attempt to get through, got %v after %d calls", err, calls)
-	}
-}
-
-// A host that is down still fails after refusedBudget, not dropBudget.
-func TestRetry_RefusedGivesUpAfterItsBudget(t *testing.T) {
-	fastRetries(t, 10*time.Millisecond, 10*time.Second)
-	refusedBudget = 50 * time.Millisecond
-	send := func(*http.Request) (*http.Response, error) { return nil, fmt.Errorf("dial: %w", errConnRefused) }
-	req, _ := http.NewRequest(http.MethodGet, "http://instance/cells", nil)
-	start := time.Now()
-	if _, err := retryRoundTrip(send, req); !IsConnectionRefused(err) {
-		t.Fatalf("expected the refusal, got %v", err)
-	}
-	if took := time.Since(start); took > time.Second {
-		t.Fatalf("gave up after %s, expected about %s", took, refusedBudget)
-	}
-}
-
 // Clients with their own transport and retry policy (Nucleus downloads) and shell
 // completion get the first error.
 func TestRetry_OnlyTransportRetries(t *testing.T) {
-	fastRetries(t, time.Millisecond, time.Second)
+	fastRetries(t, time.Millisecond)
 	calls := 0
 	failing := roundTripFunc(func(*http.Request) (*http.Response, error) {
 		calls++
