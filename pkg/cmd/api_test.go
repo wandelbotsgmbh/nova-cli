@@ -95,6 +95,19 @@ func withAPIInstance(t *testing.T) *apiInstance {
 		case "/api/v2/system/diagnosis-package/zip":
 			w.Header().Set("Content-Type", "application/zip")
 			_, _ = w.Write([]byte("PK\x03\x04\x00zip"))
+		case "/api/v2/long-401":
+			// the JSON page echoes the uri: long, and here sent in two pieces
+			page := `{"error": true, "code": 401, "message": "Unauthorized", "details": {"original_uri": "` +
+				strings.Repeat("x", 2000) + `", "ingress_name": "api-gateway"}}`
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, page[:100])
+			w.(http.Flusher).Flush()
+			time.Sleep(50 * time.Millisecond)
+			_, _ = io.WriteString(w, page[100:])
+		case "/api/v2/moved":
+			http.Redirect(w, r, "/api/v2/cells/cell/controllers/kuka", http.StatusTemporaryRedirect)
+		case "/api/v2/elsewhere":
+			http.Redirect(w, r, "https://other.example/x", http.StatusTemporaryRedirect)
 		case "/api/v2/slow-body":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -303,5 +316,64 @@ func TestAPIServiceAnswerLikeAnErrorPage(t *testing.T) {
 	stdout, stderr, err := runAsProcess(t, "api", "/api/v2/cells/{cell}/store/objects/looks-like-error")
 	if err != nil || !strings.Contains(stdout, "stored by a user") {
 		t.Fatalf("err %v, stdout %q, stderr %q", err, stdout, stderr)
+	}
+}
+
+// The JSON error page is recognized even when it is longer than the first read.
+func TestAPILongErrorPage(t *testing.T) {
+	withAPIInstance(t)
+	stdout, _, err := runAsProcess(t, "api", "/api/v2/long-401")
+	var typed *typedError
+	if !errors.As(err, &typed) || typed.Code != "UNAUTHORIZED" || stdout != "" {
+		t.Fatalf("err %v, stdout %q", err, stdout)
+	}
+}
+
+// Redirects on the instance are followed; others are not, and the error names
+// the target.
+func TestAPIRedirects(t *testing.T) {
+	withAPIInstance(t)
+	stdout, stderr, err := runAsProcess(t, "api", "/api/v2/moved")
+	if err != nil || !strings.Contains(stdout, "KukaController") {
+		t.Fatalf("same-host redirect: err %v, stdout %q, stderr %q", err, stdout, stderr)
+	}
+	_, _, err = runAsProcess(t, "api", "/api/v2/elsewhere")
+	if err == nil || !strings.Contains(err.Error(), "https://other.example/x") {
+		t.Fatalf("redirect to another host: %v", err)
+	}
+}
+
+// An answer without body is no binary answer (HEAD, empty 2xx).
+func TestAPIEmptyAnswerWithBinaryType(t *testing.T) {
+	withAPIInstance(t)
+	if _, stderr, err := runAsProcess(t, "api", "/api/v2/system/diagnosis-package/zip", "-X", "HEAD"); err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+}
+
+// -f and -F keep the order of the command line.
+func TestAPIFieldOrder(t *testing.T) {
+	withAPIInstance(t)
+	stdout, stderr, err := runAsProcess(t, "api", "/x", "-X", "PUT", "--dry-run",
+		"-f", "items[][id]=1", "-F", "items[][on]=true", "-f", "items[][id]=2", "-F", "items[][on]=false", "-F", "n=1", "-f", "n=2")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	var r struct{ Body json.RawMessage }
+	if err := json.Unmarshal([]byte(stdout), &r); err != nil {
+		t.Fatal(err)
+	}
+	var body any
+	_ = json.Unmarshal(r.Body, &body)
+	got, _ := json.Marshal(body)
+	if string(got) != `{"items":[{"id":"1","on":true},{"id":"2","on":false}],"n":"2"}` {
+		t.Errorf("body %s", got)
+	}
+}
+
+func TestAPISearchTakesTimeout(t *testing.T) {
+	withAPIInstance(t)
+	if _, stderr, err := runAsProcess(t, "api", "search", "controller", "--timeout", "5s"); err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
 	}
 }

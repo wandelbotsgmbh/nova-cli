@@ -26,29 +26,50 @@ func IsJSON(h http.Header) bool {
 	return strings.Contains(h.Get("Content-Type"), "json")
 }
 
+// Checks recognizes the ingress' answers. There are two sets: Strict for
+// clients that pass on arbitrary answers (`nova api`: a stored object may contain
+// "Error 401" or {"error": true, "code": 401}), and Known for clients of endpoints
+// whose answers have a known shape (NovaFlow), where a loose match can't hit a
+// real answer and also covers ingresses with other markers.
+type Checks struct {
+	strict bool
+}
+
+var (
+	// Strict matches only the markers of the real pages (see the package doc).
+	Strict = Checks{strict: true}
+	// Known matches the pages loosely: "Error 401" at the start, any redirect
+	// to a login url, any JSON object with "error" and a "code" >= 400.
+	Known = Checks{strict: false}
+)
+
 // IsUnauthorizedPage recognizes the plain-text "Error 401: Unauthorized" page the
 // ingress serves (with HTTP 200) for a missing or expired token.
-func IsUnauthorizedPage(h http.Header, b []byte) bool {
-	ct := strings.ToLower(h.Get("Content-Type"))
-	if ct != "" && !strings.HasPrefix(ct, "text/plain") {
-		return false
+func (c Checks) IsUnauthorizedPage(h http.Header, b []byte) bool {
+	if c.strict {
+		ct := strings.ToLower(h.Get("Content-Type"))
+		if ct != "" && !strings.HasPrefix(ct, "text/plain") {
+			return false
+		}
 	}
 	return bytes.HasPrefix(bytes.TrimSpace(b), []byte("Error 401"))
 }
 
 // IsLoginRedirect recognizes the redirect of unauthenticated app paths to the
 // login page (/oauth2/start).
-func IsLoginRedirect(resp *http.Response) bool {
-	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
+func (c Checks) IsLoginRedirect(resp *http.Response) bool {
+	if resp == nil || resp.StatusCode < 300 || resp.StatusCode >= 400 {
 		return false
 	}
-	return strings.Contains(resp.Header.Get("Location"), "/oauth2/")
+	loc := resp.Header.Get("Location")
+	return strings.Contains(loc, "/oauth2/") || (!c.strict && strings.Contains(loc, "login"))
 }
 
 // ErrorPageCode recognizes the ingress' JSON error page, which (like the
 // plain-text one) may come with HTTP 200:
-// {"error": true, "code": 401, "message": "Unauthorized", ...}
-func ErrorPageCode(h http.Header, b []byte) (int, bool) {
+// {"error": true, "code": 401, "message": "Unauthorized", "details": {…}}.
+// b must hold the whole page.
+func (c Checks) ErrorPageCode(h http.Header, b []byte) (int, bool) {
 	if !IsJSON(h) || !bytes.HasPrefix(bytes.TrimSpace(b), []byte("{")) {
 		return 0, false
 	}
@@ -63,21 +84,29 @@ func ErrorPageCode(h http.Header, b []byte) (int, bool) {
 	if json.Unmarshal(b, &page) != nil || !page.Error || page.Code < 400 {
 		return 0, false
 	}
-	if page.Details.IngressName == "" && page.Details.OriginalURI == "" {
+	if c.strict && page.Details.IngressName == "" && page.Details.OriginalURI == "" {
 		return 0, false
 	}
 	return page.Code, true
 }
 
 // IsUnauthorized reports whether an answer means "not logged in": the plain-text
-// 401 page, the login redirect or the JSON error page with code 401. b needs to
-// hold only the start of the body.
-func IsUnauthorized(resp *http.Response, b []byte) bool {
-	if IsUnauthorizedPage(resp.Header, b) || IsLoginRedirect(resp) {
+// 401 page, the login redirect or the JSON error page with code 401. For the
+// JSON page b must hold the whole body (see MaybeErrorPage).
+func (c Checks) IsUnauthorized(resp *http.Response, b []byte) bool {
+	if c.IsUnauthorizedPage(resp.Header, b) || c.IsLoginRedirect(resp) {
 		return true
 	}
-	code, ok := ErrorPageCode(resp.Header, b)
+	code, ok := c.ErrorPageCode(resp.Header, b)
 	return ok && code == http.StatusUnauthorized
+}
+
+// MaybeErrorPage reports whether the start of a body could be the JSON error
+// page, so a client should read it completely before deciding (the page echoes
+// the request uri and can be long).
+func MaybeErrorPage(h http.Header, head []byte) bool {
+	t := bytes.TrimSpace(head)
+	return IsJSON(h) && bytes.HasPrefix(t, []byte("{")) && bytes.HasPrefix(bytes.TrimSpace(bytes.TrimPrefix(t, []byte("{"))), []byte(`"error"`))
 }
 
 // ErrorDetail extracts FastAPI's "detail" or the NOVA "message" field, and

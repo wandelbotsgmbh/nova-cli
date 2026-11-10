@@ -1,7 +1,6 @@
 package novaapi
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -45,11 +44,19 @@ func newClient(base string, hc *http.Client) (*Client, error) {
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("invalid instance url %q", base)
 	}
-	// Unauthenticated paths redirect to the login page; following that would
-	// turn "not logged in" into an unrelated answer.
-	noRedirect := *hc
-	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Client{base: u, http: &noRedirect}, nil
+	// Redirects on the instance (e.g. FastAPI's trailing slash) are followed, like
+	// gh api does. The login redirect and redirects to other hosts are not: the
+	// first would turn "not logged in" into the login page, the second would
+	// leave the instance (ADR-0006).
+	h := *hc
+	h.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 || ingress.Strict.IsLoginRedirect(req.Response) ||
+			req.URL.Scheme != u.Scheme || req.URL.Host != u.Host {
+			return http.ErrUseLastResponse
+		}
+		return nil
+	}
+	return &Client{base: u, http: &h}, nil
 }
 
 // Host returns the instance's host (with port, if any).
@@ -109,9 +116,9 @@ func (c *Client) RoundTrip(req *http.Request) (*http.Response, error) {
 // (and closes it). It waits for the first bytes of the body only; the body is
 // wrapped so its start can be inspected again without consuming it.
 func CheckAnswer(resp *http.Response) (*http.Response, error) {
-	br := bufio.NewReaderSize(resp.Body, 4096)
-	head := PeekStart(br)
-	if ingress.IsUnauthorized(resp, head) {
+	br := NewBodyReader(resp.Body)
+	head := PeekStart(br, resp.Header)
+	if ingress.Strict.IsUnauthorized(resp, head) {
 		resp.Body.Close()
 		return nil, ErrUnauthorized
 	}
@@ -155,7 +162,7 @@ func (c *Client) get(ctx context.Context, path, accept string) ([]byte, http.Hea
 		return nil, nil, fmt.Errorf("GET %s: reading response: %w", req.URL, err)
 	}
 	status := resp.StatusCode
-	if code, ok := ingress.ErrorPageCode(resp.Header, b); ok {
+	if code, ok := ingress.Strict.ErrorPageCode(resp.Header, b); ok {
 		status = code
 	}
 	if status < 200 || status >= 300 {

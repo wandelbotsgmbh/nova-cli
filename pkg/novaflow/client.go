@@ -161,10 +161,10 @@ func (c *Client) send(ctx context.Context, r request) (*response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: reading response: %w", r.method, u, err)
 	}
-	if ingress.IsUnauthorizedPage(resp.Header, b) || ingress.IsLoginRedirect(resp) {
+	if ingress.Known.IsUnauthorizedPage(resp.Header, b) || ingress.Known.IsLoginRedirect(resp) {
 		return nil, ErrUnauthorized
 	}
-	if code, ok := ingress.ErrorPageCode(resp.Header, b); ok {
+	if code, ok := ingress.Known.ErrorPageCode(resp.Header, b); ok {
 		if code == http.StatusUnauthorized {
 			return nil, ErrUnauthorized
 		}

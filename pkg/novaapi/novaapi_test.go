@@ -1,9 +1,9 @@
 package novaapi
 
 import (
-	"bufio"
 	"encoding/json"
 	"io"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -208,7 +208,7 @@ func TestPeekStartDoesNotBlock(t *testing.T) {
 	defer w.Close()
 	go func() { _, _ = w.Write([]byte("abc")) }()
 	done := make(chan []byte)
-	go func() { done <- PeekStart(bufio.NewReader(r)) }()
+	go func() { done <- PeekStart(NewBodyReader(r), http.Header{"Content-Type": {"application/json"}}) }()
 	select {
 	case head := <-done:
 		if string(head) != "abc" {

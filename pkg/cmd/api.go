@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -27,17 +26,16 @@ import (
 )
 
 var apiFlags struct {
-	method    string
-	rawFields []string
-	fields    []string
-	headers   []string
-	input     string
-	include   bool
-	silent    bool
-	output    string
-	dryRun    bool
-	timeout   time.Duration
-	limit     int
+	method  string
+	fields  []fieldArg
+	headers []string
+	input   string
+	include bool
+	silent  bool
+	output  string
+	dryRun  bool
+	timeout time.Duration
+	limit   int
 }
 
 var apiCmd = &cobra.Command{
@@ -126,21 +124,71 @@ the answers.`,
 func init() {
 	f := apiCmd.Flags()
 	f.StringVarP(&apiFlags.method, "method", "X", "", "HTTP method (default: GET, or POST with fields or --input)")
-	f.StringArrayVarP(&apiFlags.rawFields, "raw-field", "f", nil, "Add a string field key=value")
-	f.StringArrayVarP(&apiFlags.fields, "field", "F", nil, "Add a typed field key=value (true, false, null, numbers, @file)")
+	f.VarP(&fieldFlag{list: &apiFlags.fields}, "raw-field", "f", "Add a string field key=value")
+	f.VarP(&fieldFlag{list: &apiFlags.fields, typed: true}, "field", "F", "Add a typed field key=value (true, false, null, numbers, @file)")
 	f.StringArrayVarP(&apiFlags.headers, "header", "H", nil, "Add a request header 'Key: value'")
 	f.StringVar(&apiFlags.input, "input", "", "Read the request body from a file (- for stdin)")
 	f.BoolVarP(&apiFlags.include, "include", "i", false, "Print the status line and response headers before the body")
 	f.BoolVar(&apiFlags.silent, "silent", false, "Don't print the response body")
 	f.StringVarP(&apiFlags.output, "output", "o", "", "Write the response body to a file (needed for binary answers)")
 	f.BoolVar(&apiFlags.dryRun, "dry-run", false, "Check and print the request as JSON without sending it")
-	f.DurationVar(&apiFlags.timeout, "timeout", time.Minute, "How long to wait for the answer's headers (0: no limit, for long polls)")
+	// persistent: search and schema bound their spec lookup with it too
+	apiCmd.PersistentFlags().DurationVar(&apiFlags.timeout, "timeout", time.Minute, "How long to wait for the answer's headers and for the API spec (0: no limit for the answer)")
 	_ = apiCmd.RegisterFlagCompletionFunc("method", cobra.FixedCompletions(
 		[]string{"GET", "POST", "PUT", "PATCH", "DELETE"}, cobra.ShellCompDirectiveNoFileComp))
 
 	apiSearchCmd.Flags().IntVar(&apiFlags.limit, "limit", 10, "Maximum number of results (0: all)")
 	apiCmd.AddCommand(apiSearchCmd, apiSchemaCmd)
 	rootCmd.AddCommand(apiCmd)
+}
+
+// fieldArg is one -f or -F argument.
+type fieldArg struct {
+	value string
+	typed bool
+}
+
+// fieldFlag is the pflag.Value of -f and -F. Both append to one list, so the
+// fields keep the order of the command line (gh collects -f before -F).
+type fieldFlag struct {
+	list  *[]fieldArg
+	typed bool
+}
+
+func (f *fieldFlag) Set(v string) error {
+	*f.list = append(*f.list, fieldArg{value: v, typed: f.typed})
+	return nil
+}
+
+func (f *fieldFlag) Type() string { return "key=value" }
+
+func (f *fieldFlag) String() string { return strings.Join(f.GetSlice(), ",") }
+
+// Append, Replace and GetSlice make it a pflag.SliceValue (repeatable flag).
+func (f *fieldFlag) Append(v string) error { return f.Set(v) }
+
+func (f *fieldFlag) Replace(vs []string) error {
+	kept := (*f.list)[:0]
+	for _, a := range *f.list {
+		if a.typed != f.typed {
+			kept = append(kept, a)
+		}
+	}
+	*f.list = kept
+	for _, v := range vs {
+		_ = f.Set(v)
+	}
+	return nil
+}
+
+func (f *fieldFlag) GetSlice() []string {
+	var out []string
+	for _, a := range *f.list {
+		if a.typed == f.typed {
+			out = append(out, a.value)
+		}
+	}
+	return out
 }
 
 // exitRefused ends nova when a request is refused before it is sent (ADR-0010).
@@ -253,16 +301,17 @@ func runAPI(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// in command-line order: a[][b] fields group by order, and the last of two
+	// equal keys wins
 	var fields []novaapi.Field
-	for _, s := range apiFlags.rawFields {
-		f, err := novaapi.ParseRawField(s)
-		if err != nil {
-			return err
+	for _, a := range apiFlags.fields {
+		var f novaapi.Field
+		var err error
+		if a.typed {
+			f, err = novaapi.ParseTypedField(a.value, readInput)
+		} else {
+			f, err = novaapi.ParseRawField(a.value)
 		}
-		fields = append(fields, f)
-	}
-	for _, s := range apiFlags.fields {
-		f, err := novaapi.ParseTypedField(s, readInput)
 		if err != nil {
 			return err
 		}
@@ -421,10 +470,10 @@ func sendAPIRequest(cmd *cobra.Command, client *novaapi.Client, req *http.Reques
 	}
 	defer resp.Body.Close()
 
-	br := bufio.NewReaderSize(resp.Body, 4096)
-	head := novaapi.PeekStart(br)
+	br := novaapi.NewBodyReader(resp.Body)
+	head := novaapi.PeekStart(br, resp.Header)
 	status := resp.StatusCode
-	if code, ok := ingress.ErrorPageCode(resp.Header, head); ok {
+	if code, ok := ingress.Strict.ErrorPageCode(resp.Header, head); ok {
 		status = code
 	}
 	failed := status < 200 || status >= 300
@@ -442,6 +491,9 @@ func sendAPIRequest(cmd *cobra.Command, client *novaapi.Client, req *http.Reques
 		msg := fmt.Sprintf("%s %s: HTTP %d", req.Method, req.URL, status)
 		if d := ingress.ErrorDetail(b); d != "" && len(b) > 0 {
 			msg += ": " + d
+		}
+		if loc := resp.Header.Get("Location"); status >= 300 && status < 400 && loc != "" {
+			msg += " (redirect to " + loc + ", not followed: another host or more than 10 redirects)"
 		}
 		return errors.New(msg)
 	}
@@ -464,7 +516,7 @@ func sendAPIRequest(cmd *cobra.Command, client *novaapi.Client, req *http.Reques
 	case apiFlags.silent:
 		_, err := io.Copy(io.Discard, br)
 		return err
-	case !isTextual(resp.Header.Get("Content-Type"), head):
+	case len(head) > 0 && !isTextual(resp.Header.Get("Content-Type"), head):
 		return fmt.Errorf("the answer is binary (%s): pass --output <file>", resp.Header.Get("Content-Type"))
 	}
 	// Copied as it arrives: a chunked or slow answer shows up line by line.
