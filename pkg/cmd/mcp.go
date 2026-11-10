@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -114,6 +115,11 @@ Diagnostics go to stderr; stdout carries only the MCP protocol.`,
 		var switcher tool.InstanceSwitcher
 		if !pinned {
 			switcher = session
+			// without them an agent can't pick an instance, and with no instance
+			// selected every other tool would only say "call use_instance first"
+			if !slices.Contains(toolsets, tool.Instances) {
+				toolsets = append(toolsets, tool.Instances)
+			}
 		}
 		api, err := novaapi.NewFromClient(client)
 		if err != nil {

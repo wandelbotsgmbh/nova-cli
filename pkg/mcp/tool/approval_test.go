@@ -2,10 +2,13 @@ package tool_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/novaapi"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/tool"
 )
 
@@ -80,5 +83,36 @@ func TestApproval_ClientWithoutElicitation(t *testing.T) {
 	cs, ran := session(t, nil)
 	if text := call(t, cs); !strings.HasPrefix(text, "APPROVAL_REQUIRED:") || *ran != 0 {
 		t.Fatalf("expected APPROVAL_REQUIRED without running, got %q, ran %d", text, *ran)
+	}
+}
+
+// retry builds the retried call of a client that answered "yes" to message.
+func retry(message string) *sdk.CallToolRequest {
+	digest := sha256.Sum256([]byte(message))
+	return &sdk.CallToolRequest{Params: &sdk.CallToolParamsRaw{
+		InputResponses: sdk.InputResponseMap{"approval": &sdk.ElicitResult{Action: "accept", Content: map[string]any{"approve": true}}},
+		RequestState:   "delete_cell " + hex.EncodeToString(digest[:]),
+	}}
+}
+
+// A "yes" covers what the human was shown and nothing else: a retry with other
+// arguments (another message) or pinned to another instance is refused.
+func TestApproval_BoundToTheMessageAndInstance(t *testing.T) {
+	ctx := context.Background()
+	if res := tool.Approval(ctx, retry("Delete cell a?"), "delete_cell", "Delete cell a?"); res != nil {
+		t.Fatalf("the approved call must run, got %v", res.Content[0].(*sdk.TextContent).Text)
+	}
+	if res := tool.Approval(ctx, retry("Delete cell a?"), "delete_cell", "Delete cell b?"); res == nil {
+		t.Fatal("a yes for cell a must not delete cell b")
+	}
+
+	client := novaapi.NewClient("https://dev.example/api/v2", nil, nil, nil)
+	dev := client.Pin(ctx)
+	if res := tool.Approval(dev, retry("On dev.example: Delete cell a?"), "delete_cell", "Delete cell a?"); res != nil {
+		t.Fatalf("the approved call must run, got %v", res.Content[0].(*sdk.TextContent).Text)
+	}
+	client.SwitchTarget(novaapi.Target{BaseURL: "https://prod.example/api/v2"})
+	if res := tool.Approval(client.Pin(ctx), retry("On dev.example: Delete cell a?"), "delete_cell", "Delete cell a?"); res == nil {
+		t.Fatal("a yes for dev must not delete on prod")
 	}
 }

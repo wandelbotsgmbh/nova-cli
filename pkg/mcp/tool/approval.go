@@ -2,7 +2,10 @@ package tool
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"net/url"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/mcp/novaapi"
@@ -26,19 +29,23 @@ const approvalID = "approval"
 // unchanged: the input request, a decline, or APPROVAL_REQUIRED when the client can't
 // ask (no elicitation support). The message must name exactly what will happen.
 //
-// The approval is bound to the instance the call is pinned to (novaapi.Client.Pin): a
-// retry that arrives after use_instance switched elsewhere is refused, so a "yes" for
-// one instance never deletes or restores something on another.
+// The approval is bound to what the human was shown: the message, prefixed with the
+// instance the call is pinned to (novaapi.Client.Pin). A retry with other arguments
+// (and so another message), or one that arrives after use_instance switched elsewhere,
+// is refused: a "yes" never covers another cell, controller, backup or instance.
 func Approval(ctx context.Context, req *sdk.CallToolRequest, toolName, message string) *sdk.CallToolResult {
-	state := toolName
 	if t, ok := novaapi.PinnedTarget(ctx); ok {
-		state += " " + t.BaseURL
+		if u, err := url.Parse(t.BaseURL); err == nil && u.Host != "" {
+			message = "On " + u.Host + ": " + message
+		}
 	}
+	digest := sha256.Sum256([]byte(message))
+	state := toolName + " " + hex.EncodeToString(digest[:])
 	if req != nil && req.Params != nil {
 		if resp, ok := req.Params.InputResponses[approvalID]; ok {
 			if req.Params.RequestState != state {
 				res, _, _ := Fail[any](&novaapi.Error{Code: novaapi.CodeApprovalRequired,
-					Message: toolName + ": the instance changed since the user was asked; call the tool again to ask again"})
+					Message: toolName + ": the request or the instance changed since the user was asked; call the tool again to ask again"})
 				return res
 			}
 			if r, ok := resp.(*sdk.ElicitResult); ok && r.Action == "accept" {

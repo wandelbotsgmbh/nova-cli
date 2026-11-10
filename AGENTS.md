@@ -41,7 +41,6 @@
 * Answers stream through as they arrive (`novaapi.PeekStart` only waits for the first bytes; never `Peek(n)` on a body). Long polls work (`--timeout 0`). WebSocket streams (`x-serverstream`/`x-bidistream`) are refused: exit 3, typed JSON error on stderr when it is no terminal (`typedError`/`printTypedError` in `pkg/cmd`). Streams get dedicated commands later (ADR-0013 notes).
 * E2E: `testdata/api/e2e.sh` (CI job `e2e`, after the app install, with `NOVA_API_E2E_APP=your-nova-app`): v2 reads, collider round trip, errors, stream refusal, and the installed app's own API (`/{cell}/<app>/programs` from NOVAx). Runs locally against any instance with a cell, a controller and an app: `PATH=$PWD/bin:$PATH testdata/api/e2e.sh`.
 * Ingress quirks (401 page with HTTP 200, JSON error page, login redirect) live in `pkg/ingress`; use it for any new instance client.
-* `nova mcp` still fetches the v1 spec (`nova.SpecURL`), which 26.x instances don't serve.
 
 ## App install: `--copy-image` (registry-less)
 
