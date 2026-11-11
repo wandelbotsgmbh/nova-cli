@@ -128,7 +128,17 @@ $ nova instance add line2 --host https://ipc-line2.example.com --cell line2 --se
 				return fmt.Errorf("instance %q was added, but its kubeconfig wasn't stored: %w", inst.Name, err)
 			}
 		}
-		return nil
+		if *instanceAddOutput != outputJSON {
+			return nil
+		}
+		// re-read: storing the kubeconfig records its path in the entry
+		if r, err = loadRegistry(); err != nil {
+			return err
+		}
+		if stored, ok := r.Get(inst.Name); ok {
+			inst = stored
+		}
+		return writeJSON(cmd, newInstanceJSON(inst, r.Current))
 	},
 }
 
@@ -230,6 +240,9 @@ With --cloud, lists the instances on portal.wandelbots.io in the previous format
 (id, host, status, sandbox name).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if listCloudInstances || listVerboseInstances {
+			if *instanceListOutput == outputJSON {
+				return listPortalInstancesJSON(cmd)
+			}
 			return listPortalInstances(cmd.OutOrStdout())
 		}
 
@@ -253,7 +266,13 @@ With --cloud, lists the instances on portal.wandelbots.io in the previous format
 			}
 		}
 
-		printInstanceList(cmd.OutOrStdout(), r, unregistered)
+		if *instanceListOutput == outputJSON {
+			if err := writeJSON(cmd, instanceListJSON(r, unregistered)); err != nil {
+				return err
+			}
+		} else {
+			printInstanceList(cmd.OutOrStdout(), r, unregistered)
+		}
 		if o := targetOverride(); o != "" && o != r.Current {
 			fmt.Fprintf(cmd.ErrOrStderr(), "note: this invocation targets %q (--instance / %s)\n", o, instances.EnvVar)
 		}
@@ -298,6 +317,23 @@ func listPortalInstances(out io.Writer) error {
 		}
 	}
 	return nil
+}
+
+// listPortalInstancesJSON prints the portal's instances (--cloud, --verbose) as JSON.
+func listPortalInstancesJSON(cmd *cobra.Command) error {
+	p, err := portal.NewPortal(portalEnvironment)
+	if err != nil {
+		return err
+	}
+	cloud, err := p.ListInstances()
+	if err != nil {
+		return err
+	}
+	list := make([]cloudInstanceJSON, 0, len(cloud))
+	for _, c := range cloud {
+		list = append(list, newCloudInstanceJSON(c))
+	}
+	return writeJSON(cmd, list)
 }
 
 var createInstancesCmd = &cobra.Command{
@@ -353,9 +389,19 @@ $ nova instance create --name my-instance --no-select
 			return err
 		}
 
-		err = registerCloudInstance(cmd.ErrOrStderr(), instance.InstanceId, instance.Host, !createNoSelect)
+		entry, err := registerCloudInstanceEntry(cmd.ErrOrStderr(), instance.InstanceId, instance.Host, !createNoSelect)
 
-		fmt.Fprintln(cmd.OutOrStdout(), "InstanceId:", instance.InstanceId, "\nHost:", instance.Host)
+		if *instanceCreateOutput == outputJSON {
+			// printed before waiting, like the text: the instance exists even if waiting fails
+			created := newInstanceJSON(entry, "")
+			created.Selected = err == nil && !createNoSelect
+			created.Local = err == nil
+			if werr := writeJSON(cmd, created); werr != nil {
+				return werr
+			}
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), "InstanceId:", instance.InstanceId, "\nHost:", instance.Host)
+		}
 
 		if !createNoWaitInstance {
 			fmt.Fprintln(os.Stderr, "Waiting for instance to be in running state...")
@@ -437,6 +483,10 @@ $ nova instance info lab
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		out := cmd.OutOrStdout()
+		asJSON := *instanceInfoOutput == outputJSON
+		if asJSON && (printHostInstanceInfoCmd || printInstanceIdInstanceInfoCmd) {
+			return errors.New("--host and --instanceId print a single value and can't be combined with -o json")
+		}
 		var inst instances.Instance
 		local := true
 		if len(args) > 0 {
@@ -485,6 +535,20 @@ $ nova instance info lab
 		if printInstanceIdInstanceInfoCmd {
 			fmt.Fprintln(out, cloudID(inst, ""))
 			return nil
+		}
+
+		if asJSON {
+			var info instanceInfoJSON
+			if local {
+				// the JSON shape has no secrets: --show-secrets doesn't matter
+				j := newInstanceJSON(inst, currentSelection())
+				info.Instance = &j
+			}
+			if live != nil {
+				c := newCloudInstanceJSON(*live)
+				info.Cloud = &c
+			}
+			return writeJSON(cmd, info)
 		}
 
 		// Nucleus keys left in the entry for older CLI versions aren't used (ADR-0018)
@@ -625,9 +689,26 @@ func init() {
 	listInstancesCmd.Flags().BoolVar(&listCloudInstances, "cloud", false, "List the instances on portal.wandelbots.io (previous output format).")
 	listInstancesCmd.Flags().BoolVarP(&listVerboseInstances, "verbose", "v", false, "Print additional information about each cloud instance (implies --cloud).")
 
+	instanceAddOutput = addOutputFlag(addInstanceCmd)
+	instanceListOutput = addOutputFlag(listInstancesCmd)
+	instanceCreateOutput = addOutputFlag(createInstancesCmd)
+	instanceInfoOutput = addOutputFlag(infoInstanceCmd)
+
 	startInstanceCmd.Flags().BoolVarP(&createNoWaitInstance, "no-wait", "w", false, "Do not wait for the instance to be in running state.")
 
 	rootCmd.AddCommand(instanceCmd)
+}
+
+// -o/--output of the instance commands; assigned in init to avoid an initialization cycle
+var instanceAddOutput, instanceListOutput, instanceCreateOutput, instanceInfoOutput *outputFormat
+
+// currentSelection returns the selected instance of the config, "" if none or unreadable.
+func currentSelection() string {
+	r, err := loadRegistry()
+	if err != nil {
+		return ""
+	}
+	return r.Current
 }
 
 func loadRegistry() (*instances.Registry, error) {
@@ -660,9 +741,16 @@ func persistMigratedNucleusServers() error {
 // that name, the first free name of <id>-2, <id>-3, … is used, so a created instance
 // always ends up in the list.
 func registerCloudInstance(errOut io.Writer, id, host string, selectIt bool) error {
+	_, err := registerCloudInstanceEntry(errOut, id, host, selectIt)
+	return err
+}
+
+// registerCloudInstanceEntry is registerCloudInstance and returns the entry (with the
+// name it got, also when saving failed).
+func registerCloudInstanceEntry(errOut io.Writer, id, host string, selectIt bool) (instances.Instance, error) {
 	r, err := loadRegistry()
 	if err != nil {
-		return err
+		return instances.Instance{Name: id, Kind: instances.KindCloud, ID: id, Host: host, Env: string(portalEnvironment)}, err
 	}
 	inst, ok := r.FindByID(instances.KindCloud, id)
 	if !ok {
@@ -674,14 +762,14 @@ func registerCloudInstance(errOut io.Writer, id, host string, selectIt bool) err
 	inst.Host = host
 	inst.Env = string(portalEnvironment)
 	if err := r.Put(inst); err != nil {
-		return err
+		return inst, err
 	}
 	if selectIt {
 		r.Current = inst.Name
 	} else {
 		fmt.Fprintf(errOut, "added cloud instance %q without selecting it; target it with --instance %s\n", inst.Name, inst.Name)
 	}
-	return saveRegistry(r)
+	return inst, saveRegistry(r)
 }
 
 // lookupCloudEntry finds a local entry by name, or a cloud entry by its instance id.

@@ -70,6 +70,9 @@ $ eval "$(nova instance env dev)"
 $ skaffold dev`,
 	}
 
+	// -o/--output per command tree ('k8srun' and the 'virtual' alias)
+	var createOutput, listOutput, pruneOutput *outputFormat
+
 	create := &cobra.Command{
 		Use:         "create",
 		Args:        cobra.NoArgs,
@@ -133,13 +136,14 @@ $ nova k8srun create`,
 				return err
 			}
 
-			if err := r.Put(instances.Instance{
+			entry := instances.Instance{
 				Name:       name,
 				Kind:       instances.KindK8sRun,
 				Host:       instance.Ip,
 				ID:         instance.Id,
 				Kubeconfig: kubeconfig,
-			}); err != nil {
+			}
+			if err := r.Put(entry); err != nil {
 				return err
 			}
 			if !k8srunNoSelect {
@@ -156,7 +160,14 @@ $ nova k8srun create`,
 			}
 
 			fmt.Fprintf(cmd.ErrOrStderr(), "created cluster %q:\n ID: %s\n IP %s\n kubeconfig: %s\n", name, instance.Id, instance.Ip, kubeconfig)
-			return nil
+			if *createOutput != outputJSON {
+				return nil
+			}
+			created := k8srunCreatedJSON{instanceJSON: newInstanceJSON(entry, r.Current)}
+			if k8srunName == "" {
+				created.KubeconfigCopy = absPath("kubeconfig")
+			}
+			return writeJSON(cmd, created)
 		},
 	}
 
@@ -232,6 +243,9 @@ Without a name, the targeted instance is destroyed; it must be a cluster.`,
 					clusters.Instances = append(clusters.Instances, i)
 				}
 			}
+			if *listOutput == outputJSON {
+				return writeJSON(cmd, instanceListJSON(clusters, nil))
+			}
 			printInstanceList(cmd.OutOrStdout(), clusters, nil)
 			return nil
 		},
@@ -257,19 +271,22 @@ $ nova k8srun prune`,
 			}
 			errOut := cmd.ErrOrStderr()
 			var gone []string
-			unchecked := 0
+			var unchecked []pruneEntryJSON
+			failed := 0
 			for _, i := range r.Instances {
 				if i.Kind != instances.KindK8sRun {
 					continue
 				}
 				if i.ID == "" {
 					fmt.Fprintf(errOut, "skipping %q: no cluster id (use 'nova instance remove %s' to forget it)\n", i.Name, i.Name)
+					unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: "no cluster id"})
 					continue
 				}
 				exists, err := clusterExists(i.ID)
 				if err != nil {
 					fmt.Fprintf(errOut, "keeping %q: %v\n", i.Name, err)
-					unchecked++
+					unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: err.Error()})
+					failed++
 					continue
 				}
 				if !exists {
@@ -277,11 +294,12 @@ $ nova k8srun prune`,
 				}
 			}
 
-			if err := removeGoneEntries(cmd, r, gone, k8srunPruneDryRun); err != nil {
+			// entries without id are reported as unchecked, but (as before) don't fail the command
+			if err := removeGoneEntries(cmd, r, gone, k8srunPruneDryRun, pruneOutput, unchecked); err != nil {
 				return err
 			}
-			if unchecked > 0 {
-				return fmt.Errorf("%d cluster(s) could not be checked and were kept", unchecked)
+			if failed > 0 {
+				return fmt.Errorf("%d cluster(s) could not be checked and were kept", failed)
 			}
 			return nil
 		},
@@ -291,6 +309,9 @@ $ nova k8srun prune`,
 	create.Flags().StringVarP(&k8srunName, "name", "n", "", "Name of the cluster in the local instance list (default \"k8srun\", replacing the previous unnamed one)")
 	create.Flags().BoolVar(&k8srunReplace, "replace", false, "Destroy an existing cluster with the same name first")
 	create.Flags().BoolVar(&k8srunNoSelect, "no-select", false, "Add the cluster to the local list without selecting it (target it with --instance)")
+	createOutput = addOutputFlag(create)
+	listOutput = addOutputFlag(list)
+	pruneOutput = addOutputFlag(prune)
 	prune.Flags().BoolVar(&k8srunPruneDryRun, "dry-run", false, "Only print the entries that would be removed")
 
 	group.AddCommand(create, destroy, list, prune)

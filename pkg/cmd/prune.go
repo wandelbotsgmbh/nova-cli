@@ -47,7 +47,7 @@ $ nova instance prune`,
 		}
 		errOut := cmd.ErrOrStderr()
 		var gone []string
-		unchecked := 0
+		var unchecked []pruneEntryJSON
 
 		// cloud entries: one portal listing per environment, in that environment
 		byEnv := map[oauth.AuthEnvironment][]instances.Instance{}
@@ -61,8 +61,9 @@ $ nova instance prune`,
 				env, err = oauth.DefaultEnvironment(), nil
 			}
 			if err != nil || i.ID == "" {
-				fmt.Fprintf(errOut, "keeping %q: can't check it (environment %q, id %q)\n", i.Name, i.Env, i.ID)
-				unchecked++
+				reason := fmt.Sprintf("can't check it (environment %q, id %q)", i.Env, i.ID)
+				fmt.Fprintf(errOut, "keeping %q: %s\n", i.Name, reason)
+				unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: reason})
 				continue
 			}
 			byEnv[env] = append(byEnv[env], i)
@@ -79,8 +80,9 @@ $ nova instance prune`,
 			listed, err := listPortalInstancesIn(env)
 			if err != nil {
 				for _, i := range byEnv[env] {
-					fmt.Fprintf(errOut, "keeping %q: can't list the %s instances: %v\n", i.Name, env, err)
-					unchecked++
+					reason := fmt.Sprintf("can't list the %s instances: %v", env, err)
+					fmt.Fprintf(errOut, "keeping %q: %s\n", i.Name, reason)
+					unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: reason})
 				}
 				continue
 			}
@@ -102,13 +104,13 @@ $ nova instance prune`,
 			}
 			if i.ID == "" {
 				fmt.Fprintf(errOut, "keeping %q: no cluster id\n", i.Name)
-				unchecked++
+				unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: "no cluster id"})
 				continue
 			}
 			ok, err := clusterExists(i.ID)
 			if err != nil {
 				fmt.Fprintf(errOut, "keeping %q: %v\n", i.Name, err)
-				unchecked++
+				unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: err.Error()})
 				continue
 			}
 			if !ok {
@@ -116,26 +118,45 @@ $ nova instance prune`,
 			}
 		}
 
-		if err := removeGoneEntries(cmd, r, gone, instancePruneDryRun); err != nil {
+		if err := removeGoneEntries(cmd, r, gone, instancePruneDryRun, instancePruneOutput, unchecked); err != nil {
 			return err
 		}
-		if unchecked > 0 {
-			return fmt.Errorf("%d instance(s) could not be checked and were kept", unchecked)
+		if len(unchecked) > 0 {
+			return fmt.Errorf("%d instance(s) could not be checked and were kept", len(unchecked))
 		}
 		return nil
 	},
 }
 
 // removeGoneEntries prints and (unless dryRun) removes the named entries with their
-// stored files, and tells when the selected one was among them.
-func removeGoneEntries(cmd *cobra.Command, r *instances.Registry, gone []string, dryRun bool) error {
-	verb := "removed"
-	if dryRun {
-		verb = "would remove"
-	}
+// stored files, and tells when the selected one was among them. With -o json, it prints
+// the removed and the unchecked entries as pruneJSON once the entries are removed.
+func removeGoneEntries(cmd *cobra.Command, r *instances.Registry, gone []string, dryRun bool, o *outputFormat, unchecked []pruneEntryJSON) error {
+	result := newPruneJSON(dryRun)
+	result.Unchecked = append(result.Unchecked, unchecked...)
 	for _, name := range gone {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", verb, name)
+		i, _ := r.Get(name)
+		result.Removed = append(result.Removed, pruneEntryJSON{Name: name, Kind: string(i.Kind)})
 	}
+	if *o != outputJSON {
+		verb := "removed"
+		if dryRun {
+			verb = "would remove"
+		}
+		for _, name := range gone {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", verb, name)
+		}
+	}
+	if err := removeEntries(cmd, r, gone, dryRun); err != nil {
+		return err
+	}
+	if *o == outputJSON {
+		return writeJSON(cmd, result)
+	}
+	return nil
+}
+
+func removeEntries(cmd *cobra.Command, r *instances.Registry, gone []string, dryRun bool) error {
 	if len(gone) == 0 || dryRun {
 		return nil
 	}
@@ -161,7 +182,11 @@ func removeGoneEntries(cmd *cobra.Command, r *instances.Registry, gone []string,
 	return nil
 }
 
+// -o/--output of 'instance prune'; assigned in init to avoid an initialization cycle
+var instancePruneOutput *outputFormat
+
 func init() {
+	instancePruneOutput = addOutputFlag(pruneInstancesCmd)
 	instanceCmd.AddCommand(pruneInstancesCmd)
 	pruneInstancesCmd.Flags().BoolVar(&instancePruneDryRun, "dry-run", false, "Only print the entries that would be removed")
 }
