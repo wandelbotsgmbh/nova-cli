@@ -3,7 +3,7 @@ package cmd
 const flowLong = `Manage NovaFlow on the configured cell ('nova config set cellname <name>').
 
 NovaFlow composes robot behavior as flows (behavior trees) that a control plane executes.
-These commands install it on a cell, open its editor, and read, write, delete, back up and restore flows.
+These commands install it on a cell, open its editor, and read, edit, write, delete, back up and restore flows.
 
 Commands that need NovaFlow check that it runs on the cell. 'open', 'push' and 'backup restore'
 offer to install it when it is missing (use --yes to install without asking).
@@ -130,8 +130,11 @@ nova flow status
 # install it (or: answer yes when 'open', 'push' or 'backup restore' offer it)
 nova flow install
 
-# edit a flow as a file and save it back (fails if it changed on the instance meanwhile)
+# edit a flow in your editor ('nova config set editor "code --wait"'), saved when you close it
 nova flow list
+nova flow edit pick-and-place
+
+# or as a file and save it back (fails if it changed on the instance meanwhile)
 nova flow get pick-and-place -o pick-and-place.json
 nova flow push pick-and-place.json --validate
 
@@ -226,3 +229,26 @@ nova flow backup restore novaflow-backup.tar.gz --only pick-and-place,place --ov
 
 # on a fresh cell: install NovaFlow without asking, then restore everything including objects
 nova flow backup restore novaflow-backup.tar.gz --include-objects --yes`
+
+const flowEditLong = `Opens a flow as JSON (as printed by 'nova flow get') in your editor and saves it back when
+you close the editor with changes. An empty file or unchanged content cancels the edit.
+
+The editor is the platform default (e.g. vi), or the one set with 'nova config set editor', e.g.
+'nova config set editor "code --wait"' for Visual Studio Code.
+
+Before saving, the instance validates the tree (schema, available actions, globals); --no-validate skips that.
+If the JSON or the tree is not valid, the editor opens again with your changes. The id can't be changed
+here ('nova flow push --id' copies a flow).
+
+The flow is only saved if nobody changed it on the instance since it was opened. If it can't be saved,
+your changes are kept in a file whose path is printed. Scripts and agents use 'nova flow get' and
+'nova flow push' instead: this command needs a terminal.`
+
+const flowEditExample = `nova flow edit pick-and-place
+
+# with Visual Studio Code
+nova config set editor "code --wait"
+nova flow edit pick-and-place
+
+# save a work in progress the instance doesn't accept as valid yet
+nova flow edit pick-and-place --no-validate`
