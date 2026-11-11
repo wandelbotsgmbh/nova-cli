@@ -619,6 +619,8 @@ func writeAppEnv(cmd *cobra.Command, dir string, reset bool) error {
 		cmd.Printf("Updated %s\n", r.path)
 	case appEnvTokenRefreshed:
 		cmd.Printf("Updated %s: access token refreshed\n", r.path)
+	case appEnvTokenMissing:
+		cmd.Printf("Updated %s: no access token available for %s, run 'nova login'\n", r.path, r.novaApi)
 	default:
 		cmd.Printf("Updated %s: no access token needed for %s\n", r.path, r.novaApi)
 	}
@@ -644,6 +646,8 @@ const (
 	appEnvTokenRefreshed = "refreshed"
 	// written empty: the instance takes no portal token (see oauth.SendsTokenTo)
 	appEnvTokenNotNeeded = "not_needed"
+	// written empty: the instance needs a portal token, but the login has none
+	appEnvTokenMissing = "missing"
 	// the project type has no token variable
 	appEnvTokenUnused = "unused"
 )
@@ -652,7 +656,7 @@ const (
 // variables, never their values: the file holds the access token.
 type appEnvResult struct {
 	Path string `json:"path"`
-	// refreshed, not_needed or unused
+	// refreshed, not_needed, missing or unused
 	Token     string           `json:"token"`
 	Variables []appEnvVariable `json:"variables"`
 
@@ -671,6 +675,21 @@ type appEnvVariable struct {
 	// an instance setting whose value differs from the targeted instance
 	// ('app update-env --reset' replaces it)
 	Differs bool `json:"differs"`
+}
+
+// appEnvTokenStatus says what 'app update-env' did with the access token of a
+// layout with token variable tokenKey ("" for none) for host.
+func appEnvTokenStatus(tokenKey, host, accessToken string) string {
+	switch {
+	case tokenKey == "":
+		return appEnvTokenUnused
+	case accessToken != "":
+		return appEnvTokenRefreshed
+	case oauth.SendsTokenTo(host):
+		return appEnvTokenMissing
+	default:
+		return appEnvTokenNotNeeded
+	}
 }
 
 // updateAppEnv writes the env file of the app project in dir (see writeAppEnv).
@@ -727,18 +746,12 @@ func updateAppEnv(dir string, reset bool) (*appEnvResult, error) {
 
 	r := &appEnvResult{
 		Path:      absPath(report.Path),
-		Token:     appEnvTokenNotNeeded,
+		Token:     appEnvTokenStatus(layout.TokenKey, host, accessToken),
 		Variables: []appEnvVariable{},
 		path:      report.Path,
 		novaApi:   novaApi,
 		instance:  layout.Instance(settings),
 		current:   current,
-	}
-	switch {
-	case layout.TokenKey == "":
-		r.Token = appEnvTokenUnused
-	case accessToken != "":
-		r.Token = appEnvTokenRefreshed
 	}
 	configured := map[string]string{}
 	for _, kv := range r.instance {

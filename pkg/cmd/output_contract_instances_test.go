@@ -118,7 +118,7 @@ func TestCloudInstanceJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"id":"abc","host":"abc.instance.wandelbots.io","status":"running","sandbox_name":"sb","expires_at":"2026-11-18T10:00:00Z","obsolete_at":""}`
+	want := `{"id":"abc","host":"abc.instance.wandelbots.io","status":"running","sandbox_name":"sb","expires_at":"2026-11-18T10:00:00Z"}`
 	if string(b) != want {
 		t.Errorf("got  %s\nwant %s", b, want)
 	}
@@ -231,6 +231,10 @@ func TestK8sRunJSON(t *testing.T) {
 	}
 
 	// extend: the cluster service doesn't report the expiry, nova sets 12 h
+	// in UTC, also when the local time zone isn't
+	local := time.Local
+	time.Local = time.FixedZone("UTC+2", 2*60*60)
+	t.Cleanup(func() { time.Local = local })
 	var ext lifetimeJSON
 	before := time.Now()
 	if _, stderr, err := runJSON(t, &ext, "instance", "extend", "sim-a", "-o", "json"); err != nil {
@@ -238,8 +242,8 @@ func TestK8sRunJSON(t *testing.T) {
 	}
 	expires, err := time.Parse(time.RFC3339, ext.ExpiresAt)
 	if err != nil || ext.Name != "sim-a" || ext.Kind != "k8srun" || ext.ID != "id-1" || !ext.Extended ||
-		expires.Before(before.Add(12*time.Hour-time.Second)) {
-		t.Errorf("extend = %+v (%v)", ext, err)
+		expires.Before(before.Add(12*time.Hour-time.Second)) || !strings.HasSuffix(ext.ExpiresAt, "Z") {
+		t.Errorf("extend = %+v (%v), want a later expiry in UTC", ext, err)
 	}
 
 	// prune: one gone, one unreachable; the JSON comes before the error

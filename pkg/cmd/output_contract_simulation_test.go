@@ -208,3 +208,75 @@ func TestSimulationOutputFlagOnlyWhereThereIsData(t *testing.T) {
 		}
 	}
 }
+
+// An action the broker answers without a Lease (204, empty body) succeeded: -o
+// json prints the session read back instead of failing, so an agent doesn't
+// repeat the action. If that read fails, the error says the action succeeded.
+func TestSimulationSessionActionJSONWithoutLease(t *testing.T) {
+	session := `{"id":"` + fakeSessionID + `","name":"my-session","status":"suspended","condition":"suspended","ready":false,` +
+		`"configName":"default","userId":"user-1","createdAt":"2026-11-11T10:00:00Z","startedAt":"2026-11-11T10:00:00Z",` +
+		`"expiresAt":"2026-11-11T14:00:00Z","routes":{}}`
+	for _, tc := range []struct {
+		name     string
+		getFails bool
+	}{{"read back", false}, {"read back fails", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var actions int
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method + " " + r.URL.Path {
+				case "POST /sessions/" + fakeSessionID + "/extend", "POST /sessions/" + fakeSessionID + "/suspend":
+					actions++
+					w.WriteHeader(http.StatusNoContent)
+				case "GET /sessions/" + fakeSessionID:
+					if tc.getFails {
+						http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(session))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(s.Close)
+			withConfig(t, `simulation-broker: `+s.URL+`
+simulation-token:
+  environment: dev
+  oauth2token:
+    accesstoken: test-access-token
+    tokentype: Bearer
+    refreshtoken: test-refresh-token
+    expiry: `+time.Now().Add(time.Hour).UTC().Format(time.RFC3339)+`
+`)
+			t.Setenv(debug.EnvVar, "")
+			for _, args := range [][]string{
+				{"simulation", "session", "extend", fakeSessionID, "--minutes", "120", "-o", "json"},
+				{"simulation", "session", "suspend", fakeSessionID, "-o", "json"},
+			} {
+				actions = 0
+				stdout, stderr, err := runAsProcess(t, args...)
+				if actions != 1 {
+					t.Errorf("%s: %d actions, want 1", args[2], actions)
+				}
+				if tc.getFails {
+					if err == nil || !strings.Contains(stderr, "succeeded") {
+						t.Errorf("%s: err = %v, stderr = %q; want an error saying the action succeeded", args[2], err, stderr)
+					}
+					if stdout != "" {
+						t.Errorf("%s: stdout = %q, want nothing", args[2], stdout)
+					}
+					continue
+				}
+				if err != nil {
+					t.Fatalf("%s: error: %v\nstderr: %s", args[2], err, stderr)
+				}
+				want := `{"id":"` + fakeSessionID + `","name":"my-session","status":"suspended","condition":"suspended","ready":false,` +
+					`"config_name":"default","user_id":"user-1","created_at":"2026-11-11T10:00:00Z","started_at":"2026-11-11T10:00:00Z",` +
+					`"expires_at":"2026-11-11T14:00:00Z","routes":[]}`
+				if got := compactJSON(t, stdout); got != want {
+					t.Errorf("%s: stdout = %s\nwant     %s", args[2], got, want)
+				}
+			}
+		})
+	}
+}

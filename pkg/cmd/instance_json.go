@@ -76,10 +76,10 @@ type cloudInstanceJSON struct {
 	Host        string `json:"host"`
 	Status      string `json:"status"`
 	SandboxName string `json:"sandbox_name"`
-	// RFC 3339, empty if unknown
-	ExpiresAt string `json:"expires_at"`
-	// RFC 3339, empty if unknown
-	ObsoleteAt string `json:"obsolete_at"`
+	// RFC 3339, left out if unknown
+	ExpiresAt string `json:"expires_at,omitempty"`
+	// RFC 3339, left out if unknown
+	ObsoleteAt string `json:"obsolete_at,omitempty"`
 }
 
 func newCloudInstanceJSON(c portal.UserInstance) cloudInstanceJSON {

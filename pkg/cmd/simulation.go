@@ -133,7 +133,7 @@ var simulationAppsCmd = &cobra.Command{
 			return err
 		}
 		if *simulationAppsOutput == outputJSON {
-			return writeJSON(cmd, simulationList(apps))
+			return writeJSON(cmd, appsJSON(apps))
 		}
 
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
@@ -316,9 +316,10 @@ nova simulation session create my-session --app nova-x-isaac --profile isaac-24g
 				return err
 			}
 			if f.open {
-				// stdout carries only the JSON
+				// stdout carries only the JSON, also the launcher's output
 				url := c.StreamURL(session.Id.String())
 				cmd.PrintErrln("Opening", url)
+				browser.Stdout, browser.Stderr = cmd.ErrOrStderr(), cmd.ErrOrStderr()
 				return browser.OpenURL(url)
 			}
 			return nil
@@ -350,7 +351,7 @@ nova simulation session extend my-session --minutes 120`,
 			return err
 		}
 		resp, err := c.ExtendSessionWithResponse(cmd.Context(), id, simulation.ExtendRequest{Minutes: simulationSessionExtendMinutes})
-		return printSessionResult(cmd, simulationSessionExtendOutput, resp, err)
+		return printSessionResult(cmd, simulationSessionExtendOutput, c, id, resp, err)
 	},
 }
 
@@ -368,7 +369,7 @@ var simulationSessionRenameCmd = &cobra.Command{
 			return err
 		}
 		resp, err := c.RenameSessionWithResponse(cmd.Context(), id, simulation.RenameRequest{Name: args[1]})
-		return printSessionResult(cmd, simulationSessionRenameOutput, resp, err)
+		return printSessionResult(cmd, simulationSessionRenameOutput, c, id, resp, err)
 	},
 }
 
@@ -388,7 +389,7 @@ func sessionActionCmd(use, short string, withOutput bool, call func(context.Cont
 				return err
 			}
 			resp, err := call(cmd.Context(), c, id)
-			return printSessionResult(cmd, out, resp, err)
+			return printSessionResult(cmd, out, c, id, resp, err)
 		},
 	}
 	if withOutput {
@@ -574,7 +575,11 @@ var simulationConfigListCmd = &cobra.Command{
 			return err
 		}
 		if *simulationConfigListOutput == outputJSON {
-			return writeJSON(cmd, simulationList(configs))
+			out := make([]configRefJSON, 0, len(configs))
+			for _, c := range configs {
+				out = append(out, configRefJSON{App: c.App, Name: c.Name})
+			}
+			return writeJSON(cmd, out)
 		}
 		for _, cfg := range configs {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s/%s\n", cfg.App, cfg.Name)
@@ -801,18 +806,24 @@ func brokerAndSession(ctx context.Context, ref string) (*simulation.Broker, uuid
 
 // printSessionResult checks a session action and prints the session if the
 // broker returned it. With -o json (out may be nil: no flag) it prints the
-// session from the broker's Lease, which the actions return.
-func printSessionResult(cmd *cobra.Command, out *outputFormat, resp simulation.Response, err error) error {
+// session from the broker's Lease, which the actions return; if the answer
+// carries none, it fetches the session, as "session get" does.
+func printSessionResult(cmd *cobra.Command, out *outputFormat, c *simulation.Broker, id uuid.UUID, resp simulation.Response, err error) error {
 	if err := simulation.Check(resp, err); err != nil {
 		return err
 	}
 	body := resp.GetBody()
 	if out != nil && *out == outputJSON {
 		var lease simulation.Lease
-		if err := json.Unmarshal(body, &lease); err != nil || lease.Id == uuid.Nil {
-			return fmt.Errorf("broker: unexpected response: %s", string(body))
+		if len(body) > 0 && json.Unmarshal(body, &lease) == nil && lease.Id != uuid.Nil {
+			return writeJSON(cmd, leaseJSON(lease))
 		}
-		return writeJSON(cmd, leaseJSON(lease))
+		// the action succeeded: don't fail it (a retry would repeat it), show the session instead
+		got, err := c.GetSessionWithResponse(cmd.Context(), id)
+		if err := checkJSON(got, err); err != nil {
+			return fmt.Errorf("the action on session %s succeeded, but reading the session back failed: %w", id, err)
+		}
+		return writeJSON(cmd, sessionResponseJSON(got.JSON200))
 	}
 	var session simulation.SessionResponse
 	if len(body) > 0 && json.Unmarshal(body, &session) == nil && session.Id != uuid.Nil {
@@ -937,12 +948,46 @@ func completeSimulationSession(cmd *cobra.Command, args []string, toComplete str
 	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
-// simulationList makes an empty list print as [] instead of null.
-func simulationList[T any](s []T) []T {
-	if s == nil {
-		return []T{}
+// appJSON is an application in 'simulation apps -o json' (ADR-0010: the CLI
+// defines the shape, lists are [] when empty).
+type appJSON struct {
+	Description string           `json:"description"`
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Versions    []appVersionJSON `json:"versions"`
+}
+
+type appVersionJSON struct {
+	Profiles []appProfileJSON `json:"profiles"`
+	Version  string           `json:"version"`
+}
+
+type appProfileJSON struct {
+	Description string `json:"description"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+}
+
+// configRefJSON is a saved config in 'simulation config list -o json'.
+type configRefJSON struct {
+	App  string `json:"app"`
+	Name string `json:"name"`
+}
+
+func appsJSON(apps []simulation.ApplicationInfo) []appJSON {
+	out := make([]appJSON, 0, len(apps))
+	for _, a := range apps {
+		versions := make([]appVersionJSON, 0, len(a.Versions))
+		for _, v := range a.Versions {
+			profiles := make([]appProfileJSON, 0, len(v.Profiles))
+			for _, p := range v.Profiles {
+				profiles = append(profiles, appProfileJSON{Description: p.Description, ID: p.Id, Name: p.Name})
+			}
+			versions = append(versions, appVersionJSON{Profiles: profiles, Version: v.Version})
+		}
+		out = append(out, appJSON{Description: a.Description, ID: a.Id, Name: a.Name, Versions: versions})
 	}
-	return s
+	return out
 }
 
 // sessionJSON is a session in -o json (ADR-0010). The CLI defines the shape, in

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -65,6 +66,11 @@ type flowStatusResult struct {
 	// the version the installer app recommends, if it differs from Version
 	AvailableVersion string `json:"available_version,omitempty"`
 	EditorURL        string `json:"editor_url,omitempty"`
+	// "novaflow-installer" when the instance doesn't expose NOVA's NovaFlow
+	// feature flag, so 'flow install' uses the installer app; empty otherwise
+	InstallsWith string `json:"installs_with,omitempty"`
+	// why the feature flags could not be read (other than a missing flag API)
+	FeatureFlagsError string `json:"feature_flags_error,omitempty"`
 }
 
 // flowStatus collects what printFlowStatus prints.
@@ -83,6 +89,10 @@ func flowStatus(c *novaflow.Client, inst *novaflow.Installation, installerApp bo
 			r.State, r.Version, r.Reason = s.State, s.DeployedVersion, s.Reason
 		}
 		r.RequestedVersion = f.NovaflowVersion
+	} else if installerStatus == nil && errors.Is(inst.FlagsErr, novaflow.ErrUnreachable) {
+		r.InstallsWith = novaflow.InstallerApp
+	} else if installerStatus == nil && inst.FlagsErr != nil {
+		r.FeatureFlagsError = inst.FlagsErr.Error()
 	}
 	if s := installerStatus; s != nil && !inst.ViaFeatureFlag() {
 		if s.InstalledVersion != "" {

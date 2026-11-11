@@ -139,8 +139,42 @@ func TestFlowStatusJSONNotInstalled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v\nstderr: %s", err, stderr)
 	}
-	if got, want := compactJSON(t, stdout), `{"cell":"cell","installed":false}`; got != want {
+	// no feature flag API: install goes through the installer app, as the text says
+	if got, want := compactJSON(t, stdout), `{"cell":"cell","installed":false,"installs_with":"novaflow-installer"}`; got != want {
 		t.Errorf("stdout = %s, want %s", got, want)
+	}
+}
+
+// A feature flag API that fails is reported, as in the text output.
+func TestFlowStatusJSONFeatureFlagsError(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/internal/cells/cell/feature-flags" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"detail":"forbidden"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(s.Close)
+	withConfig(t, "current-instance: lab\ninstances:\n  - name: lab\n    kind: host\n    host: "+s.URL+"\n    cellname: cell\n")
+	t.Setenv(debug.EnvVar, "")
+
+	stdout, stderr, err := runAsProcess(t, "flow", "status", "-o", "json")
+	if err != nil {
+		t.Fatalf("error: %v\nstderr: %s", err, stderr)
+	}
+	var got flowStatusResult
+	decodeStdout(t, stdout, &got)
+	if got.Installed || got.InstallsWith != "" || !strings.Contains(got.FeatureFlagsError, "403") {
+		t.Errorf("result = %+v", got)
+	}
+	text, _, err := runAsProcess(t, "flow", "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "Feature flags:") || !strings.Contains(text, got.FeatureFlagsError) {
+		t.Errorf("text output %q doesn't carry %q", text, got.FeatureFlagsError)
 	}
 }
 

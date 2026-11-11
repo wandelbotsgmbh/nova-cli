@@ -35,8 +35,15 @@ func newTestRootCmd() (*cobra.Command, *fakeserver.Server) {
 
 	// Register subcommands — reuse the RunE closures from the real commands
 	// but on fresh cobra.Command instances so flags don't conflict.
+	// -o binds to the real commands' variables, which their RunE reads: reset
+	// them, a previous test may have set json
+	for _, o := range []*outputFormat{nucleusLsOutput, nucleusStatOutput, nucleusCpOutput} {
+		*o = outputText
+	}
+
 	ls := &cobra.Command{Use: nucleusLsCmd.Use, Args: nucleusLsCmd.Args, RunE: nucleusLsCmd.RunE}
 	ls.Flags().BoolP("long", "l", false, "")
+	ls.Flags().VarP(nucleusLsOutput, "output", "o", "")
 	nuc.AddCommand(ls)
 
 	mkdir := &cobra.Command{Use: nucleusMkdirCmd.Use, Args: nucleusMkdirCmd.Args, RunE: nucleusMkdirCmd.RunE}
@@ -47,6 +54,7 @@ func newTestRootCmd() (*cobra.Command, *fakeserver.Server) {
 	nuc.AddCommand(rm)
 
 	stat := &cobra.Command{Use: nucleusStatCmd.Use, Args: nucleusStatCmd.Args, RunE: nucleusStatCmd.RunE}
+	stat.Flags().VarP(nucleusStatOutput, "output", "o", "")
 	nuc.AddCommand(stat)
 
 	mv := &cobra.Command{Use: nucleusMvCmd.Use, Args: nucleusMvCmd.Args, RunE: nucleusMvCmd.RunE}
@@ -56,6 +64,7 @@ func newTestRootCmd() (*cobra.Command, *fakeserver.Server) {
 	cp.Flags().BoolP("parents", "p", false, "")
 	cp.Flags().BoolP("progress", "P", false, "")
 	cp.Flags().IntP("parallel", "j", 2, "")
+	cp.Flags().VarP(nucleusCpOutput, "output", "o", "")
 	nuc.AddCommand(cp)
 
 	return root, fake

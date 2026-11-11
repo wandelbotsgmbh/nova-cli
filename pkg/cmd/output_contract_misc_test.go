@@ -312,6 +312,23 @@ func TestAppUpdateEnvJSON(t *testing.T) {
 	}
 }
 
+// A portal instance whose login yields no access token is "missing", not
+// "not_needed" (that is for instances that take no portal token).
+func TestAppEnvTokenStatus(t *testing.T) {
+	for _, tc := range []struct {
+		tokenKey, host, token, want string
+	}{
+		{"", "https://x.instance.wandelbots.io", "tok", "unused"},
+		{"ACCESS_TOKEN", "https://x.instance.wandelbots.io", "tok", "refreshed"},
+		{"ACCESS_TOKEN", "https://x.instance.wandelbots.io", "", "missing"},
+		{"ACCESS_TOKEN", "http://192.168.1.10", "", "not_needed"},
+	} {
+		if got := appEnvTokenStatus(tc.tokenKey, tc.host, tc.token); got != tc.want {
+			t.Errorf("appEnvTokenStatus(%q, %q, %q) = %q, want %q", tc.tokenKey, tc.host, tc.token, got, tc.want)
+		}
+	}
+}
+
 func TestAppUpdateEnvTextUnchanged(t *testing.T) {
 	withFakeInstance(t)
 	if err := os.MkdirAll("demo", 0o700); err != nil {

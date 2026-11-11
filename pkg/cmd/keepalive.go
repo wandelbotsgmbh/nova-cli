@@ -68,7 +68,7 @@ $ nova instance extend my-instance`,
 				Name:      inst.Name,
 				Kind:      string(inst.Kind),
 				ID:        lifetimeID(inst),
-				ExpiresAt: after.expires.Format(time.RFC3339),
+				ExpiresAt: after.expires.UTC().Format(time.RFC3339),
 				Extended:  extended,
 			})
 		}

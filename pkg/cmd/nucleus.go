@@ -91,7 +91,7 @@ RFC 3339 with created_by/modified_by, hash, version), whether or not -l is given
 			return fmt.Errorf("listing %s: %w", path, err)
 		}
 
-		if nucleusOutput(cmd) == outputJSON {
+		if *nucleusLsOutput == outputJSON {
 			items := make([]nucleusEntryJSON, 0, len(entries))
 			for _, e := range entries {
 				items = append(items, toNucleusEntryJSON(e))
@@ -279,7 +279,7 @@ within Nucleus lists only the destination.`,
 			}
 		}
 
-		if nucleusOutput(cmd) == outputJSON {
+		if *nucleusCpOutput == outputJSON {
 			return writeJSON(cmd, res)
 		}
 		return nil
@@ -334,16 +334,8 @@ func toNucleusEntryJSON(e nucleus.Entry) nucleusEntryJSON {
 	return j
 }
 
-// nucleusOutput returns the -o/--output value of cmd, text if it has none (the
-// tests run the RunE functions on commands without the flag).
-func nucleusOutput(cmd *cobra.Command) outputFormat {
-	if f := cmd.Flags().Lookup("output"); f != nil {
-		if o, ok := f.Value.(*outputFormat); ok {
-			return *o
-		}
-	}
-	return outputText
-}
+// -o/--output of 'nucleus ls', 'nucleus stat' and 'nucleus cp' (ADR-0010)
+var nucleusLsOutput, nucleusStatOutput, nucleusCpOutput *outputFormat
 
 var nucleusRmCmd = &cobra.Command{
 	Use:               "rm <path>",
@@ -461,7 +453,7 @@ var nucleusStatCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
-		if nucleusOutput(cmd) == outputJSON {
+		if *nucleusStatOutput == outputJSON {
 			return writeJSON(cmd, toNucleusEntryJSON(*entry))
 		}
 
@@ -502,10 +494,9 @@ func init() {
 	// ls-specific flags.
 	nucleusLsCmd.Flags().BoolP("long", "l", false, "Show detailed listing")
 
-	// -o/--output (ADR-0010); read with nucleusOutput
-	for _, c := range []*cobra.Command{nucleusLsCmd, nucleusStatCmd, nucleusCpCmd} {
-		addOutputFlag(c)
-	}
+	nucleusLsOutput = addOutputFlag(nucleusLsCmd)
+	nucleusStatOutput = addOutputFlag(nucleusStatCmd)
+	nucleusCpOutput = addOutputFlag(nucleusCpCmd)
 
 	// rm-specific flags.
 	nucleusRmCmd.Flags().BoolP("recursive", "r", false, "Recursively delete non-empty directories")
