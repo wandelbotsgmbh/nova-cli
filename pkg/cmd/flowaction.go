@@ -182,6 +182,10 @@ func createNovaflowActionProject(cmd *cobra.Command, name string) error {
 	interactive := len(actions) == 0 && term.IsTerminal(int(os.Stdin.Fd()))
 	c := debug.Command(uvx, copierArgs(outpath, serviceName(name), appName, viper.GetString("image-registry"), actions, interactive)...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if *flowActionCreateOutput == outputJSON {
+		// stdout carries only the result
+		c.Stdout = os.Stderr
+	}
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("creating the project from %s failed: %w", novaflowActionTemplate, err)
 	}
@@ -196,6 +200,9 @@ func createNovaflowActionProject(cmd *cobra.Command, name string) error {
 	} else {
 		cmd.Println("  uv run run.py        # registers the actions on the instance, they show up in 'nova flow open'")
 		cmd.Println("  nova app install .   # deploy when done")
+	}
+	if *flowActionCreateOutput == outputJSON {
+		return writeJSON(cmd, createdFlowAction{Name: name, Path: absPath(outpath)})
 	}
 	return nil
 }
