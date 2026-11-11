@@ -121,26 +121,27 @@ func readToken(in io.Reader) (string, error) {
 var nucleusServerListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List the Nucleus servers; '*' marks the selected one",
-	Args:  cobra.NoArgs,
+	Long: `List the Nucleus servers; '*' marks the selected one.
+
+-o json prints an array of servers (name, host, tls, has_token, selected). Tokens are
+never printed.`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := loadNucleusRegistry()
 		if err != nil {
 			return err
 		}
-		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "\tNAME\tHOST\tTLS\tTOKEN")
-		for _, s := range r.Servers {
-			mark := ""
-			if s.Name == r.Current {
-				mark = "*"
+		if *nucleusServerListOutput == outputJSON {
+			items := make([]nucleusServerJSON, 0, len(r.Servers))
+			for _, s := range r.Servers {
+				items = append(items, nucleusServerJSON{
+					Name: s.Name, Host: s.Host, TLS: s.UseTLS(), HasToken: s.Token != "", Selected: s.Name == r.Current,
+				})
 			}
-			token := "-"
-			if s.Token != "" {
-				token = "set"
+			if err := writeJSON(cmd, items); err != nil {
+				return err
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%t\t%s\n", mark, s.Name, s.Host, s.UseTLS(), token)
-		}
-		if err := w.Flush(); err != nil {
+		} else if err := printNucleusServers(cmd, r); err != nil {
 			return err
 		}
 		if o := nucleusOverride(); o != "" && o != r.Current {
@@ -148,6 +149,37 @@ var nucleusServerListCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// nucleusServerJSON is an entry of 'nucleus server list -o json'. It never carries
+// the token, only whether one is set.
+type nucleusServerJSON struct {
+	Name     string `json:"name"`
+	Host     string `json:"host"`
+	TLS      bool   `json:"tls"`
+	HasToken bool   `json:"has_token"`
+	// the server in current-nucleus (--nucleus / NOVA_NUCLEUS don't change it)
+	Selected bool `json:"selected"`
+}
+
+// -o/--output of 'nucleus server list'
+var nucleusServerListOutput *outputFormat
+
+func printNucleusServers(cmd *cobra.Command, r *nucleusservers.Registry) error {
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "\tNAME\tHOST\tTLS\tTOKEN")
+	for _, s := range r.Servers {
+		mark := ""
+		if s.Name == r.Current {
+			mark = "*"
+		}
+		token := "-"
+		if s.Token != "" {
+			token = "set"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%t\t%s\n", mark, s.Name, s.Host, s.UseTLS(), token)
+	}
+	return w.Flush()
 }
 
 func nucleusOverride() string {
@@ -276,6 +308,7 @@ func init() {
 		})
 	}
 
+	nucleusServerListOutput = addOutputFlag(nucleusServerListCmd)
 	nucleusServerAddCmd.Flags().StringVar(&nucleusServerHost, "host", "", "Host of the Nucleus server, e.g. nucleus.dev.wandelbots.io (required)")
 	_ = nucleusServerAddCmd.MarkFlagRequired("host")
 	nucleusServerAddCmd.Flags().BoolVar(&nucleusServerTokenStdin, "token-stdin", false, "Read the API token from stdin")

@@ -59,14 +59,18 @@ Usage examples:
 }
 
 var nucleusLsCmd = &cobra.Command{
-	Use:               "ls [path]",
-	Short:             "List files and directories",
-	Long:              `List the contents of a directory on the Nucleus server. Defaults to "/".`,
+	Use:   "ls [path]",
+	Short: "List files and directories",
+	Long: `List the contents of a directory on the Nucleus server. Defaults to "/".
+
+-o json prints an array of entries (path, type, size in bytes, created/modified as
+RFC 3339 with created_by/modified_by, hash, version), whether or not -l is given.`,
 	Args:              cobra.MaximumNArgs(1),
 	ValidArgsFunction: completeNucleusPath,
 	Example: `  nova nucleus ls /
   nova nucleus ls /Projects/
-  nova nucleus ls -l /Projects/`,
+  nova nucleus ls -l /Projects/
+  nova nucleus ls -o json /Projects/`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := "/"
 		if len(args) > 0 {
@@ -85,6 +89,14 @@ var nucleusLsCmd = &cobra.Command{
 		entries, err := client.List(ctx, path)
 		if err != nil {
 			return fmt.Errorf("listing %s: %w", path, err)
+		}
+
+		if nucleusOutput(cmd) == outputJSON {
+			items := make([]nucleusEntryJSON, 0, len(entries))
+			for _, e := range entries {
+				items = append(items, toNucleusEntryJSON(e))
+			}
+			return writeJSON(cmd, items)
 		}
 
 		long, _ := cmd.Flags().GetBool("long")
@@ -116,7 +128,11 @@ are treated as local filesystem paths. Directories are copied recursively.
 Supported directions:
   local  -> Nucleus:  nova nucleus cp ./file.usd n:/Projects/file.usd
   Nucleus -> local:   nova nucleus cp n:/Projects/file.usd ./file.usd
-  Nucleus -> Nucleus: nova nucleus cp n:/Projects/a.usd n:/Projects/b.usd`,
+  Nucleus -> Nucleus: nova nucleus cp n:/Projects/a.usd n:/Projects/b.usd
+
+-o json prints source, destination and the copied files: "path" is the local file
+(absolute), "nucleus_path" the file on Nucleus, "size" its size in bytes. A copy
+within Nucleus lists only the destination.`,
 	Args: cobra.ExactArgs(2),
 	Example: `  # Upload a local file to Nucleus
   nova nucleus cp ./Scene.usd n:/Projects/Scene.usd
@@ -154,6 +170,7 @@ Supported directions:
 		// scenes take >5min on a normal uplink). Ctrl-C cancels via the command
 		// context; the LFT HTTP layer has its own dial/response-header timeouts.
 		ctx := cmd.Context()
+		res := nucleusCopyResult{Source: src, Destination: dst, Files: []nucleusCopiedFile{}}
 
 		switch {
 		case srcIsNucleus && dstIsNucleus:
@@ -169,6 +186,7 @@ Supported directions:
 			if err := client.Copy(ctx, nSrc, nDst); err != nil {
 				return fmt.Errorf("copy %s -> %s: %w", nSrc, nDst, err)
 			}
+			res.Files = append(res.Files, nucleusCopiedFile{NucleusPath: nDst})
 
 		case !srcIsNucleus && dstIsNucleus:
 			// Local -> Nucleus (upload, supports files and directories)
@@ -178,6 +196,10 @@ Supported directions:
 			info, err := os.Stat(src)
 			if err != nil {
 				return fmt.Errorf("stat %s: %w", src, err)
+			}
+			res.Source = absPath(src)
+			uploaded := func(localPath, remotePath string, size int64) {
+				res.Files = append(res.Files, nucleusCopiedFile{Path: absPath(localPath), NucleusPath: remotePath, Size: &size})
 			}
 
 			showProgress, _ := cmd.Flags().GetBool("progress")
@@ -192,6 +214,7 @@ Supported directions:
 				if err := uploadFile(ctx, client, src, nDst, info.Size(), showProgress); err != nil {
 					return fmt.Errorf("uploading to %s: %w", nDst, err)
 				}
+				uploaded(src, nDst, info.Size())
 			} else {
 				// Recursive directory upload.
 				srcBase := filepath.Clean(src)
@@ -226,7 +249,11 @@ Supported directions:
 						}
 						return client.CreateFolder(ctx, remotePath)
 					}
-					return uploadFile(ctx, client, localPath, remotePath, fi.Size(), showProgress)
+					if err := uploadFile(ctx, client, localPath, remotePath, fi.Size(), showProgress); err != nil {
+						return err
+					}
+					uploaded(localPath, remotePath, fi.Size())
+					return nil
 				})
 				if err != nil {
 					return fmt.Errorf("uploading directory %s: %w", src, err)
@@ -237,13 +264,85 @@ Supported directions:
 			// Nucleus -> Local (download, supports files and directories)
 			nSrc := stripNucleusPrefix(src)
 			parallel, _ := cmd.Flags().GetInt("parallel")
-			if err := downloadRecursive(ctx, client, nSrc, dst, cmd.ErrOrStderr(), parallel); err != nil {
+			files, err := downloadRecursive(ctx, client, nSrc, dst, cmd.ErrOrStderr(), parallel)
+			if err != nil {
 				return err
+			}
+			res.Destination = absPath(dst)
+			for _, f := range files {
+				cf := nucleusCopiedFile{Path: absPath(f.local), NucleusPath: f.remote}
+				if fi, err := os.Stat(f.local); err == nil {
+					size := fi.Size()
+					cf.Size = &size
+				}
+				res.Files = append(res.Files, cf)
 			}
 		}
 
+		if nucleusOutput(cmd) == outputJSON {
+			return writeJSON(cmd, res)
+		}
 		return nil
 	},
+}
+
+// nucleusCopyResult is the JSON result of 'nucleus cp -o json'.
+type nucleusCopyResult struct {
+	// as given; local paths absolute, Nucleus paths with the n: prefix
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+	// files written, in the order they were copied (directories are not listed)
+	Files []nucleusCopiedFile `json:"files"`
+}
+
+// nucleusCopiedFile is one copied file of 'nucleus cp -o json'.
+type nucleusCopiedFile struct {
+	// local file, absolute; empty for a copy within Nucleus
+	Path        string `json:"path,omitempty"`
+	NucleusPath string `json:"nucleus_path"`
+	// bytes transferred; not known for a copy within Nucleus
+	Size *int64 `json:"size,omitempty"`
+}
+
+// nucleusEntryJSON is the JSON shape of an entry in 'nucleus ls -o json' and
+// 'nucleus stat -o json'.
+type nucleusEntryJSON struct {
+	Path string `json:"path"`
+	// file, folder or mount
+	Type string `json:"type"`
+	Size int64  `json:"size"`
+	// RFC 3339, UTC
+	Created    string `json:"created,omitempty"`
+	CreatedBy  string `json:"created_by,omitempty"`
+	Modified   string `json:"modified,omitempty"`
+	ModifiedBy string `json:"modified_by,omitempty"`
+	Hash       string `json:"hash,omitempty"`
+	Version    int    `json:"version,omitempty"`
+}
+
+func toNucleusEntryJSON(e nucleus.Entry) nucleusEntryJSON {
+	j := nucleusEntryJSON{
+		Path: e.Path, Type: e.PathType, Size: e.Size,
+		CreatedBy: e.CreatedBy, ModifiedBy: e.ModifiedBy, Hash: e.Hash, Version: e.Version,
+	}
+	if e.CreatedTimestamp > 0 {
+		j.Created = e.CreatedTime().UTC().Format(time.RFC3339)
+	}
+	if e.ModifiedTimestamp > 0 {
+		j.Modified = e.ModifiedTime().UTC().Format(time.RFC3339)
+	}
+	return j
+}
+
+// nucleusOutput returns the -o/--output value of cmd, text if it has none (the
+// tests run the RunE functions on commands without the flag).
+func nucleusOutput(cmd *cobra.Command) outputFormat {
+	if f := cmd.Flags().Lookup("output"); f != nil {
+		if o, ok := f.Value.(*outputFormat); ok {
+			return *o
+		}
+	}
+	return outputText
 }
 
 var nucleusRmCmd = &cobra.Command{
@@ -341,9 +440,11 @@ var nucleusStatCmd = &cobra.Command{
 	Use:               "stat <path>",
 	Short:             "Show details about a file or directory",
 	ValidArgsFunction: completeNucleusPath,
-	Long:              `Display detailed metadata for a file or directory on the Nucleus server.`,
-	Args:              cobra.ExactArgs(1),
-	Example:           `  nova nucleus stat /Projects/Scene.usd`,
+	Long: `Display detailed metadata for a file or directory on the Nucleus server.
+
+-o json prints the entry as one object, in the shape of 'nucleus ls -o json'.`,
+	Args:    cobra.ExactArgs(1),
+	Example: `  nova nucleus stat /Projects/Scene.usd`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0]
 
@@ -359,6 +460,9 @@ var nucleusStatCmd = &cobra.Command{
 		entry, err := client.Stat(ctx, path)
 		if err != nil {
 			return fmt.Errorf("stat %s: %w", path, err)
+		}
+		if nucleusOutput(cmd) == outputJSON {
+			return writeJSON(cmd, toNucleusEntryJSON(*entry))
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Path:     %s\n", entry.Path)
@@ -397,6 +501,11 @@ func init() {
 
 	// ls-specific flags.
 	nucleusLsCmd.Flags().BoolP("long", "l", false, "Show detailed listing")
+
+	// -o/--output (ADR-0010); read with nucleusOutput
+	for _, c := range []*cobra.Command{nucleusLsCmd, nucleusStatCmd, nucleusCpCmd} {
+		addOutputFlag(c)
+	}
 
 	// rm-specific flags.
 	nucleusRmCmd.Flags().BoolP("recursive", "r", false, "Recursively delete non-empty directories")
@@ -492,20 +601,20 @@ type downloadJob struct {
 // written for them), reported on errOut as they happen, and summarized in the
 // returned error so the command exits non-zero. Errors that aren't per-file
 // (cancellation, listing failures, local filesystem errors) abort the whole
-// download.
-func downloadRecursive(ctx context.Context, client *nucleus.Client, remotePath, localPath string, errOut io.Writer, parallel int) error {
+// download. On success it returns the files written.
+func downloadRecursive(ctx context.Context, client *nucleus.Client, remotePath, localPath string, errOut io.Writer, parallel int) ([]downloadJob, error) {
 	// Try as a file first.
 	err := downloadOne(ctx, client, remotePath, localPath)
 	if err == nil {
-		return nil
+		return []downloadJob{{remote: remotePath, local: localPath}}, nil
 	}
 	if ctx.Err() != nil {
-		return err
+		return nil, err
 	}
 	if nucleus.IsTransient(err) {
 		// The server identified the path as a file but could not deliver it;
 		// don't mask that by trying to treat it as a directory.
-		return fmt.Errorf("downloading %s: %w", remotePath, err)
+		return nil, fmt.Errorf("downloading %s: %w", remotePath, err)
 	}
 
 	// If the read failed, treat as directory.
@@ -517,25 +626,25 @@ func downloadRecursive(ctx context.Context, client *nucleus.Client, remotePath, 
 	entries, listErr := client.List(ctx, remoteDir)
 	if listErr != nil {
 		// Return the original read error if listing also fails.
-		return fmt.Errorf("downloading %s: %w", remotePath, err)
+		return nil, fmt.Errorf("downloading %s: %w", remotePath, err)
 	}
 
 	// Walk the tree first (listings are cheap), creating local directories
 	// as we go, then fetch the files with a worker pool.
 	var jobs []downloadJob
 	if err := collectDownloadJobs(ctx, client, entries, localPath, &jobs); err != nil {
-		return err
+		return nil, err
 	}
 
 	failed, err := runDownloads(ctx, client, jobs, errOut, parallel)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(failed) > 0 {
-		return fmt.Errorf("%d file(s) failed to download and were skipped:\n  %s",
+		return nil, fmt.Errorf("%d file(s) failed to download and were skipped:\n  %s",
 			len(failed), strings.Join(failed, "\n  "))
 	}
-	return nil
+	return jobs, nil
 }
 
 // downloadOne fetches a single file into localPath, creating the parent

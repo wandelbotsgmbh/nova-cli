@@ -498,7 +498,7 @@ func TestNucleusCpDownloadDirectorySkipsFailedFile(t *testing.T) {
 
 	dstDir := t.TempDir() + "/downloaded"
 	var stderr bytes.Buffer
-	err = downloadRecursive(ctx, client, "/Projects/mydir/", dstDir, &stderr, 2)
+	_, err = downloadRecursive(ctx, client, "/Projects/mydir/", dstDir, &stderr, 2)
 	if err == nil {
 		t.Fatal("expected error when a file cannot be downloaded")
 	}
@@ -548,7 +548,7 @@ func TestNucleusCpDownloadSingleFileFails(t *testing.T) {
 	defer client.Close()
 
 	dst := t.TempDir() + "/bad.png"
-	err = downloadRecursive(ctx, client, "/Projects/bad.png", dst, io.Discard, 1)
+	_, err = downloadRecursive(ctx, client, "/Projects/bad.png", dst, io.Discard, 1)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -604,7 +604,7 @@ func TestNucleusCpDownloadDirectorySurvivesConnectionDrop(t *testing.T) {
 
 	dstDir := t.TempDir() + "/downloaded"
 	var stderr bytes.Buffer
-	if err := downloadRecursive(ctx, client, "/Projects/mydir/", dstDir, &stderr, 3); err != nil {
+	if _, err := downloadRecursive(ctx, client, "/Projects/mydir/", dstDir, &stderr, 3); err != nil {
 		t.Fatalf("downloadRecursive: %v (stderr: %s)", err, stderr.String())
 	}
 	for name, want := range map[string]string{"a.txt": "file-a", "sub/b.txt": "file-b"} {
@@ -709,7 +709,7 @@ func TestNucleusCpDownloadDirectoryCancel(t *testing.T) {
 	}()
 	var stderr bytes.Buffer
 	start := time.Now()
-	err = downloadRecursive(dlCtx, client, "/Projects/big/", t.TempDir()+"/dl", &stderr, 4)
+	_, err = downloadRecursive(dlCtx, client, "/Projects/big/", t.TempDir()+"/dl", &stderr, 4)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
