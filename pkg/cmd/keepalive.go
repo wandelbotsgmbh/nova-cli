@@ -26,6 +26,9 @@ const (
 
 var keepAliveMargin time.Duration
 
+// -o/--output of 'instance extend'; assigned in init to avoid an initialization cycle
+var extendOutput *outputFormat
+
 var extendInstanceCmd = &cobra.Command{
 	Use:               "extend [name]",
 	Args:              cobra.MaximumNArgs(1),
@@ -41,7 +44,7 @@ To keep an instance alive while you or an agent work with it, use 'nova instance
 	Example: `$ nova instance extend
 $ nova instance extend my-instance`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c, _, err := lifetimeTarget(cmd, args, "extend")
+		c, inst, _, err := lifetimeTarget(cmd, args, "extend")
 		if err != nil {
 			return err
 		}
@@ -56,8 +59,12 @@ $ nova instance extend my-instance`,
 		if err != nil {
 			return err
 		}
-		if !after.expires.After(before.expires) {
+		extended := after.expires.After(before.expires)
+		if !extended {
 			fmt.Fprintln(cmd.ErrOrStderr(), "warning: the request was accepted but didn't move the expiry; the instance may have reached its maximum lifetime")
+		}
+		if *extendOutput == outputJSON {
+			return writeJSON(cmd, newLifetimeJSON(inst, after.expires, extended))
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), after.expires.Format(time.RFC3339))
 		return nil
@@ -94,7 +101,7 @@ $ nova instance keep-alive my-cluster -- skaffold dev`,
 			return errors.New("--margin must be positive")
 		}
 		name, command := splitAtDash(cmd, args)
-		c, label, err := lifetimeTarget(cmd, name, "keep-alive")
+		c, _, label, err := lifetimeTarget(cmd, name, "keep-alive")
 		if err != nil {
 			return err
 		}
@@ -128,29 +135,37 @@ func splitAtDash(cmd *cobra.Command, args []string) (before, after []string) {
 	return args, nil
 }
 
+// lifetimeID is the id lifetimeTarget extends: the portal instance id or the cluster id.
+func lifetimeID(inst instances.Instance) string {
+	if inst.Kind == instances.KindCloud {
+		return cloudID(inst, inst.Name)
+	}
+	return inst.ID
+}
+
 // lifetimeTarget returns the lifetime client for the named instance (a local entry, else
-// a cloud instance id) or the targeted one, and a label for messages.
-func lifetimeTarget(cmd *cobra.Command, args []string, verb string) (lifetimeClient, string, error) {
+// a cloud instance id) or the targeted one, the instance, and a label for messages.
+func lifetimeTarget(cmd *cobra.Command, args []string, verb string) (lifetimeClient, instances.Instance, string, error) {
 	var inst instances.Instance
 	if len(args) > 0 {
 		name := strings.TrimSpace(args[0])
 		r, err := loadRegistry()
 		if err != nil {
-			return nil, "", err
+			return nil, inst, "", err
 		}
 		var ok bool
 		if inst, ok = lookupCloudEntry(r, name); !ok {
 			inst = instances.Instance{Name: name, Kind: instances.KindCloud, ID: name}
 		} else if err := useInstanceEnv(inst); err != nil {
-			return nil, "", err
+			return nil, inst, "", err
 		}
 	} else {
 		t, err := ensureTarget()
 		if err != nil {
-			return nil, "", err
+			return nil, inst, "", err
 		}
 		if t.Name == "" {
-			return nil, "", fmt.Errorf("%w: select one with 'nova instance select <name>'", instances.ErrNoTarget)
+			return nil, inst, "", fmt.Errorf("%w: select one with 'nova instance select <name>'", instances.ErrNoTarget)
 		}
 		inst = t
 	}
@@ -160,21 +175,21 @@ func lifetimeTarget(cmd *cobra.Command, args []string, verb string) (lifetimeCli
 		id := cloudID(inst, inst.Name)
 		p, err := portal.NewPortal(portalEnvironment)
 		if err != nil {
-			return nil, "", err
+			return nil, inst, "", err
 		}
 		env := portalEnvironment
 		return &cloudLifetime{
 			portal:  p,
 			id:      id,
 			refresh: func() error { return oauth.RefreshToken(cmd.Context(), env) },
-		}, "cloud instance " + id, nil
+		}, inst, "cloud instance " + id, nil
 	case instances.KindK8sRun:
 		if inst.ID == "" {
-			return nil, "", fmt.Errorf("cluster %q has no id; use 'nova instance remove %s' to forget it", inst.Name, inst.Name)
+			return nil, inst, "", fmt.Errorf("cluster %q has no id; use 'nova instance remove %s' to forget it", inst.Name, inst.Name)
 		}
-		return &k8srunLifetime{id: inst.ID, now: time.Now}, "cluster " + inst.Name, nil
+		return &k8srunLifetime{id: inst.ID, now: time.Now}, inst, "cluster " + inst.Name, nil
 	}
-	return nil, "", fmt.Errorf("can't %s instance %q: it is a %s instance, '%s' only works for cloud and k8srun instances",
+	return nil, inst, "", fmt.Errorf("can't %s instance %q: it is a %s instance, '%s' only works for cloud and k8srun instances",
 		verb, inst.Name, inst.Kind, verb)
 }
 
@@ -383,5 +398,6 @@ func clampCheck(d time.Duration) time.Duration {
 func init() {
 	instanceCmd.AddCommand(extendInstanceCmd)
 	instanceCmd.AddCommand(keepAliveInstanceCmd)
+	extendOutput = addOutputFlag(extendInstanceCmd)
 	keepAliveInstanceCmd.Flags().DurationVar(&keepAliveMargin, "margin", 15*time.Minute, "Extend the lifetime when less than this is left")
 }

@@ -7,6 +7,10 @@ import (
 	"os"
 )
 
+// DiagnosisPackageFile is where DownloadDiagnosisPackage writes the package, in the
+// working directory.
+const DiagnosisPackageFile = "diagnosis.zip"
+
 func downloadDiagnosisPackageV1Impl(host string) error {
 	client, err := NewClientWithToken(host)
 	if err != nil {
@@ -22,8 +26,8 @@ func downloadDiagnosisPackageV1Impl(host string) error {
 		return fmt.Errorf("failed to download diagnosis package: %s", resp.Status)
 	}
 
-	os.Remove("diagnosis.zip")
-	out, err := os.Create("diagnosis.zip")
+	os.Remove(DiagnosisPackageFile)
+	out, err := os.Create(DiagnosisPackageFile)
 	if err != nil {
 		return err
 	}

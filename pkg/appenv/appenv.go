@@ -131,6 +131,22 @@ func DetectLayout(dir string) (Layout, error) {
 // so values edited by hand survive; reset replaces them with the ones from s.
 // Everything else in the file (comments, other variables) is kept.
 func Write(dir string, layout Layout, s Settings, reset bool) (string, error) {
+	r, err := WriteReport(dir, layout, s, reset)
+	return r.Path, err
+}
+
+// Report says what Write did: which variables it set and which it kept as they
+// were in the file. It holds names only, never values.
+type Report struct {
+	Path string
+	// variables written with the value from the settings, in the order of the layout
+	Set []string
+	// variables of the layout that were already in the file and left as they are
+	Kept []string
+}
+
+// WriteReport is Write, reporting which variables were set or kept.
+func WriteReport(dir string, layout Layout, s Settings, reset bool) (Report, error) {
 	path := filepath.Join(dir, layout.File)
 	var values []KV
 	if layout.TokenKey != "" {
@@ -141,15 +157,23 @@ func Write(dir string, layout Layout, s Settings, reset bool) (string, error) {
 		values = append(defaults, values...)
 		defaults = nil
 	}
-	return path, Update(path, values, append(defaults, layout.Defaults...))
+	set, kept, err := update(path, values, append(defaults, layout.Defaults...))
+	return Report{Path: path, Set: set, Kept: kept}, err
 }
 
 // Update sets values in the env file at path, adds defaults which are not set yet
 // and keeps everything else. The file is created with 0600 if it does not exist.
 func Update(path string, values, defaults []KV) error {
+	_, _, err := update(path, values, defaults)
+	return err
+}
+
+// update is Update, returning the keys it set (values, missing defaults) and the
+// defaults it kept.
+func update(path string, values, defaults []KV) (set, kept []string, err error) {
 	content, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+		return nil, nil, err
 	}
 
 	var lines []string
@@ -159,25 +183,32 @@ func Update(path string, values, defaults []KV) error {
 		lines = []string{"# Local development settings, updated by `nova app update-env`.", "# May contain an access token: keep this file out of git."}
 	}
 
-	set := func(kv KV, overwrite bool) {
+	put := func(kv KV, overwrite bool) {
 		for i, line := range lines {
 			if lineKey(line) == kv.Key {
 				if overwrite {
 					lines[i] = format(kv)
+					set = append(set, kv.Key)
+				} else {
+					kept = append(kept, kv.Key)
 				}
 				return
 			}
 		}
 		lines = append(lines, format(kv))
+		set = append(set, kv.Key)
 	}
 	for _, kv := range values {
-		set(kv, true)
+		put(kv, true)
 	}
 	for _, kv := range defaults {
-		set(kv, false)
+		put(kv, false)
 	}
 
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+		return nil, nil, err
+	}
+	return set, kept, nil
 }
 
 // Read returns the variables set in the env file at path.

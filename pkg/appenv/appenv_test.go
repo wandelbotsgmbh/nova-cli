@@ -3,6 +3,7 @@ package appenv
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,5 +122,36 @@ func TestRead(t *testing.T) {
 	}
 	if got["A"] != "x" || got["B"] != "y" || got["C"] != "z" || len(got) != 3 {
 		t.Errorf("got %v", got)
+	}
+}
+
+func TestWriteReportNamesSetAndKeptVariables(t *testing.T) {
+	dir := t.TempDir()
+	existing := "NOVA_API=\"http://my-own-instance\"\nLOG_LEVEL=\"warn\"\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env.local"), []byte(existing), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := Settings{NovaApi: "https://configured", Cell: "cell", AppName: "app", AccessToken: "fresh"}
+
+	r, err := WriteReport(dir, serverLayout, s, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(r.Set, ","), "ACCESS_TOKEN,CELL_NAME,BASE_PATH"; got != want {
+		t.Errorf("set = %s, want %s", got, want)
+	}
+	if got, want := strings.Join(r.Kept, ","), "NOVA_API,LOG_LEVEL"; got != want {
+		t.Errorf("kept = %s, want %s", got, want)
+	}
+
+	r, err = WriteReport(dir, serverLayout, s, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(r.Set, ","), "NOVA_API,CELL_NAME,BASE_PATH,ACCESS_TOKEN"; got != want {
+		t.Errorf("set with reset = %s, want %s", got, want)
+	}
+	if got, want := strings.Join(r.Kept, ","), "LOG_LEVEL"; got != want {
+		t.Errorf("kept with reset = %s, want %s", got, want)
 	}
 }

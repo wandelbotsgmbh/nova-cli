@@ -74,7 +74,13 @@ var flowStatusCmd = &cobra.Command{
 		if installer {
 			installerStatus, _ = c.InstallerStatus(cmd.Context())
 		}
-		printFlowStatus(cmd.OutOrStdout(), c, inst, installer, installerStatus)
+		if *flowStatusOutput == outputJSON {
+			if err := writeJSON(cmd, flowStatus(c, inst, installer, installerStatus)); err != nil {
+				return err
+			}
+		} else {
+			printFlowStatus(cmd.OutOrStdout(), c, inst, installer, installerStatus)
+		}
 		if inst.Flags != nil && inst.Flags.State() == novaflow.StateFailed {
 			return errors.New("the NovaFlow deployment failed")
 		}
@@ -190,6 +196,9 @@ var flowListCmd = &cobra.Command{
 		list, err := c.ListFlows(cmd.Context())
 		if err != nil {
 			return err
+		}
+		if *flowListOutput == outputJSON {
+			return writeFlowListJSON(cmd, list)
 		}
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tNAME\tUPDATED")
@@ -458,7 +467,15 @@ var flowBackupRestoreCmd = &cobra.Command{
 			opts.Progress = progressPrinter(cmd)
 		}
 		items, err := c.Restore(ctx, bc, opts)
-		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+		out := cmd.OutOrStdout()
+		if *flowRestoreOutput == outputJSON {
+			// the table only shows what was done before a failure, on stderr
+			out = io.Discard
+			if err != nil {
+				out = cmd.ErrOrStderr()
+			}
+		}
+		w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 		for _, it := range items {
 			fmt.Fprintf(w, "%s\t%s\t%s\n", it.Kind, it.Key, it.Action)
 		}
@@ -467,6 +484,11 @@ var flowBackupRestoreCmd = &cobra.Command{
 		}
 		if err != nil {
 			return err
+		}
+		if *flowRestoreOutput == outputJSON {
+			if err := writeJSON(cmd, newFlowRestoreResult(c.Cell(), args[0], flowRestoreDryRun, items)); err != nil {
+				return err
+			}
 		}
 		if flowRestoreDryRun {
 			cmd.Println("Dry run, nothing was changed")

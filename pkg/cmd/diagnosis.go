@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
@@ -36,11 +38,32 @@ var downloadZipCmd = &cobra.Command{
 	Long:  `Download diagnostic information from Wandelbots NOVA OS`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		host := currentHost()
-		return nova.DownloadDiagnosisPackage(host)
+		if err := nova.DownloadDiagnosisPackage(host); err != nil {
+			return err
+		}
+		if *diagnosisDownloadOutput != outputJSON {
+			return nil
+		}
+		info, err := os.Stat(nova.DiagnosisPackageFile)
+		if err != nil {
+			return err
+		}
+		return writeJSON(cmd, downloadedDiagnosis{Path: absPath(nova.DiagnosisPackageFile), Bytes: info.Size()})
 	},
 }
 
+// downloadedDiagnosis is the JSON result of 'diagnosis download -o json'.
+type downloadedDiagnosis struct {
+	Path string `json:"path"`
+	// size of the written file
+	Bytes int64 `json:"bytes"`
+}
+
+// -o/--output of 'diagnosis download'
+var diagnosisDownloadOutput *outputFormat
+
 func init() {
+	diagnosisDownloadOutput = addOutputFlag(downloadZipCmd)
 	diagnosisCmd.AddCommand(sendSlackCmd)
 	diagnosisCmd.AddCommand(downloadZipCmd)
 	rootCmd.AddCommand(diagnosisCmd)

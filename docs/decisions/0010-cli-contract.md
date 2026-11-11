@@ -6,7 +6,9 @@
   constraints; data on stdout, messages on stderr, `--debug` / `NOVA_DEBUG`, output tail in
   tool failures; `-o json` on the list commands and on commands that write files (#60);
   typed errors and exit code 3 for refused requests in `nova api` (#77) and for a declined
-  overwrite in `app create` (`ABORTED`); field selection and typed errors in the other
+  overwrite in `app create` (`ABORTED`); `-o json` on the instance, k8srun, flow, Nucleus,
+  simulation, catalog, backup, diagnosis, version, license, config and `app update-env`
+  commands that print data or write files; field selection and typed errors in the other
   commands not started)
 
 ## Context
@@ -33,6 +35,20 @@ stderr, exit codes and files written; golden tests replay it (as Impeccable's
     (`cell`, `path`, `format`), `flow backup download` (`cell`, `path`, `flows`,
     `globals`, `objects` with `--include-objects`), `app create` (`name`, `generator`,
     `path` of the project directory).
+  - Field names are `snake_case` and defined by the CLI (`created_at`, `config_name`,
+    `has_token`), even where the data comes from one server answer: services name
+    their fields differently (the simulation broker uses camelCase), and the CLI only
+    hands on the fields it declares, so a new server field can't leak a secret onto
+    stdout. Exceptions are documents a user edits and sends back, which pass through
+    as stored: `simulation config get` (input of `config set -f`) and `license get`
+    (the instance's license object). `nova api` is the passthrough for everything else.
+  - Times are RFC 3339; local paths are absolute. Fields that don't apply are left out,
+    lists stay `[]`. Secrets never appear: `nucleus server list` says `has_token`,
+    `config view` keeps its redaction without `--show-secrets`, `app update-env` names
+    the variables it set or kept, never their values.
+  - Commands that print no data (`instance select`/`remove`, `nucleus mkdir`/`mv`/`rm`,
+    `simulation session delete`/`restart`, `keep-alive`) get no `-o json`; `instance env`
+    prints shell code, and `model init` already uses `-o` for `--output-dir`.
   - Shapes only grow: fields are added, never renamed or removed. A top-level `nova
     status` doesn't exist yet; it gets `-o json` when it is added.
 - **Existing commands stay non-interactive.** `cell delete`, `app delete`,
@@ -43,7 +59,8 @@ stderr, exit codes and files written; golden tests replay it (as Impeccable's
 - **Data on stdout, everything else on stderr, always** (not only without a TTY):
   progress, warnings, prompts and the output of child processes (docker, ssh, kubectl)
   go to stderr, so `$(nova cell list)` and pipes get only the data [S10][S15]. Contract tests run
-  the commands like the real process (`runAsProcess` in `pkg/cmd/output_contract_test.go`).
+  the commands like the real process (`runAsProcess` in `pkg/cmd/output_contract_test.go`;
+  per area in `output_contract_<area>_test.go`).
 - **`--debug` / `NOVA_DEBUG=1`** writes diagnostics to stderr, prefixed `debug: `: the
   resolved instance and portal environment, every HTTP request and response (headers,
   first 4 KiB of text bodies) and every external command line. It catches what error

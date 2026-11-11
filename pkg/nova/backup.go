@@ -34,6 +34,8 @@ type DownloadStatus struct {
 	TotalBytes      int
 	Message         string
 	Error           error
+	// ID of the backup, set once the instance created it
+	BackupID string
 }
 
 // ProgressWriter wraps an io.Writer to track download progress
@@ -113,7 +115,7 @@ func DownloadBackupWithProgress(host, filename string, progress chan<- DownloadS
 	// Thus it is expected this is just -1 in most (all) cases
 	contentLength := int(resp.ContentLength)
 
-	progress <- DownloadStatus{Message: fmt.Sprintf("Backup created with ID: %s", backupId), TotalBytes: contentLength}
+	progress <- DownloadStatus{Message: fmt.Sprintf("Backup created with ID: %s", backupId), TotalBytes: contentLength, BackupID: backupId}
 
 	var backupUuid openapi_types.UUID
 	err = backupUuid.UnmarshalText([]byte(backupId))

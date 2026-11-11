@@ -72,9 +72,12 @@ $ kubectl --kubeconfig "$(nova instance kubeconfig lab)" get pods -A
 # or set KUBECONFIG and NOVA_INSTANCE for this shell
 $ eval "$(nova instance env lab)"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path, err := instanceKubeconfig(cmd, args)
+		inst, path, err := instanceKubeconfig(cmd, args)
 		if err != nil {
 			return err
+		}
+		if *kubeconfigOutput == outputJSON {
+			return writeJSON(cmd, kubeconfigJSON{Name: inst.Name, Kind: string(inst.Kind), Path: absPath(path)})
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), path)
 		return nil
@@ -127,7 +130,7 @@ PS> nova instance env lab | Invoke-Expression`,
 		}
 		vars := []envVar{{instances.EnvVar, inst.Name}}
 		if inst.Kind != instances.KindCloud {
-			path, err := instanceKubeconfig(cmd, args)
+			_, path, err := instanceKubeconfig(cmd, args)
 			if err != nil {
 				return err
 			}
@@ -141,7 +144,11 @@ PS> nova instance env lab | Invoke-Expression`,
 	},
 }
 
+// -o/--output of 'instance kubeconfig'; assigned in init to avoid an initialization cycle
+var kubeconfigOutput *outputFormat
+
 func init() {
+	kubeconfigOutput = addOutputFlag(kubeconfigInstanceCmd)
 	instanceCmd.AddCommand(kubeconfigInstanceCmd)
 	instanceCmd.AddCommand(envInstanceCmd)
 
@@ -180,42 +187,43 @@ func instanceArg(args []string) (instances.Instance, error) {
 	return t, nil
 }
 
-// instanceKubeconfig returns the path of the instance's kubeconfig, fetching it over
-// ssh for host instances when it isn't stored yet or --refresh is given.
-func instanceKubeconfig(cmd *cobra.Command, args []string) (string, error) {
+// instanceKubeconfig returns the instance and the path of its kubeconfig, fetching it
+// over ssh for host instances when it isn't stored yet or --refresh is given.
+func instanceKubeconfig(cmd *cobra.Command, args []string) (instances.Instance, string, error) {
 	inst, err := instanceArg(args)
 	if err != nil {
-		return "", err
+		return inst, "", err
 	}
 
 	if inst.Kind == instances.KindCloud {
-		return "", fmt.Errorf("cloud instance %q has no kubeconfig", inst.Name)
+		return inst, "", fmt.Errorf("cloud instance %q has no kubeconfig", inst.Name)
 	}
 	if kubeconfigFrom != "" {
 		content, err := readKubeconfigSource(cmd.InOrStdin(), kubeconfigFrom)
 		if err != nil {
-			return "", err
+			return inst, "", err
 		}
-		return storeKubeconfig(inst, content, "")
+		path, err := storeKubeconfig(inst, content, "")
+		return inst, path, err
 	}
 
 	stored := inst.Kubeconfig != "" && fileExists(inst.Kubeconfig)
 	switch inst.Kind {
 	case instances.KindK8sRun:
 		if !stored {
-			return "", fmt.Errorf("kubeconfig of %q is missing; recreate it with 'nova k8srun create --name %s --replace'", inst.Name, inst.Name)
+			return inst, "", fmt.Errorf("kubeconfig of %q is missing; recreate it with 'nova k8srun create --name %s --replace'", inst.Name, inst.Name)
 		}
-		return inst.Kubeconfig, nil
+		return inst, inst.Kubeconfig, nil
 	}
 	if stored && !kubeconfigRefresh {
-		return inst.Kubeconfig, nil
+		return inst, inst.Kubeconfig, nil
 	}
 
 	if inst.Host == "" {
-		return "", fmt.Errorf("instance %q has no host", inst.Name)
+		return inst, "", fmt.Errorf("instance %q has no host", inst.Name)
 	}
 	if !remote.IsOpenSSHInstalled() {
-		return "", errors.New("fetching the kubeconfig requires the OpenSSH client (ssh) in PATH")
+		return inst, "", errors.New("fetching the kubeconfig requires the OpenSSH client (ssh) in PATH")
 	}
 	user := kubeconfigSSHUser
 	if user == "" {
@@ -226,7 +234,7 @@ func instanceKubeconfig(cmd *cobra.Command, args []string) (string, error) {
 
 	if kubeconfigSetupSSH {
 		if err := remote.SetupSSHAccess(target, "k3s", useSudo); err != nil {
-			return "", err
+			return inst, "", err
 		}
 	}
 
@@ -237,10 +245,11 @@ func instanceKubeconfig(cmd *cobra.Command, args []string) (string, error) {
 		if useSudo {
 			hint = " (sudo needs a password? run once with --setup-ssh-key, or use --no-sudo when logging in as root)"
 		}
-		return "", fmt.Errorf("fetching the kubeconfig from %s failed: %w%s", target.Host, err, hint)
+		return inst, "", fmt.Errorf("fetching the kubeconfig from %s failed: %w%s", target.Host, err, hint)
 	}
 
-	return storeKubeconfig(inst, []byte(content), kubeconfigSSHUser)
+	path, err := storeKubeconfig(inst, []byte(content), kubeconfigSSHUser)
+	return inst, path, err
 }
 
 // readKubeconfigSource reads a kubeconfig from a file, or from in for "-".

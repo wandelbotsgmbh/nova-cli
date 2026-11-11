@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -34,20 +35,35 @@ $ nova --instance lab-ipc --env prod license activate`,
 var licenseGetCmd = &cobra.Command{
 	Use:   "get",
 	Short: "Get the license",
-	Long:  `Get the license for the current instance`,
-	Args:  cobra.NoArgs,
+	Long: `Get the license for the current instance.
+
+-o json prints the license object as the instance's API returns it.`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		host := currentHost()
 		license, err := nova.GetLicense(host)
 		if err != nil {
 			return err
 		}
+		if *licenseGetOutput == outputJSON {
+			// the v2 API answers JSON, older instances' license comes as YAML
+			if !json.Valid(license) {
+				if license, err = nova.ConvertYamlToJsonString(license); err != nil {
+					return fmt.Errorf("unexpected license format: %w", err)
+				}
+			}
+			return writeJSON(cmd, json.RawMessage(license))
+		}
 		fmt.Fprintln(cmd.OutOrStdout(), string(license))
 		return nil
 	},
 }
 
+// -o/--output of 'license get'
+var licenseGetOutput *outputFormat
+
 func init() {
+	licenseGetOutput = addOutputFlag(licenseGetCmd)
 	licenseCmd.AddCommand(licenseGetCmd)
 	licenseCmd.AddCommand(licenseActivateCmd)
 	rootCmd.AddCommand(licenseCmd)
