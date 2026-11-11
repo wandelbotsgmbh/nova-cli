@@ -114,7 +114,9 @@ File and variables per project type (detected by Cargo.toml, go.mod, package.jso
 
 The apps read the file on startup: restart the app after updating (nextjs dev reloads it by itself).
 The token is never printed. The output lists the instance settings in effect and notes the ones that
-differ from the targeted instance.`
+differ from the targeted instance. -o json names the file (absolute path), what happened to the token
+(refreshed, not_needed, unused) and each variable of the layout as set or kept, with differs for
+instance settings that differ from the targeted instance; it holds no values.`
 
 const updateEnvAppTxtExample = `# refresh the access token of the app project in the current directory
 nova app update-env

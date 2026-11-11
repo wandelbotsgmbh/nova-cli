@@ -207,9 +207,41 @@ var catalogInfoCmd = &cobra.Command{
 			return err
 		}
 
+		if *catalogInfoOutput == outputJSON {
+			deps := make([]namedItem, 0, len(m.Dependencies))
+			for _, d := range m.Dependencies {
+				deps = append(deps, namedItem{Name: d.Name})
+			}
+			return writeJSON(cmd, catalogInfo{
+				Name:          entryName,
+				Catalog:       catalogName,
+				Version:       m.Version,
+				Description:   m.Description,
+				Homepage:      m.Homepage,
+				Image:         m.App.ContainerImage.Image,
+				SupportsCloud: m.SupportsCloud,
+				Dependencies:  deps,
+			})
+		}
 		fmt.Fprintln(cmd.OutOrStdout(), m.Description)
 		return nil
 	},
+}
+
+// catalogInfo is the JSON result of 'catalog info -o json'.
+type catalogInfo struct {
+	Name string `json:"name"`
+	// the additional catalog the entry comes from; "" for the default catalog
+	Catalog     string `json:"catalog"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	Homepage    string `json:"homepage"`
+	// container image of the app
+	Image string `json:"image"`
+	// null when the manifest doesn't say
+	SupportsCloud *bool `json:"supports_cloud"`
+	// catalog entries installed along with this one
+	Dependencies []namedItem `json:"dependencies"`
 }
 
 var catalogAddCmd = &cobra.Command{
@@ -254,6 +286,14 @@ var catalogHostsCmd = &cobra.Command{
 			return err
 		}
 
+		if *catalogHostsOutput == outputJSON {
+			hosts := make([]catalogHost, 0, len(c.Entries))
+			for _, entry := range c.Entries {
+				hosts = append(hosts, catalogHost{Name: entry.Name, URL: entry.Url})
+			}
+			return writeJSON(cmd, hosts)
+		}
+
 		// keep the ASCII borders of tablewriter v0
 		table := tablewriter.NewTable(cmd.OutOrStdout(),
 			tablewriter.WithRenderer(renderer.NewBlueprint(tw.Rendition{Symbols: tw.NewSymbols(tw.StyleASCII)})))
@@ -267,6 +307,15 @@ var catalogHostsCmd = &cobra.Command{
 		return table.Render()
 	},
 }
+
+// catalogHost is an entry of 'catalog hosts -o json'.
+type catalogHost struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+// -o/--output of 'catalog info' and 'catalog hosts'
+var catalogInfoOutput, catalogHostsOutput *outputFormat
 
 func completeExternalCatalog(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	var comp []string
@@ -435,6 +484,8 @@ func mapCatalogSecretsToApiV2Secrets(catalogSecrets []catalog.CatalogEntryAppCon
 
 func init() {
 	catalogListOutput = addOutputFlag(catalogListCmd)
+	catalogInfoOutput = addOutputFlag(catalogInfoCmd)
+	catalogHostsOutput = addOutputFlag(catalogHostsCmd)
 	catalogCmd.AddCommand(catalogListCmd)
 	catalogCmd.AddCommand(catalogInstallCmd)
 	catalogCmd.AddCommand(catalogInfoCmd)

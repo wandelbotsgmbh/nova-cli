@@ -38,12 +38,16 @@ var downloadBackupCmd = &cobra.Command{
 		var wg sync.WaitGroup
 		wg.Add(1)
 		var lastError error
+		var backupID string
 
 		go func() {
 			for status := range progress {
 				if status.Error != nil {
 					lastError = status.Error
 				} else {
+					if status.BackupID != "" {
+						backupID = status.BackupID
+					}
 					bar.Describe(status.Message)
 					if status.TotalBytes > 0 && bar.GetMax() <= 0 {
 						bar.AddMax(status.TotalBytes)
@@ -64,9 +68,28 @@ var downloadBackupCmd = &cobra.Command{
 		// seems we need to close the progressbar otherwise (final) message might not be shown
 		bar.Close()
 
-		return lastError
+		if lastError != nil || *backupDownloadOutput != outputJSON {
+			return lastError
+		}
+		info, err := os.Stat(outname)
+		if err != nil {
+			return err
+		}
+		return writeJSON(cmd, downloadedBackup{ID: backupID, Path: absPath(outname), Bytes: info.Size()})
 	},
 }
+
+// downloadedBackup is the JSON result of 'backup download -o json'.
+type downloadedBackup struct {
+	// ID of the backup on the instance
+	ID   string `json:"id"`
+	Path string `json:"path"`
+	// size of the written file
+	Bytes int64 `json:"bytes"`
+}
+
+// -o/--output of 'backup download'
+var backupDownloadOutput *outputFormat
 
 var restoreBackupCmd = &cobra.Command{
 	Use:   "restore <filename>",
@@ -79,6 +102,7 @@ var restoreBackupCmd = &cobra.Command{
 }
 
 func init() {
+	backupDownloadOutput = addOutputFlag(downloadBackupCmd)
 	backupCmd.AddCommand(downloadBackupCmd)
 	backupCmd.AddCommand(restoreBackupCmd)
 	rootCmd.AddCommand(backupCmd)

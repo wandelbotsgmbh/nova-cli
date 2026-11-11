@@ -141,7 +141,7 @@ var viewCmd = &cobra.Command{
 	Long: `Shows the configuration of the Wandelbots NOVA CLI: global settings plus the settings
 of the targeted instance (selected, or set via --instance / NOVA_INSTANCE) and of the
 Nucleus server (selected, or set via --nucleus / NOVA_NUCLEUS).
-Tokens are redacted unless --show-secrets is given.`,
+Tokens are redacted unless --show-secrets is given, also with -o json.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		t, err := ensureTarget()
 		if err != nil {
@@ -165,6 +165,26 @@ Tokens are redacted unless --show-secrets is given.`,
 				values[key] = viper.GetString(key)
 			}
 		}
+		for key, value := range values {
+			if _, secret := secretKeys[key]; secret && value != "" && !showSecretsConfigView {
+				values[key] = instances.Redact
+			}
+		}
+
+		if *configViewOutput == outputJSON {
+			view := configView{
+				Env:      configSource{Name: string(portalEnvironment), Source: envSource},
+				Settings: values,
+			}
+			if t.Name != "" {
+				view.Instance = &configInstance{Name: t.Name, Kind: string(t.Kind), Source: string(targetSource)}
+			}
+			if nuc.Name != "" {
+				view.Nucleus = &configSource{Name: nuc.Name, Source: string(nucSource)}
+			}
+			return writeJSON(cmd, view)
+		}
+
 		if t.Name != "" {
 			values["instance"] = fmt.Sprintf("%s (%s, from %s)", t.Name, t.Kind, targetSource)
 		}
@@ -180,15 +200,40 @@ Tokens are redacted unless --show-secrets is given.`,
 		sort.Strings(sorted)
 		out := cmd.OutOrStdout()
 		for _, key := range sorted {
-			value := values[key]
-			if _, secret := secretKeys[key]; secret && value != "" && !showSecretsConfigView {
-				value = instances.Redact
-			}
-			fmt.Fprintf(out, "%s: %v\n", key, value)
+			fmt.Fprintf(out, "%s: %v\n", key, values[key])
 		}
 		return nil
 	},
 }
+
+// configView is the JSON result of 'config view -o json'.
+type configView struct {
+	// the targeted instance; null when none is selected
+	Instance *configInstance `json:"instance"`
+	// the portal environment of this invocation
+	Env configSource `json:"env"`
+	// the targeted Nucleus server; null when there is none
+	Nucleus *configSource `json:"nucleus"`
+	// the config keys of 'config set' with their values in effect; tokens are
+	// redacted unless --show-secrets
+	Settings map[string]string `json:"settings"`
+}
+
+// configSource is a name and where it was chosen: flag, env, config (or default
+// for the portal environment).
+type configSource struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+}
+
+type configInstance struct {
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Source string `json:"source"`
+}
+
+// -o/--output of 'config view'
+var configViewOutput *outputFormat
 
 func init() {
 	rootCmd.AddCommand(configCmd)
@@ -196,6 +241,7 @@ func init() {
 	configCmd.AddCommand(viewCmd)
 	configCmd.AddCommand(setRegistryAuthCmd)
 
+	configViewOutput = addOutputFlag(viewCmd)
 	viewCmd.Flags().BoolVar(&showSecretsConfigView, "show-secrets", false, "Print tokens instead of redacting them.")
 }
 

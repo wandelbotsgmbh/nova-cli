@@ -123,8 +123,11 @@ var createAppCmd = &cobra.Command{
 	},
 }
 
-// --reset for 'nova app update-env'
-var appEnvReset bool
+// --reset and -o/--output of 'nova app update-env'
+var (
+	appEnvReset        bool
+	appUpdateEnvOutput *outputFormat
+)
 
 var updateEnvAppCmd = &cobra.Command{
 	Use:     "update-env [path]",
@@ -137,7 +140,14 @@ var updateEnvAppCmd = &cobra.Command{
 		if len(args) > 0 {
 			dir = args[0]
 		}
-		return writeAppEnv(cmd, dir, appEnvReset)
+		if *appUpdateEnvOutput != outputJSON {
+			return writeAppEnv(cmd, dir, appEnvReset)
+		}
+		r, err := updateAppEnv(dir, appEnvReset)
+		if err != nil {
+			return err
+		}
+		return writeJSON(cmd, r)
 	},
 }
 
@@ -482,6 +492,7 @@ var appListOutput, appCreateOutput *outputFormat
 func init() {
 	appListOutput = addOutputFlag(listAppsCmd)
 	appCreateOutput = addOutputFlag(createAppCmd)
+	appUpdateEnvOutput = addOutputFlag(updateEnvAppCmd)
 	rootCmd.AddCommand(appCmd)
 
 	// subcommands
@@ -598,23 +609,89 @@ func createAppProject(appName string) (string, error) {
 // Writes the instance url, cell and a fresh access token into the gitignored env file of the
 // app project in dir, using the file and variable names of its project type.
 func writeAppEnv(cmd *cobra.Command, dir string, reset bool) error {
-	layout, err := appenv.DetectLayout(dir)
+	r, err := updateAppEnv(dir, reset)
 	if err != nil {
 		return err
 	}
 
+	switch r.Token {
+	case appEnvTokenUnused:
+		cmd.Printf("Updated %s\n", r.path)
+	case appEnvTokenRefreshed:
+		cmd.Printf("Updated %s: access token refreshed\n", r.path)
+	default:
+		cmd.Printf("Updated %s: no access token needed for %s\n", r.path, r.novaApi)
+	}
+
+	// show the instance settings in effect, they are kept unless --reset
+	differs := false
+	for _, kv := range r.instance {
+		note := ""
+		if r.current[kv.Key] != kv.Value {
+			note = fmt.Sprintf("  (configured: %s)", kv.Value)
+			differs = true
+		}
+		cmd.Printf("  %s=%s%s\n", kv.Key, r.current[kv.Key], note)
+	}
+	if differs {
+		cmd.Println("Some settings differ from the configured instance. Run 'nova app update-env --reset' to replace them.")
+	}
+	return nil
+}
+
+// what 'app update-env' did with the access token
+const (
+	appEnvTokenRefreshed = "refreshed"
+	// written empty: the instance takes no portal token (see oauth.SendsTokenTo)
+	appEnvTokenNotNeeded = "not_needed"
+	// the project type has no token variable
+	appEnvTokenUnused = "unused"
+)
+
+// appEnvResult is the JSON result of 'app update-env -o json'. It names the
+// variables, never their values: the file holds the access token.
+type appEnvResult struct {
+	Path string `json:"path"`
+	// refreshed, not_needed or unused
+	Token     string           `json:"token"`
+	Variables []appEnvVariable `json:"variables"`
+
+	// path as given (relative to the working directory), for the text output
+	path     string
+	novaApi  string
+	instance []appenv.KV
+	current  map[string]string
+}
+
+// appEnvVariable is a variable of the project type's layout in the env file.
+type appEnvVariable struct {
+	Name string `json:"name"`
+	// set: written by this run; kept: already in the file and left as it was
+	Status string `json:"status"`
+	// an instance setting whose value differs from the targeted instance
+	// ('app update-env --reset' replaces it)
+	Differs bool `json:"differs"`
+}
+
+// updateAppEnv writes the env file of the app project in dir (see writeAppEnv).
+func updateAppEnv(dir string, reset bool) (*appEnvResult, error) {
+	layout, err := appenv.DetectLayout(dir)
+	if err != nil {
+		return nil, err
+	}
+
 	data, err := os.ReadFile(filepath.Join(dir, ".nova"))
 	if err != nil {
-		return fmt.Errorf("%s is no nova app project folder: %w", dir, err)
+		return nil, fmt.Errorf("%s is no nova app project folder: %w", dir, err)
 	}
 	app := DotNovaApp{}
 	if err := yaml.Unmarshal(data, &app); err != nil {
-		return fmt.Errorf("invalid .nova file: %w", err)
+		return nil, fmt.Errorf("invalid .nova file: %w", err)
 	}
 
 	host := currentHost()
 	if host == "" {
-		return fmt.Errorf("%w: select one with 'nova instance select <name>' or pass --instance <name>", instances.ErrNoTarget)
+		return nil, fmt.Errorf("%w: select one with 'nova instance select <name>' or pass --instance <name>", instances.ErrNoTarget)
 	}
 	cell := currentCell()
 
@@ -623,11 +700,11 @@ func writeAppEnv(cmd *cobra.Command, dir string, reset bool) error {
 	accessToken := ""
 	if layout.TokenKey != "" && oauth.SendsTokenTo(host) {
 		if err := oauth.RefreshTokenOrLogin(host); err != nil {
-			return err
+			return nil, err
 		}
 		token, err := oauth.LoadToken()
 		if err != nil {
-			return fmt.Errorf("failed to load the access token: %w", err)
+			return nil, fmt.Errorf("failed to load the access token: %w", err)
 		}
 		accessToken = token.OAuth2Token.AccessToken
 	}
@@ -639,38 +716,43 @@ func writeAppEnv(cmd *cobra.Command, dir string, reset bool) error {
 		AppName:     app.Name,
 		AccessToken: accessToken,
 	}
-	path, err := appenv.Write(dir, layout, settings, reset)
+	report, err := appenv.WriteReport(dir, layout, settings, reset)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	current, err := appenv.Read(report.Path)
+	if err != nil {
+		return nil, err
 	}
 
+	r := &appEnvResult{
+		Path:      absPath(report.Path),
+		Token:     appEnvTokenNotNeeded,
+		Variables: []appEnvVariable{},
+		path:      report.Path,
+		novaApi:   novaApi,
+		instance:  layout.Instance(settings),
+		current:   current,
+	}
 	switch {
 	case layout.TokenKey == "":
-		cmd.Printf("Updated %s\n", path)
+		r.Token = appEnvTokenUnused
 	case accessToken != "":
-		cmd.Printf("Updated %s: access token refreshed\n", path)
-	default:
-		cmd.Printf("Updated %s: no access token needed for %s\n", path, novaApi)
+		r.Token = appEnvTokenRefreshed
 	}
-
-	// show the instance settings in effect, they are kept unless --reset
-	current, err := appenv.Read(path)
-	if err != nil {
-		return err
+	configured := map[string]string{}
+	for _, kv := range r.instance {
+		configured[kv.Key] = kv.Value
 	}
-	differs := false
-	for _, kv := range layout.Instance(settings) {
-		note := ""
-		if current[kv.Key] != kv.Value {
-			note = fmt.Sprintf("  (configured: %s)", kv.Value)
-			differs = true
+	add := func(names []string, status string) {
+		for _, n := range names {
+			want, ok := configured[n]
+			r.Variables = append(r.Variables, appEnvVariable{Name: n, Status: status, Differs: ok && current[n] != want})
 		}
-		cmd.Printf("  %s=%s%s\n", kv.Key, current[kv.Key], note)
 	}
-	if differs {
-		cmd.Println("Some settings differ from the configured instance. Run 'nova app update-env --reset' to replace them.")
-	}
-	return nil
+	add(report.Set, "set")
+	add(report.Kept, "kept")
+	return r, nil
 }
 
 func installApp(host, cell, completeImageName string, appContext DotNovaAppContext) error {

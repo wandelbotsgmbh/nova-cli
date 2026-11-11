@@ -560,8 +560,8 @@ func DownloadDiagnosisPackageV2Impl(host string) error {
 		return fmt.Errorf("failed to download diagnosis package: %s", resp.Status)
 	}
 
-	os.Remove("diagnosis.zip")
-	out, err := os.Create("diagnosis.zip")
+	os.Remove(DiagnosisPackageFile)
+	out, err := os.Create(DiagnosisPackageFile)
 	if err != nil {
 		return err
 	}
