@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/cli/browser"
+	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/configfile"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"golang.org/x/oauth2"
 )
@@ -79,12 +82,10 @@ func LoginWithRefreshToken(ctx context.Context, env AuthEnvironment, force bool)
 	config := NewAuth0Config(env)
 
 	if !force {
-		// Try to load existing token
-		if oldToken, err := LoadTokenFor(env); err == nil && oldToken.OAuth2Token.RefreshToken != "" {
-			tokenSource := config.TokenSource(ctx, &oldToken.OAuth2Token)
-			if newToken, err := tokenSource.Token(); err == nil {
-				return StoreToken(newToken, env)
-			}
+		// refresh the stored login, under the config lock like every refresh: two
+		// processes must not use the same (rotating) refresh token
+		if RefreshToken(ctx, env) == nil {
+			return nil
 		}
 	}
 
@@ -120,60 +121,68 @@ var refreshConfig = NewAuth0Config
 // RefreshToken refreshes the stored login of env without any interaction; it fails if
 // there is none or it can't be refreshed.
 //
-// It works on the config file as it is now, not only on this process's copy:
-// long-running processes (nova mcp, keep-alive) see logins other processes refreshed
-// meanwhile (refresh tokens can be rotated), and writing back changes only the login,
-// so it never reverts what others changed in the config (selected instance, new
-// instances). Of the login in the file and the one in memory the newer one counts: the
-// file may have been overwritten with an older copy.
+// The login in the config file counts, not only this process's copy: long-running
+// processes (nova mcp, keep-alive) see logins other processes refreshed meanwhile.
+// The refresh itself runs under the config lock (configfile.Update), so two processes
+// never refresh with the same refresh token (they can be rotated: the second one
+// would be left with a dead login); the one that waited finds the new login.
 func RefreshToken(ctx context.Context, env AuthEnvironment) error {
 	ctx = withHTTPClient(ctx)
-	login, err := LoadTokenFor(env)
+	v := viper.GetViper()
+	memory, err := LoadTokenFor(env)
 	if err != nil {
 		return err
 	}
-	disk := configOnDisk()
-	fromMemory := true
-	if disk != nil {
+	// the common cases without the lock
+	if disk := configOnDisk(); disk != nil {
 		onDisk, err := loadTokenFor(disk, env)
 		switch {
-		case err != nil || !loggedIn(onDisk):
-			// no login in the file although this process has one: the file is being
-			// written right now (viper truncates it first). Don't build on that copy.
-			if loggedIn(login) {
-				disk = nil
+		case err != nil:
+		case onDisk.OAuth2Token.Valid() && !onDisk.OAuth2Token.Expiry.Before(memory.OAuth2Token.Expiry):
+			if onDisk.OAuth2Token.AccessToken != memory.OAuth2Token.AccessToken {
+				return configfile.Reload(v) // refreshed elsewhere: use it
 			}
-		case !loggedIn(login) || !onDisk.OAuth2Token.Expiry.Before(login.OAuth2Token.Expiry):
-			login, fromMemory = onDisk, false
+			return nil
+		case !loggedIn(onDisk) && memory.OAuth2Token.Valid():
+			// no login in the file (an older CLI version is writing it right now, or
+			// it was removed), but this process has a valid one: nothing to do
+			return nil
 		}
 	}
-	if !loggedIn(login) {
-		return fmt.Errorf("not logged in to the %s environment", env)
-	}
-	token, refreshed := &login.OAuth2Token, false
-	if !token.Valid() {
-		token, err = refreshConfig(env).TokenSource(ctx, token).Token()
-		if err != nil {
-			return fmt.Errorf("login of the %s environment expired, run 'nova login --env %s': %w", env, env, err)
+	return configfile.Update(v, func(disk *viper.Viper) error {
+		// of the login in the file and the one of this process the newer one counts:
+		// an older CLI version may have written its older copy over the file
+		login := memory
+		onDisk, err := loadTokenFor(disk, env)
+		fromDisk := err == nil && loggedIn(onDisk) && (!loggedIn(login) || !onDisk.OAuth2Token.Expiry.Before(login.OAuth2Token.Expiry))
+		if fromDisk {
+			login = onDisk
 		}
-		refreshed = true
-	}
-	if disk == nil {
-		if refreshed {
-			return StoreToken(token, env)
+		if !loggedIn(login) {
+			return fmt.Errorf("not logged in to the %s environment", env)
 		}
-		return nil
-	}
-	if refreshed || !fromMemory {
-		adoptToken(WaboAuthToken{OAuth2Token: *token, AuthEnvironment: env}, env)
-	}
-	if refreshed || fromMemory {
-		// the file lacks the newest login: only the login is written, see above
+		token := &login.OAuth2Token
+		if token.Valid() {
+			if fromDisk {
+				return configfile.ErrUnchanged // refreshed while waiting for the lock
+			}
+		} else {
+			// other nova processes wait for the lock meanwhile: never hold it for
+			// longer than a stalled request is worth
+			refreshCtx, cancel := context.WithTimeout(ctx, refreshTimeout)
+			defer cancel()
+			if token, err = refreshConfig(env).TokenSource(refreshCtx, token).Token(); err != nil {
+				return fmt.Errorf("login of the %s environment expired, run 'nova login --env %s': %w", env, env, err)
+			}
+		}
 		setToken(disk, token, env)
-		return disk.WriteConfig()
-	}
-	return nil
+		return nil
+	})
 }
+
+// refreshTimeout bounds the token request made under the config lock; it is well
+// below the time other processes wait for the lock.
+const refreshTimeout = 15 * time.Second
 
 func LoginWithProvidedRefreshToken(ctx context.Context, env AuthEnvironment, refreshToken string) error {
 	ctx = withHTTPClient(ctx)

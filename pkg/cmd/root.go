@@ -10,6 +10,7 @@ import (
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/configfile"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/debug"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
@@ -154,7 +155,7 @@ func initConfig() {
 
 	createConfigFileIfMissing(configFile, configPath)
 
-	err = viper.ReadInConfig()
+	err = configfile.Read(viper.GetViper())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Can't read config:", err)
 		os.Exit(1)
@@ -178,18 +179,19 @@ func createConfigFileIfMissing(configFile string, configPath string) {
 			os.Exit(1)
 		}
 		f, err := os.OpenFile(configFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, configFileMode)
-		if err != nil {
+		switch {
+		case os.IsExist(err):
+			// another nova process created it in this moment: leave it alone
+		case err != nil:
 			fmt.Fprintln(os.Stderr, "Can't create config:", err)
 			os.Exit(1)
-		}
-		if err := f.Close(); err != nil {
-			fmt.Fprintln(os.Stderr, "Can't create config:", err)
-			os.Exit(1)
-		}
-		err = viper.WriteConfig()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Can't write config:", err)
-			os.Exit(1)
+		default:
+			if err := f.Close(); err != nil {
+				fmt.Fprintln(os.Stderr, "Can't create config:", err)
+				os.Exit(1)
+			}
+			// The file stays empty: every version sets its defaults itself, and
+			// writing them here could overwrite what another process just stored.
 		}
 	}
 	restrictPermissions(configPath, configDirMode)

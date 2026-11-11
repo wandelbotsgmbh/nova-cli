@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/configfile"
 )
 
 // Kind says where an instance runs. It never says whether its robots are real.
@@ -136,12 +138,25 @@ type Registry struct {
 	// Migrated is true when the entries were derived from a legacy single-host config
 	// and haven't been saved yet.
 	Migrated bool
+
+	// what Load read, to tell this process's changes from those of others in Save
+	base        []Instance
+	baseCurrent string
 }
 
 // Load reads the registry from v. A config without an instances list but with a
 // top-level host is migrated in memory into an entry named DefaultName; it is
 // persisted on the next Save.
 func Load(v *viper.Viper) (*Registry, error) {
+	r, err := load(v)
+	if err != nil {
+		return nil, err
+	}
+	r.base, r.baseCurrent = slices.Clone(r.Instances), r.Current
+	return r, nil
+}
+
+func load(v *viper.Viper) (*Registry, error) {
 	r := &Registry{Current: v.GetString(keyCurrent)}
 	if v.IsSet(keyInstances) {
 		if err := v.UnmarshalKey(keyInstances, &r.Instances); err != nil {
@@ -179,27 +194,50 @@ func Load(v *viper.Viper) (*Registry, error) {
 	return r, nil
 }
 
-// Save writes the registry into v and persists v's config file. The legacy
-// single-instance keys are set from the selected entry, so older CLI versions keep
-// working against the same file; nothing else is removed.
+// Save persists the registry in v's config file. Other processes may have changed the
+// file since Load: only what this registry added, changed or removed is applied to the
+// file's current list, and the selection is only written if it was changed here
+// (configfile.Merge3). The registry holds the merged result afterwards.
+//
+// The legacy single-instance keys are set from the selected entry, so older CLI
+// versions keep working against the same file; nothing else is removed.
 func (r *Registry) Save(v *viper.Viper) error {
-	list := make([]map[string]any, 0, len(r.Instances))
-	for _, i := range r.Instances {
-		list = append(list, toMap(i))
-	}
-	v.Set(keyInstances, list)
-	v.Set(keyCurrent, r.Current)
+	err := configfile.Update(v, func(disk *viper.Viper) error {
+		onDisk, err := load(disk)
+		if err != nil {
+			return err
+		}
+		r.Instances = configfile.Merge3(r.base, r.Instances, onDisk.Instances,
+			func(i Instance) string { return i.Name }, func(a, b Instance) bool { return a == b })
+		if r.Current == r.baseCurrent {
+			r.Current = onDisk.Current
+		}
+		if _, ok := r.Get(r.Current); !ok {
+			r.Current = "" // selected elsewhere, removed here (or the other way round)
+		}
 
-	if cur, ok := r.Get(r.Current); ok {
-		v.Set(legacyHost, cur.Host)
-		v.Set(legacyCell, cur.CellName)
-		v.Set(legacyID, cur.ID)
-	} else {
-		v.Set(legacyHost, "")
-		v.Set(legacyID, "")
+		list := make([]map[string]any, 0, len(r.Instances))
+		for _, i := range r.Instances {
+			list = append(list, toMap(i))
+		}
+		disk.Set(keyInstances, list)
+		disk.Set(keyCurrent, r.Current)
+		if cur, ok := r.Get(r.Current); ok {
+			disk.Set(legacyHost, cur.Host)
+			disk.Set(legacyCell, cur.Cell()) // older versions have no default for an empty cell
+			disk.Set(legacyID, cur.ID)
+		} else {
+			disk.Set(legacyHost, "")
+			disk.Set(legacyID, "")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	r.Migrated = false
-	return v.WriteConfig()
+	r.base, r.baseCurrent = slices.Clone(r.Instances), r.Current
+	return nil
 }
 
 func toMap(i Instance) map[string]any {

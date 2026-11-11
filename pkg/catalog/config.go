@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/spf13/viper"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/configfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,9 +36,11 @@ type Config struct {
 }
 
 // Reads the config for the catalog
-func ReadConfig() (*Config, error) {
+func ReadConfig() (*Config, error) { return readConfig(viper.GetViper()) }
+
+func readConfig(v *viper.Viper) (*Config, error) {
 	config := &Config{}
-	mapped := viper.GetStringMap(pathInYaml)
+	mapped := v.GetStringMap(pathInYaml)
 	plain, _ := yaml.Marshal(mapped)
 	err := yaml.Unmarshal(plain, config)
 	return config, err
@@ -70,25 +73,39 @@ func AddCatalog(name string, host string) error {
 		host = host + "/"
 	}
 
-	config.Entries = append(config.Entries, Entry{Name: name, Url: host})
-	viper.Set(pathInYaml, config)
-	return viper.WriteConfig()
+	// applied to the file's current list: other processes may have changed it
+	return configfile.Update(viper.GetViper(), func(disk *viper.Viper) error {
+		config, err := readConfig(disk)
+		if err != nil {
+			return err
+		}
+		for _, entry := range config.Entries {
+			if entry.Name == name {
+				return ErrNameAlreadyExists
+			}
+		}
+		config.Entries = append(config.Entries, Entry{Name: name, Url: host})
+		disk.Set(pathInYaml, config)
+		return nil
+	})
 }
 
 // Removes a catalog configuration
 func RemoveCatalog(name string) error {
-	config, err := ReadConfig()
-	if err != nil {
-		return err
-	}
-	for i, entry := range config.Entries {
-		if entry.Name == name {
-			config.Entries = slices.Delete(config.Entries, i, i+1)
-			break
+	return configfile.Update(viper.GetViper(), func(disk *viper.Viper) error {
+		config, err := readConfig(disk)
+		if err != nil {
+			return err
 		}
-	}
-	viper.Set(pathInYaml, config)
-	return viper.WriteConfig()
+		for i, entry := range config.Entries {
+			if entry.Name == name {
+				config.Entries = slices.Delete(config.Entries, i, i+1)
+				break
+			}
+		}
+		disk.Set(pathInYaml, config)
+		return nil
+	})
 }
 
 // Only Simple names are allowed for the catalog
