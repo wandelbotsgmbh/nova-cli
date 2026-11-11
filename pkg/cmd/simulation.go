@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -108,6 +109,8 @@ curl -H "Authorization: Bearer $(nova simulation token)" https://broker.omni.dev
 	},
 }
 
+var simulationAppsOutput *outputFormat
+
 var simulationAppsCmd = &cobra.Command{
 	Use:   "apps",
 	Short: "List the applications, versions and profiles sessions can run",
@@ -129,6 +132,9 @@ var simulationAppsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if *simulationAppsOutput == outputJSON {
+			return writeJSON(cmd, simulationList(apps))
+		}
 
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "APP\tVERSION\tPROFILE\tDESCRIPTION")
@@ -141,6 +147,16 @@ var simulationAppsCmd = &cobra.Command{
 		}
 		return w.Flush()
 	},
+}
+
+var simulationCapacityOutput *outputFormat
+
+// capacityResult is 'simulation capacity -o json': the broker's CapacityResponse,
+// with gpu and free always present (null: no GPU / no quota counted, i.e. unlimited).
+type capacityResult struct {
+	Profile string  `json:"profile"`
+	Gpu     *string `json:"gpu"`
+	Free    *uint64 `json:"free"`
 }
 
 var simulationCapacityCmd = &cobra.Command{
@@ -159,6 +175,9 @@ nova simulation capacity isaac-48gb`,
 			return err
 		}
 		capacity := resp.JSON200
+		if *simulationCapacityOutput == outputJSON {
+			return writeJSON(cmd, capacityResult{Profile: capacity.Profile, Gpu: capacity.Gpu, Free: capacity.Free})
+		}
 		free, gpu := "unlimited", "-"
 		if capacity.Free != nil {
 			free = fmt.Sprint(*capacity.Free)
@@ -185,6 +204,8 @@ and a suspended session is removed after the broker's retention window.
 Sessions are addressed by id or, if unique, by name.`,
 }
 
+var simulationSessionListOutput *outputFormat
+
 var simulationSessionListCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
@@ -199,6 +220,9 @@ var simulationSessionListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if *simulationSessionListOutput == outputJSON {
+			return writeJSON(cmd, sessionsJSON(sessions))
+		}
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tNAME\tSTATUS\tCONFIG\tEXPIRES")
 		for _, s := range sessions {
@@ -207,6 +231,8 @@ var simulationSessionListCmd = &cobra.Command{
 		return w.Flush()
 	},
 }
+
+var simulationSessionGetOutput *outputFormat
 
 var simulationSessionGetCmd = &cobra.Command{
 	Use: "get <session>",
@@ -225,6 +251,9 @@ nova simulation session get 66416162-239c-4aa0-b212-02b1323102cf`,
 		if err := checkJSON(resp, err); err != nil {
 			return err
 		}
+		if *simulationSessionGetOutput == outputJSON {
+			return writeJSON(cmd, sessionResponseJSON(resp.JSON200))
+		}
 		return printYAML(cmd, resp.JSON200)
 	},
 }
@@ -235,6 +264,8 @@ var simulationSessionCreateFlags struct {
 	wait                                 time.Duration
 	open                                 bool
 }
+
+var simulationSessionCreateOutput *outputFormat
 
 var simulationSessionCreateCmd = &cobra.Command{
 	Use:   "create <name>",
@@ -280,6 +311,18 @@ nova simulation session create my-session --app nova-x-isaac --profile isaac-24g
 				return err
 			}
 		}
+		if *simulationSessionCreateOutput == outputJSON {
+			if err := writeJSON(cmd, sessionResponseJSON(session)); err != nil {
+				return err
+			}
+			if f.open {
+				// stdout carries only the JSON
+				url := c.StreamURL(session.Id.String())
+				cmd.PrintErrln("Opening", url)
+				return browser.OpenURL(url)
+			}
+			return nil
+		}
 		if err := printYAML(cmd, session); err != nil {
 			return err
 		}
@@ -291,6 +334,8 @@ nova simulation session create my-session --app nova-x-isaac --profile isaac-24g
 }
 
 var simulationSessionExtendMinutes uint32
+
+var simulationSessionExtendOutput *outputFormat
 
 var simulationSessionExtendCmd = &cobra.Command{
 	Use: "extend <session>",
@@ -305,9 +350,11 @@ nova simulation session extend my-session --minutes 120`,
 			return err
 		}
 		resp, err := c.ExtendSessionWithResponse(cmd.Context(), id, simulation.ExtendRequest{Minutes: simulationSessionExtendMinutes})
-		return printSessionResult(cmd, resp, err)
+		return printSessionResult(cmd, simulationSessionExtendOutput, resp, err)
 	},
 }
+
+var simulationSessionRenameOutput *outputFormat
 
 var simulationSessionRenameCmd = &cobra.Command{
 	Use:               "rename <session> <new-name>",
@@ -321,13 +368,15 @@ var simulationSessionRenameCmd = &cobra.Command{
 			return err
 		}
 		resp, err := c.RenameSessionWithResponse(cmd.Context(), id, simulation.RenameRequest{Name: args[1]})
-		return printSessionResult(cmd, resp, err)
+		return printSessionResult(cmd, simulationSessionRenameOutput, resp, err)
 	},
 }
 
-// sessionActionCmd builds the commands that only take a session id.
-func sessionActionCmd(use, short string, call func(context.Context, *simulation.Broker, uuid.UUID) (simulation.Response, error)) *cobra.Command {
-	return &cobra.Command{
+// sessionActionCmd builds the commands that only take a session id. With
+// withOutput, the command gets -o json for the session the broker returns.
+func sessionActionCmd(use, short string, withOutput bool, call func(context.Context, *simulation.Broker, uuid.UUID) (simulation.Response, error)) *cobra.Command {
+	var out *outputFormat
+	c := &cobra.Command{
 		Use:               use + " <session>",
 		Example:           `nova simulation session ` + use + ` my-session`,
 		Short:             short,
@@ -339,28 +388,32 @@ func sessionActionCmd(use, short string, call func(context.Context, *simulation.
 				return err
 			}
 			resp, err := call(cmd.Context(), c, id)
-			return printSessionResult(cmd, resp, err)
+			return printSessionResult(cmd, out, resp, err)
 		},
 	}
+	if withOutput {
+		out = addOutputFlag(c)
+	}
+	return c
 }
 
 var (
-	simulationSessionDeleteCmd = sessionActionCmd("delete", "Delete a session for good, freeing its GPU",
+	simulationSessionDeleteCmd = sessionActionCmd("delete", "Delete a session for good, freeing its GPU", false,
 		func(ctx context.Context, c *simulation.Broker, id uuid.UUID) (simulation.Response, error) {
 			r, err := c.DeleteSessionWithResponse(ctx, id)
 			return r, err
 		})
-	simulationSessionSuspendCmd = sessionActionCmd("suspend", "Stop a session's pod to free the GPU, keeping the session",
+	simulationSessionSuspendCmd = sessionActionCmd("suspend", "Stop a session's pod to free the GPU, keeping the session", true,
 		func(ctx context.Context, c *simulation.Broker, id uuid.UUID) (simulation.Response, error) {
 			r, err := c.SuspendSessionWithResponse(ctx, id)
 			return r, err
 		})
-	simulationSessionResumeCmd = sessionActionCmd("resume", "Start a suspended session again",
+	simulationSessionResumeCmd = sessionActionCmd("resume", "Start a suspended session again", true,
 		func(ctx context.Context, c *simulation.Broker, id uuid.UUID) (simulation.Response, error) {
 			r, err := c.ResumeSessionWithResponse(ctx, id)
 			return r, err
 		})
-	simulationSessionRestartCmd = sessionActionCmd("restart", "Restart a session's pod",
+	simulationSessionRestartCmd = sessionActionCmd("restart", "Restart a session's pod", false,
 		func(ctx context.Context, c *simulation.Broker, id uuid.UUID) (simulation.Response, error) {
 			r, err := c.RestartSessionWithResponse(ctx, id)
 			return r, err
@@ -491,6 +544,8 @@ nova simulation config set nova-x-isaac/default -f isaac.json`,
 
 var simulationConfigListApp string
 
+var simulationConfigListOutput *outputFormat
+
 var simulationConfigListCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
@@ -518,6 +573,9 @@ var simulationConfigListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if *simulationConfigListOutput == outputJSON {
+			return writeJSON(cmd, simulationList(configs))
+		}
 		for _, cfg := range configs {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s/%s\n", cfg.App, cfg.Name)
 		}
@@ -529,7 +587,12 @@ var simulationConfigGetCmd = &cobra.Command{
 	Use:     "get <app>/<name>",
 	Example: `nova simulation config get nova-x-isaac/default`,
 	Short:   "Print a saved config as JSON",
-	Args:    cobra.ExactArgs(1),
+	Long: `Print a saved config as JSON, as the broker stores it.
+
+The output is always the config document itself, so it can be edited and passed
+to "nova simulation config set"; -o json is accepted for scripts that pass it to
+every command and prints the same.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		app, name, err := splitConfigRef(args[0])
 		if err != nil {
@@ -649,6 +712,16 @@ func init() {
 	simulationAPICmd.Flags().StringVarP(&simulationAPIFlags.output, "output", "o", "", "File to write the spec to (default: stdout)")
 	simulationAPICmd.MarkFlagsMutuallyExclusive("open", "spec")
 
+	simulationAppsOutput = addOutputFlag(simulationAppsCmd)
+	simulationCapacityOutput = addOutputFlag(simulationCapacityCmd)
+	simulationSessionListOutput = addOutputFlag(simulationSessionListCmd)
+	simulationSessionGetOutput = addOutputFlag(simulationSessionGetCmd)
+	simulationSessionCreateOutput = addOutputFlag(simulationSessionCreateCmd)
+	simulationSessionExtendOutput = addOutputFlag(simulationSessionExtendCmd)
+	simulationSessionRenameOutput = addOutputFlag(simulationSessionRenameCmd)
+	simulationConfigListOutput = addOutputFlag(simulationConfigListCmd)
+	addOutputFlag(simulationConfigGetCmd)
+
 	simulationConfigListCmd.Flags().StringVar(&simulationConfigListApp, "app", "", "Only configs of this application")
 	simulationConfigSetCmd.Flags().StringVarP(&simulationConfigSetFile, "file", "f", "", `JSON file with the config, "-" for stdin (required)`)
 	_ = simulationConfigSetCmd.MarkFlagRequired("file")
@@ -727,12 +800,20 @@ func brokerAndSession(ctx context.Context, ref string) (*simulation.Broker, uuid
 }
 
 // printSessionResult checks a session action and prints the session if the
-// broker returned it.
-func printSessionResult(cmd *cobra.Command, resp simulation.Response, err error) error {
+// broker returned it. With -o json (out may be nil: no flag) it prints the
+// session from the broker's Lease, which the actions return.
+func printSessionResult(cmd *cobra.Command, out *outputFormat, resp simulation.Response, err error) error {
 	if err := simulation.Check(resp, err); err != nil {
 		return err
 	}
 	body := resp.GetBody()
+	if out != nil && *out == outputJSON {
+		var lease simulation.Lease
+		if err := json.Unmarshal(body, &lease); err != nil || lease.Id == uuid.Nil {
+			return fmt.Errorf("broker: unexpected response: %s", string(body))
+		}
+		return writeJSON(cmd, leaseJSON(lease))
+	}
 	var session simulation.SessionResponse
 	if len(body) > 0 && json.Unmarshal(body, &session) == nil && session.Id != uuid.Nil {
 		return printYAML(cmd, &session)
@@ -854,4 +935,89 @@ func completeSimulationSession(cmd *cobra.Command, args []string, toComplete str
 		completions = append(completions, s.Id.String()+"\t"+s.Name+" ("+s.Status+")")
 	}
 	return completions, cobra.ShellCompDirectiveNoFileComp
+}
+
+// simulationList makes an empty list print as [] instead of null.
+func simulationList[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
+
+// sessionJSON is a session in -o json (ADR-0010). The CLI defines the shape, in
+// snake_case like the other commands, instead of passing the broker's camelCase
+// on. Lease answers (list, extend, rename, suspend, resume) have no condition,
+// ready and routes. Times are UTC.
+type sessionJSON struct {
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Status      string       `json:"status"`
+	Condition   string       `json:"condition,omitempty"`
+	Ready       *bool        `json:"ready,omitempty"`
+	ConfigName  string       `json:"config_name"`
+	UserID      string       `json:"user_id"`
+	CreatedAt   time.Time    `json:"created_at"`
+	StartedAt   time.Time    `json:"started_at"`
+	ExpiresAt   time.Time    `json:"expires_at"`
+	SuspendedAt *time.Time   `json:"suspended_at,omitempty"`
+	Routes      *[]routeJSON `json:"routes,omitempty"`
+}
+
+// routeJSON is one WebRTC route; the broker's host → routes map becomes a list.
+type routeJSON struct {
+	Host            string `json:"host"`
+	Description     string `json:"description"`
+	Protocol        string `json:"protocol"`
+	SourcePort      uint16 `json:"source_port"`
+	DestinationPort uint16 `json:"destination_port"`
+}
+
+func leaseJSON(l simulation.Lease) sessionJSON {
+	j := sessionJSON{
+		ID:         l.Id.String(),
+		Name:       l.Name,
+		Status:     l.Status,
+		ConfigName: l.ConfigName,
+		UserID:     l.UserId,
+		CreatedAt:  l.CreatedAt.UTC(),
+		StartedAt:  l.StartedAt.UTC(),
+		ExpiresAt:  l.ExpiresAt.UTC(),
+	}
+	if l.SuspendedAt != nil {
+		t := l.SuspendedAt.UTC()
+		j.SuspendedAt = &t
+	}
+	return j
+}
+
+func sessionsJSON(leases []simulation.Lease) []sessionJSON {
+	out := make([]sessionJSON, 0, len(leases))
+	for _, l := range leases {
+		out = append(out, leaseJSON(l))
+	}
+	return out
+}
+
+func sessionResponseJSON(s *simulation.SessionResponse) sessionJSON {
+	j := leaseJSON(simulation.Lease{
+		ConfigName: s.ConfigName, CreatedAt: s.CreatedAt, ExpiresAt: s.ExpiresAt, Id: s.Id, Name: s.Name,
+		StartedAt: s.StartedAt, Status: s.Status, SuspendedAt: s.SuspendedAt, UserId: s.UserId,
+	})
+	ready := s.Ready
+	j.Condition, j.Ready = s.Condition, &ready
+	hosts := make([]string, 0, len(s.Routes))
+	for h := range s.Routes {
+		hosts = append(hosts, h)
+	}
+	sort.Strings(hosts)
+	routes := []routeJSON{}
+	for _, h := range hosts {
+		for _, r := range s.Routes[h].Routes {
+			routes = append(routes, routeJSON{Host: h, Description: r.Description, Protocol: r.Protocol,
+				SourcePort: r.SourcePort, DestinationPort: r.DestinationPort})
+		}
+	}
+	j.Routes = &routes
+	return j
 }
