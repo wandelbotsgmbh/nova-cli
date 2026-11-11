@@ -127,6 +127,18 @@ type lifetimeJSON struct {
 	Extended bool `json:"extended"`
 }
 
+// newLifetimeJSON is the result of 'instance extend -o json'; the expiry is in UTC
+// like the other JSON times, whatever the local time zone.
+func newLifetimeJSON(inst instances.Instance, expires time.Time, extended bool) lifetimeJSON {
+	return lifetimeJSON{
+		Name:      inst.Name,
+		Kind:      string(inst.Kind),
+		ID:        lifetimeID(inst),
+		ExpiresAt: expires.UTC().Format(time.RFC3339),
+		Extended:  extended,
+	}
+}
+
 // k8srunCreatedJSON is the result of 'k8srun create'.
 type k8srunCreatedJSON struct {
 	instanceJSON

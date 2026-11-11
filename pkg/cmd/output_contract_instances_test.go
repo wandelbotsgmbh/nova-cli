@@ -231,10 +231,7 @@ func TestK8sRunJSON(t *testing.T) {
 	}
 
 	// extend: the cluster service doesn't report the expiry, nova sets 12 h
-	// in UTC, also when the local time zone isn't
-	local := time.Local
-	time.Local = time.FixedZone("UTC+2", 2*60*60)
-	t.Cleanup(func() { time.Local = local })
+	// (UTC in any local time zone: TestLifetimeJSONIsUTC)
 	var ext lifetimeJSON
 	before := time.Now()
 	if _, stderr, err := runJSON(t, &ext, "instance", "extend", "sim-a", "-o", "json"); err != nil {
@@ -325,5 +322,17 @@ func TestRegisterCloudInstanceEntry(t *testing.T) {
 	}
 	if inst.Name != "abc-2" || inst.ID != "abc" || inst.Kind != instances.KindCloud {
 		t.Errorf("entry = %+v, want the free name abc-2", inst)
+	}
+}
+
+// instance extend -o json reports the expiry in UTC, also when it comes in another
+// zone. (Not by changing time.Local in the end-to-end test: the fake servers read
+// it concurrently, which -race reports.)
+func TestLifetimeJSONIsUTC(t *testing.T) {
+	inst := instances.Instance{Name: "sim-a", Kind: instances.KindK8sRun, ID: "id-1"}
+	expires := time.Date(2026, 11, 12, 2, 0, 0, 0, time.FixedZone("UTC+2", 2*60*60))
+	got := newLifetimeJSON(inst, expires, true)
+	if got.ExpiresAt != "2026-11-12T00:00:00Z" {
+		t.Errorf("expires_at = %q, want 2026-11-12T00:00:00Z", got.ExpiresAt)
 	}
 }

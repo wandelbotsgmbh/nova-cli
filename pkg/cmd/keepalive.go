@@ -64,13 +64,7 @@ $ nova instance extend my-instance`,
 			fmt.Fprintln(cmd.ErrOrStderr(), "warning: the request was accepted but didn't move the expiry; the instance may have reached its maximum lifetime")
 		}
 		if *extendOutput == outputJSON {
-			return writeJSON(cmd, lifetimeJSON{
-				Name:      inst.Name,
-				Kind:      string(inst.Kind),
-				ID:        lifetimeID(inst),
-				ExpiresAt: after.expires.UTC().Format(time.RFC3339),
-				Extended:  extended,
-			})
+			return writeJSON(cmd, newLifetimeJSON(inst, after.expires, extended))
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), after.expires.Format(time.RFC3339))
 		return nil
