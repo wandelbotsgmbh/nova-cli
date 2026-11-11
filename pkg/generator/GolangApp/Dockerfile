@@ -1,5 +1,5 @@
 # Builds natively on the build machine and cross-compiles for the target platform.
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.3 AS builder
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.4 AS builder
 
 ARG TARGETOS TARGETARCH
 
