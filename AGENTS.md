@@ -41,7 +41,6 @@
 * Answers stream through as they arrive (`novaapi.PeekStart` only waits for the first bytes; never `Peek(n)` on a body). Long polls work (`--timeout 0`). WebSocket streams (`x-serverstream`/`x-bidistream`) are refused: exit 3, typed JSON error on stderr when it is no terminal (`typedError`/`printTypedError` in `pkg/cmd`). Streams get dedicated commands later (ADR-0013 notes).
 * E2E: `testdata/api/e2e.sh` (CI job `e2e`, after the app install, with `NOVA_API_E2E_APP=your-nova-app`): v2 reads, collider round trip, errors, stream refusal, and the installed app's own API (`/{cell}/<app>/programs` from NOVAx). Runs locally against any instance with a cell, a controller and an app: `PATH=$PWD/bin:$PATH testdata/api/e2e.sh`.
 * Ingress quirks (401 page with HTTP 200, JSON error page, login redirect) live in `pkg/ingress`; use it for any new instance client.
-* `nova mcp` still fetches the v1 spec (`nova.SpecURL`), which 26.x instances don't serve.
 
 ## App install: `--copy-image` (registry-less)
 
@@ -95,6 +94,16 @@
 
 * Go module: `github.com/wandelbotsgmbh/nova-cli` (public repo)
 * Merges to `main` publish `x.y.z-rc.N` prereleases (semantic-release); stable versions (Homebrew, winget, docker `latest`, docs) come from fast-forwarding the `release` branch via the Promote workflow. Use Conventional Commit messages / PR titles (`fix:`, `feat:`, `docs:`, `ci:`, …) — they decide the version bump. See `RELEASING.md`.
+
+## MCP server (`nova mcp`, ADR-0019)
+
+* Serves the toolsets of the instance MCP service's roadmap (service-manager MR !2924, `services/mcp/docs/roadmap.md` on code.wabo.run) locally over stdio until that service ships. The 8 tools in `pkg/mcp/tools.go` are ported unchanged from the MR; the toolsets in `pkg/mcp/toolsets/<name>` use the roadmap's names and rules so they can be upstreamed. `pkg/mcp/testdata/tools_snapshot.json` pins the surface (`UPDATE_SNAPSHOTS=1 go test ./pkg/mcp/` regenerates; review the diff).
+* Shared code: `pkg/mcp/tool` (toolset names, default vs opt-in, annotations, `OK`/`Fail` result lines, `Page`, `Approval` for elicitation), `pkg/mcp/novaapi` (`Client`: plain HTTP to the v2 API with error mapping, ingress 200 pages, `RequireVirtual`/`RequireAllVirtual` gate). Response structs declare only the fields handed on, never connection details, credentials, env values or tokens. The published Go clients are older than the instances, so toolsets don't use them.
+* Motion, I/O writes and mode changes only on virtual controllers (physical: `APPROVAL_REQUIRED`). `delete_cell`, `restore_backup`, `update_nova_version` go through `tool.Approval`. Server instructions in `pkg/mcp/instructions.go` (≤ 4096 chars, tested).
+* Auth per call via `mcpSession.auth` (`pkg/cmd/mcp.go`): non-interactive `oauth.RefreshToken`, never a device login.
+* Instance switching: `list_instances`/`use_instance` (`pkg/mcp/toolsets/instances`) exist only when the target isn't pinned by `--instance`/`NOVA_INSTANCE`. `mcpSession.Use` re-reads the registry, applies the instance's portal environment and calls `novaapi.Client.SwitchTarget`; nothing is written to the config. Every tool call is pinned to the instance it started on (`Client.Pin`; `Client.Detach` for work that outlives the call), so read the target with `Client.BaseURL(ctx)` and key per-instance state in toolsets (caches, registries) by it.
+* Live tests: `TestLive*` in each toolset, skipped unless `NOVA_MCP_LIVE_HOST` (+ `NOVA_MCP_LIVE_TOKEN=$(nova login token)`, `NOVA_MCP_LIVE_CELL`, `NOVA_MCP_LIVE_CONTROLLER` for a virtual controller, default `mcp-ur5e`) is set (`pkg/mcp/internal/livetest`). They only write to `mcp-test-*` resources they delete again; motion tests move the virtual controller.
+* Smoke test: pipe `initialize`, `tools/list` and `tools/call` JSON-RPC lines into `bin/nova mcp`; stdout must carry only protocol messages.
 
 ## Agentic tooling
 

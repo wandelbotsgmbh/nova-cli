@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-31
 - **Status:** accepted
-- **Implementation:** not started
+- **Implementation:** in progress (`nova mcp` uses the official Go SDK since ADR-0019)
 
 ## Context
 

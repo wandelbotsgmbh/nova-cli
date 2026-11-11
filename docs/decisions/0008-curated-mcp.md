@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-31
 - **Status:** accepted
-- **Implementation:** not started (the generator is fixed in the meantime, see "Current state")
+- **Implementation:** in progress (`nova mcp` serves the instance service's first tools locally, ADR-0019)
 
 ## Context
 
