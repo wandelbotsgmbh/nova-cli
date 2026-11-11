@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 )
@@ -26,14 +24,15 @@ var controllerListCmd = &cobra.Command{
 			return err
 		}
 
-		for _, controller := range controllers {
-			fmt.Fprintln(cmd.OutOrStdout(), controller)
-		}
-		return nil
+		return writeNames(cmd, controllerListOutput, controllers)
 	},
 }
 
+// -o/--output of 'controller list'; assigned in init to avoid an initialization cycle
+var controllerListOutput *outputFormat
+
 func init() {
+	controllerListOutput = addOutputFlag(controllerListCmd)
 	controllerCmd.AddCommand(controllerListCmd)
 	rootCmd.AddCommand(controllerCmd)
 }

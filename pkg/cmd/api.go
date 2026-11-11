@@ -95,7 +95,7 @@ tags and description. Prints a JSON array, best matches first: operationId, meth
 		if err != nil {
 			return err
 		}
-		return writeAPIJSON(cmd, spec.Search(strings.Join(args, " "), apiFlags.limit))
+		return writeJSON(cmd, spec.Search(strings.Join(args, " "), apiFlags.limit))
 	},
 }
 
@@ -117,7 +117,7 @@ the answers.`,
 		if !ok {
 			return fmt.Errorf("no operation %q in the NOVA API %s of the instance: find one with 'nova api search <words>'", args[0], spec.APIVersion())
 		}
-		return writeAPIJSON(cmd, spec.Schema(*op))
+		return writeJSON(cmd, spec.Schema(*op))
 	},
 }
 
@@ -242,13 +242,6 @@ func specTimeout() time.Duration {
 		return apiFlags.timeout
 	}
 	return time.Minute
-}
-
-func writeAPIJSON(cmd *cobra.Command, v any) error {
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false)
-	return enc.Encode(v)
 }
 
 var placeholder = regexp.MustCompile(`\{[^}/]*\}`)
@@ -389,7 +382,7 @@ func runAPI(cmd *cobra.Command, args []string) error {
 	}
 
 	if apiFlags.dryRun {
-		return writeAPIJSON(cmd, dryRunRequest(req, op, body))
+		return writeJSON(cmd, dryRunRequest(req, op, body))
 	}
 	if req.URL.Scheme == "http" && req.Header.Get("Authorization") != "" {
 		fmt.Fprintf(os.Stderr, "Warning: sending credentials to %s over plain HTTP\n", req.URL.Host)

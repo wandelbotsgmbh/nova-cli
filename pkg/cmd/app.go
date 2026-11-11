@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -114,7 +115,11 @@ var createAppCmd = &cobra.Command{
 		if len(args) > 0 {
 			appName = strings.TrimSpace(args[0])
 		}
-		return createAppProject(appName)
+		path, err := createAppProject(appName)
+		if err != nil || *appCreateOutput != outputJSON {
+			return err
+		}
+		return writeJSON(cmd, createdApp{Name: appName, Generator: appGenerator, Path: absPath(path)})
 	},
 }
 
@@ -437,10 +442,7 @@ var listAppsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		for _, app := range list {
-			fmt.Fprintln(cmd.OutOrStdout(), app)
-		}
-		return nil
+		return writeNames(cmd, appListOutput, list)
 	},
 }
 
@@ -474,7 +476,12 @@ var editAppCmd = &cobra.Command{
 	},
 }
 
+// -o/--output of 'app list' and 'app create'
+var appListOutput, appCreateOutput *outputFormat
+
 func init() {
+	appListOutput = addOutputFlag(listAppsCmd)
+	appCreateOutput = addOutputFlag(createAppCmd)
 	rootCmd.AddCommand(appCmd)
 
 	// subcommands
@@ -509,22 +516,34 @@ func init() {
 	installAppCmd.MarkFlagsMutuallyExclusive("copy-image", "omit-credentials")
 }
 
-func createAppProject(appName string) error {
+// createdApp is the JSON result of 'app create -o json'.
+type createdApp struct {
+	Name      string `json:"name"`
+	Generator string `json:"generator"`
+	// the project directory
+	Path string `json:"path"`
+}
+
+// createAppProject generates the project and returns its directory.
+func createAppProject(appName string) (string, error) {
 	// TODO we might need to verify the output path
 	err := utils.VerifyProjectName(appName)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	strippedAppName, err := utils.ConvertToValidSubdomainName(appName)
 	// we could try to continue but the if the app name is not valid, the backend most likely will fail
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	cliVersion := version.GetCliVersion()
 
-	appGen := getGenerator()
+	appGen, err := getGenerator()
+	if err != nil {
+		return "", err
+	}
 	spec := generator.PluginSpec{
 		Language:         appGen.GeneratorLanguage(),
 		Name:             appName,
@@ -554,21 +573,26 @@ func createAppProject(appName string) error {
 
 	if _, err := os.Stat(outpath); !os.IsNotExist(err) {
 		msg := fmt.Sprintf("Directory %s already exists. Contents may be overwritten. Do you want to continue?", outpath)
-		confirmed := utils.PromptUserConfirmation(msg)
-		if !confirmed {
-			return nil
+		if !utils.PromptUserConfirmation(msg) {
+			// ADR-0010: an aborted action never exits 0
+			return "", &typedError{
+				Code:    "ABORTED",
+				Message: fmt.Sprintf("directory %s already exists and overwriting it was declined", outpath),
+				Hint:    "choose another app name, or remove the directory first",
+				exit:    exitRefused,
+			}
 		}
 	}
 
 	if err := appGen.CreateProject(outpath, spec); err != nil {
-		return err
+		return "", err
 	}
 
 	// reset: the env files of the templates contain placeholders for the instance settings
 	if err := writeAppEnv(rootCmd, outpath, true); err != nil {
 		fmt.Fprintf(os.Stderr, "Could not write the local development settings: %v\nRun 'nova app update-env' in %s once that is fixed.\n", err, outpath)
 	}
-	return nil
+	return outpath, nil
 }
 
 // Writes the instance url, cell and a fresh access token into the gitignored env file of the
@@ -944,20 +968,26 @@ func completeApp(cmd *cobra.Command, args []string, toComplete string) ([]string
 	return comp, cobra.ShellCompDirectiveNoFileComp
 }
 
-func getGenerator() generator.PluginGenerator {
-	if appGenerator == "python_app" {
-		return generator.NewPythonGenerator()
+// appGenerators are the values of 'app create --generator'.
+var appGenerators = map[string]generator.PluginGenerator{
+	"python_app": generator.NewPythonGenerator(),
+	"nextjs_app": generator.NewNextJsAppGenerator(),
+	"golang_app": generator.NewGolangAppGenerator(),
+	"rust_app":   generator.NewRustAppGenerator(),
+}
+
+// getGenerator returns the generator of --generator; an unknown name is an error,
+// not a silent fallback to python (a typo like "golang" would generate the wrong project).
+func getGenerator() (generator.PluginGenerator, error) {
+	if gen, ok := appGenerators[appGenerator]; ok {
+		return gen, nil
 	}
-	if appGenerator == "nextjs_app" {
-		return generator.NewNextJsAppGenerator()
+	names := make([]string, 0, len(appGenerators))
+	for n := range appGenerators {
+		names = append(names, n)
 	}
-	if appGenerator == "golang_app" {
-		return generator.NewGolangAppGenerator()
-	}
-	if appGenerator == "rust_app" {
-		return generator.NewRustAppGenerator()
-	}
-	return generator.NewPythonGenerator()
+	sort.Strings(names)
+	return nil, fmt.Errorf("unknown generator %q: use one of %s", appGenerator, strings.Join(names, ", "))
 }
 
 func installFromExistingFile(host, cellname, pathToFile string) error {

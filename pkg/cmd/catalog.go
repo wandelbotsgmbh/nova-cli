@@ -52,20 +52,28 @@ nova catalog list mycatalog
 	Args:              cobra.MaximumNArgs(1),
 	ValidArgsFunction: completeExternalCatalog,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var entries []catalogListItem
+		add := func(c *catalog.WebHosted, name string) error {
+			e, err := c.ListEntries()
+			if err != nil {
+				return err
+			}
+			for _, entry := range e {
+				entries = append(entries, catalogListItem{Name: entry.Name, Catalog: name})
+			}
+			return nil
+		}
+
 		// list entries from a specific catalog
 		if len(args) > 0 {
 			c, err := catalog.NewFromConfig(args[0])
 			if err != nil {
 				return err
 			}
-			e, err := c.ListEntries()
-			if err != nil {
+			if err := add(c, args[0]); err != nil {
 				return err
 			}
-			for _, entry := range e {
-				fmt.Fprintln(cmd.OutOrStdout(), entry.Name)
-			}
-			return nil
+			return writeCatalogList(cmd, entries, false)
 		}
 
 		// list entries from the default catalog
@@ -73,12 +81,8 @@ nova catalog list mycatalog
 		if err != nil {
 			return err
 		}
-		e, err := c.ListEntries()
-		if err != nil {
+		if err := add(c, ""); err != nil {
 			return err
-		}
-		for _, entry := range e {
-			fmt.Fprintln(cmd.OutOrStdout(), entry.Name)
 		}
 
 		// list entries from all catalogs
@@ -89,19 +93,44 @@ nova catalog list mycatalog
 				if err != nil {
 					return err
 				}
-				catEntries, err := cat.ListEntries()
-				if err != nil {
+				if err := add(cat, entry.Name); err != nil {
 					return err
-				}
-				for _, catEntry := range catEntries {
-					fmt.Fprintln(cmd.OutOrStdout(), entry.Name+"/"+catEntry.Name)
 				}
 			}
 		}
 
-		return nil
+		return writeCatalogList(cmd, entries, true)
 	},
 }
+
+// catalogListItem is an entry of 'catalog list -o json'.
+type catalogListItem struct {
+	Name string `json:"name"`
+	// the additional catalog the entry comes from; "" for the default catalog
+	Catalog string `json:"catalog"`
+}
+
+// writeCatalogList prints the entries one per line; with qualify, entries of
+// additional catalogs as <catalog>/<name>, as 'catalog install' takes them.
+func writeCatalogList(cmd *cobra.Command, entries []catalogListItem, qualify bool) error {
+	if *catalogListOutput == outputJSON {
+		if entries == nil {
+			entries = []catalogListItem{}
+		}
+		return writeJSON(cmd, entries)
+	}
+	for _, e := range entries {
+		if qualify && e.Catalog != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), e.Catalog+"/"+e.Name)
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), e.Name)
+		}
+	}
+	return nil
+}
+
+// -o/--output of 'catalog list'
+var catalogListOutput *outputFormat
 
 var catalogInstallCmd = &cobra.Command{
 	Use:               "install <name>",
@@ -405,6 +434,7 @@ func mapCatalogSecretsToApiV2Secrets(catalogSecrets []catalog.CatalogEntryAppCon
 }
 
 func init() {
+	catalogListOutput = addOutputFlag(catalogListCmd)
 	catalogCmd.AddCommand(catalogListCmd)
 	catalogCmd.AddCommand(catalogInstallCmd)
 	catalogCmd.AddCommand(catalogInfoCmd)
