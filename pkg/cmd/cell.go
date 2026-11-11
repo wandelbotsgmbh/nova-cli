@@ -84,6 +84,7 @@ var saveCmd = &cobra.Command{
 	Long: `Saves the cell configuration to a file.
 
 The filename will be "cellname.cell". The content can be either in json or yaml format (select via --json flag).
+-o json only changes what is printed: the file name, path and format as JSON (the file stays yaml without --json).
 
 If no name is given, the default cellname is used (which can be changed with 'nova config set cellname <name>').`,
 	Example: `

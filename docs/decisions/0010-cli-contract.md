@@ -5,8 +5,9 @@
 - **Implementation:** in progress (#40: suggestions for unknown subcommands, flag
   constraints; data on stdout, messages on stderr, `--debug` / `NOVA_DEBUG`, output tail in
   tool failures; `-o json` on the list commands and on commands that write files (#60);
-  typed errors and exit code 3 for refused requests in `nova api` (#77); field selection
-  and typed errors in the other commands not started)
+  typed errors and exit code 3 for refused requests in `nova api` (#77) and for a declined
+  overwrite in `app create` (`ABORTED`); field selection and typed errors in the other
+  commands not started)
 
 ## Context
 
@@ -66,7 +67,7 @@ stderr, exit codes and files written; golden tests replay it (as Impeccable's
   distinct exit codes are what agent harnesses rely on to recover without retries
   [S18][S20][S21].
 - **Error codes** are a fixed set in `UPPER_SNAKE_CASE`, shared with the MCP servers on
-  the instance where they apply (`INVALID_ARGUMENT`, `NOT_FOUND`, `OUT_OF_WORKSPACE`,
+  the instance where they apply (`ABORTED`, `INVALID_ARGUMENT`, `NOT_FOUND`, `OUT_OF_WORKSPACE`,
   `NO_IK_SOLUTION`, `COLLISION`, `ROBOT_BUSY`, `EXECUTION_FAILED`, `APPROVAL_REQUIRED`, …).
 - **MCP tool results** are compact: one line `CODE: sentence; key=value; ...` plus data
   only where needed, images only on request. API failures are

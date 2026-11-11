@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -137,4 +138,70 @@ func compactJSON(t *testing.T, s string) string {
 		return strings.TrimSpace(s)
 	}
 	return b.String()
+}
+
+// #60: app create names the project directory and the generator that ran.
+func TestAppCreateJSON(t *testing.T) {
+	withFakeInstance(t)
+	stdout, stderr, err := runAsProcess(t, "app", "create", "demo", "-g", "golang_app", "-o", "json")
+	if err != nil {
+		t.Fatalf("error: %v\nstderr: %s", err, stderr)
+	}
+	var got createdApp
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("stdout is no JSON result: %v\n%s", err, stdout)
+	}
+	if got.Name != "demo" || got.Generator != "golang_app" || !filepath.IsAbs(got.Path) || filepath.Base(got.Path) != "demo" {
+		t.Errorf("result = %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(got.Path, "go.mod")); err != nil {
+		t.Errorf("no Go project in the named directory: %v", err)
+	}
+}
+
+// A typo in --generator used to generate a python project silently.
+func TestAppCreateRejectsUnknownGenerator(t *testing.T) {
+	withFakeInstance(t)
+	stdout, stderr, err := runAsProcess(t, "app", "create", "demo", "-g", "golang", "-o", "json")
+	if err == nil {
+		t.Fatal("no error")
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want nothing", stdout)
+	}
+	if want := `unknown generator "golang": use one of golang_app, nextjs_app, python_app, rust_app`; !strings.Contains(stderr, want) {
+		t.Errorf("stderr = %q, want %q", stderr, want)
+	}
+	if _, err := os.Stat("demo"); !os.IsNotExist(err) {
+		t.Errorf("a project was created anyway: %v", err)
+	}
+}
+
+// ADR-0010: declining the overwrite prompt (EOF on stdin for agents and CI) is an
+// aborted action, not a success with empty output.
+func TestAppCreateDeclinedOverwriteFails(t *testing.T) {
+	withFakeInstance(t)
+	if err := os.Mkdir("demo", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	devnull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { devnull.Close() })
+	orig := os.Stdin
+	os.Stdin = devnull
+	t.Cleanup(func() { os.Stdin = orig })
+
+	stdout, stderr, err := runAsProcess(t, "app", "create", "demo", "-o", "json")
+	var typed *typedError
+	if !errors.As(err, &typed) || typed.Code != "ABORTED" || typed.exit != exitRefused {
+		t.Fatalf("error = %#v, want ABORTED with exit %d\nstderr: %s", err, exitRefused, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want nothing", stdout)
+	}
+	if entries, _ := os.ReadDir("demo"); len(entries) != 0 {
+		t.Errorf("the existing directory was written to: %v", entries)
+	}
 }
