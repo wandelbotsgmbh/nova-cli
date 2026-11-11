@@ -30,7 +30,7 @@ func (o *outputFormat) Set(s string) error {
 }
 
 // addOutputFlag adds -o/--output to cmd. It is a local flag, not a global one:
-// some commands use -o/--output for a file (flow get, simulation api).
+// some commands use -o/--output for a file (api, flow get, simulation api).
 func addOutputFlag(cmd *cobra.Command) *outputFormat {
 	o := outputText
 	cmd.Flags().VarP(&o, "output", "o", "Output format: text or json")
@@ -39,10 +39,12 @@ func addOutputFlag(cmd *cobra.Command) *outputFormat {
 	return &o
 }
 
-// writeJSON writes v as indented JSON to stdout.
+// writeJSON writes v as indented JSON to stdout, without escaping <, > and &
+// (paths, URLs and API descriptions stay readable).
 func writeJSON(cmd *cobra.Command, v any) error {
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
 	return enc.Encode(v)
 }
 

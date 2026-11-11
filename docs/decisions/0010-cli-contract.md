@@ -5,7 +5,8 @@
 - **Implementation:** in progress (#40: suggestions for unknown subcommands, flag
   constraints; data on stdout, messages on stderr, `--debug` / `NOVA_DEBUG`, output tail in
   tool failures; `-o json` on the list commands and on commands that write files (#60);
-  field selection, typed errors and exit codes not started)
+  typed errors and exit code 3 for refused requests in `nova api` (#77); field selection
+  and typed errors in the other commands not started)
 
 ## Context
 
@@ -21,8 +22,10 @@ stderr, exit codes and files written; golden tests replay it (as Impeccable's
 - **`-o json`** with a stable shape, first on `status`, `app list`, `cell list`,
   `controller list`, `catalog list`. gh-style field selection later
   (`--json` lists fields, `--json f1,f2` selects) [S15].
-  - `-o text` is the default. The flag is per command, not global: `flow get` and
-    `simulation api` already use `-o`/`--output` for a file.
+  - `-o text` is the default. The flag is per command, not global: `api`, `flow get`
+    and `simulation api` already use `-o`/`--output` for a file. `api search`,
+    `api schema` and `api --dry-run` always print JSON; `api` itself prints the
+    instance's answer as it is.
   - Lists are JSON arrays of objects, `[]` when empty: `[{"name": …}]`; `catalog list`
     adds `"catalog"` (`""` for the default catalog).
   - Commands that write files report them with absolute paths (#60): `cell save`
