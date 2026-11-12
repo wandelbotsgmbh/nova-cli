@@ -33,7 +33,8 @@ var pruneInstancesCmd = &cobra.Command{
 Only a definite answer removes an entry:
   cloud   the portal doesn't list the instance for the account logged in to the
           entry's environment (an instance of another account counts as gone)
-  k8srun  the cluster service doesn't know the cluster id (as 'nova k8srun prune')
+  k8srun  the cluster service doesn't know the cluster id, or the cluster rejects the
+          stored kubeconfig (as 'nova k8srun prune')
   host    never removed: an unreachable host can't be told apart from one that is off
 
 Entries that can't be checked (no login for their environment, network error, any other
@@ -107,13 +108,14 @@ $ nova instance prune`,
 				unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: "no cluster id"})
 				continue
 			}
-			ok, err := clusterExists(i.ID)
+			isGone, reason, err := clusterGone(i, false)
 			if err != nil {
 				fmt.Fprintf(errOut, "keeping %q: %v\n", i.Name, err)
 				unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: err.Error()})
 				continue
 			}
-			if !ok {
+			if isGone {
+				fmt.Fprintf(errOut, "%q is gone: %s\n", i.Name, reason)
 				gone = append(gone, i.Name)
 			}
 		}

@@ -721,7 +721,13 @@ func printFlowStatus(out io.Writer, c *novaflow.Client, inst *novaflow.Installat
 // confirm asks a yes/no question. Without a terminal it answers no, unless
 // --yes was given.
 func confirm(cmd *cobra.Command, question string, defaultYes bool) bool {
-	if flowYes {
+	return confirmWith(cmd, flowYes, question, defaultYes)
+}
+
+// confirmWith asks a yes/no question unless yes is set. Without a terminal it
+// answers no.
+func confirmWith(cmd *cobra.Command, yes bool, question string, defaultYes bool) bool {
+	if yes {
 		return true
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) {

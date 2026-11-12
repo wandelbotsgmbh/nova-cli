@@ -247,7 +247,7 @@ func TestK8sRunJSON(t *testing.T) {
 	fake.gone["id-1"] = true
 	fake.broken["id-2"] = true
 	var pruned pruneJSON
-	stdout, stderr, err = runJSON(t, &pruned, "k8srun", "prune", "-o", "json")
+	stdout, stderr, err = runJSON(t, &pruned, "k8srun", "prune", "-y", "-o", "json")
 	if err == nil {
 		t.Error("an unchecked cluster must fail the command")
 	}
