@@ -335,10 +335,15 @@ $ nova k8srun prune -y`,
 				}
 				var still []string
 				for _, name := range gone {
-					if i, ok := r.Get(name); ok && i.ID == checkedID[name] {
-						still = append(still, name)
-					} else {
+					i, ok := r.Get(name)
+					switch {
+					case !ok || i.ID != checkedID[name]:
 						fmt.Fprintf(errOut, "keeping %q: it was changed meanwhile\n", name)
+					case kubeconfigShared(i) != "":
+						// kubectl or kind may have added a context meanwhile
+						fmt.Fprintf(errOut, "keeping %q: %s\n", name, kubeconfigShared(i))
+					default:
+						still = append(still, name)
 					}
 				}
 				gone = still

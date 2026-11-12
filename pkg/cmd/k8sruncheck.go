@@ -29,8 +29,9 @@ var kubeCheckTimeout = 5 * time.Second
 //   - it knows the id, but its kubeconfig for it has another CA than the stored one, or
 //   - (only with probe) the cluster at the stored address rejects the stored kubeconfig.
 //     A released VM keeps its IP but gets new credentials, so a rejection means the
-//     address serves another cluster. This is a heuristic (a TLS-intercepting proxy
-//     looks the same), so callers that probe must ask before removing anything.
+//     address serves another cluster. Only a 401 or a certificate of an authority
+//     neither the kubeconfig nor the system trusts counts (see certificateRejected);
+//     callers that probe ask before removing anything unless told -y.
 //
 // err is set when the service can't be asked; the entry must then be kept.
 func clusterGone(inst instances.Instance, probe bool) (gone bool, reason string, err error) {
@@ -141,21 +142,41 @@ func kubeconfigRejected(kc kubeAccess) string {
 	return ""
 }
 
-// certificateRejected tells whether err is a TLS verification failure on either side:
-// the server's certificate isn't signed by the stored CA, or the server refused our
-// client certificate.
+// systemRoots returns the system's trusted roots; tests replace it.
+var systemRoots = x509.SystemCertPool
+
+// certificateRejected tells whether err proves that the server is another cluster: its
+// certificate chains to an unknown authority, and the system doesn't trust it either. A
+// k3s VM handed out again presents a certificate of its new, self-signed CA. Everything
+// else is inconclusive and keeps the entry: a TLS-intercepting proxy with a certificate
+// the system trusts, a hostname mismatch, or a certificate that isn't valid yet or any
+// more (clock skew).
 func certificateRejected(err error) bool {
-	var unknownAuthority x509.UnknownAuthorityError
-	var hostname x509.HostnameError
-	var invalid x509.CertificateInvalidError
-	var verify *tls.CertificateVerificationError
-	if errors.As(err, &unknownAuthority) || errors.As(err, &hostname) || errors.As(err, &invalid) || errors.As(err, &verify) {
-		return true
+	var unknown x509.UnknownAuthorityError
+	if !errors.As(err, &unknown) || unknown.Cert == nil {
+		return false
 	}
-	// alerts sent by the server when it doesn't accept our client certificate
-	msg := err.Error()
-	return strings.Contains(msg, "tls: bad certificate") || strings.Contains(msg, "tls: unknown certificate authority") ||
-		strings.Contains(msg, "tls: certificate required")
+	roots, rootsErr := systemRoots()
+	if rootsErr != nil {
+		return false
+	}
+	leaf := unknown.Cert
+	intermediates := x509.NewCertPool()
+	var verify *tls.CertificateVerificationError
+	if errors.As(err, &verify) {
+		for _, c := range verify.UnverifiedCertificates[min(1, len(verify.UnverifiedCertificates)):] {
+			intermediates.AddCert(c)
+		}
+	}
+	// only the authority matters here, not name or validity period
+	_, sysErr := leaf.Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediates,
+		CurrentTime:   leaf.NotBefore.Add(leaf.NotAfter.Sub(leaf.NotBefore) / 2),
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	})
+	var sysUnknown x509.UnknownAuthorityError
+	return errors.As(sysErr, &sysUnknown)
 }
 
 // kubeAccess is what a request to one context's API server needs.

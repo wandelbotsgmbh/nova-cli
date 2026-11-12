@@ -361,3 +361,71 @@ func TestK8sRunPruneKeepsEntryReplacedMeanwhile(t *testing.T) {
 		t.Errorf("its kubeconfig must stay: %v", err)
 	}
 }
+
+// Only an authority neither the kubeconfig nor the system trusts proves another cluster.
+func TestCertificateVerdictsThatAreNoProof(t *testing.T) {
+	ok := fakeKubeAPI(t, http.StatusOK)
+	verdict := func(path string) string {
+		t.Helper()
+		kc, err := parseKubeconfig([]byte(mustReadFile(t, path)), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return kubeconfigRejected(kc)
+	}
+
+	// httptest's certificate names 127.0.0.1 and example.com, not localhost
+	if why := verdict(kubeconfigFor(t, strings.Replace(ok.URL, "127.0.0.1", "localhost", 1), ok)); why != "" {
+		t.Errorf("hostname mismatch must be inconclusive, got %q", why)
+	}
+
+	// a TLS-intercepting proxy whose certificate the system trusts
+	old := systemRoots
+	t.Cleanup(func() { systemRoots = old })
+	systemRoots = func() (*x509.CertPool, error) {
+		pool := x509.NewCertPool()
+		pool.AddCert(ok.Certificate())
+		return pool, nil
+	}
+	if why := verdict(kubeconfigWithCA(t, ok.URL, otherCA(t))); why != "" {
+		t.Errorf("a system-trusted certificate must be inconclusive, got %q", why)
+	}
+	systemRoots = old
+	if why := verdict(kubeconfigWithCA(t, ok.URL, otherCA(t))); why == "" {
+		t.Error("an authority nobody trusts must count as another cluster")
+	}
+}
+
+// A context added to the kubeconfig while the question is open keeps the entry.
+func TestK8sRunPruneKeepsKubeconfigSharedMeanwhile(t *testing.T) {
+	withConfig(t, "")
+	fake := newFakeK8sRunService(t)
+	mustRun(t, "k8srun", "create", "--name", "dev") // id-1
+	fake.gone["id-1"] = true
+	r, _ := instances.Load(viper.GetViper())
+	inst, _ := r.Get("dev")
+	old := afterPruneConfirm
+	t.Cleanup(func() { afterPruneConfirm = old })
+	afterPruneConfirm = func() {
+		// as 'kind create cluster' with KUBECONFIG from 'nova instance env dev'
+		kc := `apiVersion: v1
+kind: Config
+contexts:
+- name: default
+  context: {cluster: default, user: default}
+- name: kind-x
+  context: {cluster: kind-x, user: kind-x}
+`
+		if err := os.WriteFile(inst.Kubeconfig, []byte(kc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out, errOut, err := runWithConfig(t, "k8srun", "prune", "-y")
+	if err != nil || out != "" || !strings.Contains(errOut, `keeping "dev": its kubeconfig`) {
+		t.Errorf("out=%q errOut=%q err=%v", out, errOut, err)
+	}
+	if _, err := os.Stat(inst.Kubeconfig); err != nil {
+		t.Errorf("the kubeconfig must survive: %v", err)
+	}
+}
