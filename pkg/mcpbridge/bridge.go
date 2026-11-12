@@ -64,7 +64,7 @@ type pending struct {
 
 // maxMessage bounds a single message read from stdin (a saved flow can be large).
 // A larger one is answered with an error and skipped; the bridge keeps serving.
-var maxMessage = 64 << 20
+var maxMessage = 256 << 20
 
 // JSON-RPC error codes used for answers the bridge makes up itself.
 const (
