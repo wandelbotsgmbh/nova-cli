@@ -1,10 +1,22 @@
 # Nova CLI
 
+![](media/hero.png)
+
 [![CI](https://github.com/wandelbotsgmbh/nova-cli/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wandelbotsgmbh/nova-cli/actions/workflows/ci.yml)
 
 The Swiss Army knife for interacting with [Wandelbots NOVA](https://www.wandelbots.com/).
 
-The CLI helps you build and deploy applications on the NOVA platform. You can also use it to download diagnostic logs and manage your applications. Your application is built as an OCI image, pushed to the specified registry, and then deployed on the specified instance.
+The CLI helps you build, deploy and manage applications on the NOVA platform, administer instances and cells, browse the app catalog, and pull diagnostics. Your application is built as an OCI image, pushed to the specified registry, and then deployed on the specified instance.
+
+It's built for agentic workflows as much as for people at a terminal: a clean stdout/stderr contract that's easy to parse, `--debug` for troubleshooting, direct access to the full instance API via [`nova api`](docs/decisions/0013-nova-api.md) (with `nova api search`/`nova api schema` for discovery, so an agent can find and call an operation it's never seen before), and an experimental MCP server (`nova mcp`) so Cursor, Claude Code and other MCP-capable agents can drive an instance directly. See [docs/decisions](docs/decisions/README.md) for how the pieces fit together.
+
+From the terminal to the cell:
+
+![](asciinema/demo.svg)
+
+...and the app shows up right on the instance's homescreen:
+
+![](asciinema/homescreen.png)
 
 ## Install
 
