@@ -293,9 +293,13 @@ users:
 	for _, gone := range []bool{false, true} {
 		fake.gone[inst.ID] = gone
 		for _, args := range [][]string{{"instance", "prune"}, {"k8srun", "prune", "-y"}} {
-			out, errOut, _ := runWithConfig(t, args...)
+			out, errOut, err := runWithConfig(t, args...)
 			if out != "" || !strings.Contains(errOut, "has 2 contexts") || !strings.Contains(errOut, "nova instance remove ours") {
 				t.Errorf("gone=%v %v must keep the entry: out=%q errOut=%q", gone, args, out, errOut)
+			}
+			// a rule, not a failed check: scripts must not see a failure they can't clear
+			if err != nil {
+				t.Errorf("gone=%v %v must not fail: %v", gone, args, err)
 			}
 		}
 	}
@@ -312,5 +316,48 @@ users:
 	}
 	if out, errOut, err := runWithConfig(t, "k8srun", "prune", "-y"); err != nil || out != "" {
 		t.Errorf("single context must be kept: out=%q err=%v\n%s", out, err, errOut)
+	}
+}
+
+// Another session replaces the entry while the question is open: the new cluster and
+// its kubeconfig must survive the "yes".
+func TestK8sRunPruneKeepsEntryReplacedMeanwhile(t *testing.T) {
+	withConfig(t, "")
+	fake := newFakeK8sRunService(t)
+	mustRun(t, "k8srun", "create")                    // "k8srun", id-1
+	mustRun(t, "k8srun", "create", "--name", "other") // id-2
+	fake.gone["id-1"], fake.gone["id-2"] = true, true
+	old := afterPruneConfirm
+	t.Cleanup(func() { afterPruneConfirm = old })
+	afterPruneConfirm = func() {
+		// as 'nova k8srun create' replacing the unnamed cluster in another session
+		r, err := loadRegistry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for n := range r.Instances {
+			if r.Instances[n].Name == "k8srun" {
+				r.Instances[n].ID = "id-3"
+			}
+		}
+		if err := saveRegistry(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out, errOut, err := runWithConfig(t, "k8srun", "prune", "-y")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, errOut)
+	}
+	if out != "removed other\n" || !strings.Contains(errOut, `keeping "k8srun": it was changed meanwhile`) {
+		t.Errorf("out=%q errOut=%q", out, errOut)
+	}
+	r, _ := instances.Load(viper.GetViper())
+	inst, ok := r.Get("k8srun")
+	if !ok || inst.ID != "id-3" {
+		t.Fatalf("the new cluster must stay: %+v", inst)
+	}
+	if _, err := os.Stat(inst.Kubeconfig); err != nil {
+		t.Errorf("its kubeconfig must stay: %v", err)
 	}
 }

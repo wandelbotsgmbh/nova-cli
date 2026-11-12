@@ -27,6 +27,10 @@ const defaultK8sRunName = "k8srun"
 // k8srunMaxMinutes is the longest lifetime the cluster service grants (12 hours).
 const k8srunMaxMinutes = 720
 
+// afterPruneConfirm runs after the prune question was answered; tests use it to change
+// the list meanwhile.
+var afterPruneConfirm = func() {}
+
 // clusterServiceURL is a variable so tests can point it to a fake service.
 var clusterServiceURL = "http://k8s.wabo.run/instance"
 
@@ -283,6 +287,7 @@ $ nova k8srun prune -y`,
 			}
 			errOut := cmd.ErrOrStderr()
 			var gone []string
+			checkedID := map[string]string{}
 			var unchecked []pruneEntryJSON
 			failed := 0
 			for _, i := range r.Instances {
@@ -309,6 +314,7 @@ $ nova k8srun prune -y`,
 				if isGone {
 					fmt.Fprintf(errOut, "%q is gone: %s\n", i.Name, reason)
 					gone = append(gone, i.Name)
+					checkedID[i.Name] = i.ID
 				}
 			}
 
@@ -318,6 +324,24 @@ $ nova k8srun prune -y`,
 					return errors.New("nothing removed: without a terminal, confirm with -y")
 				}
 				return errors.New("nothing removed")
+			}
+			if len(gone) > 0 && !k8srunPruneDryRun {
+				afterPruneConfirm()
+				// another session may have replaced an entry while the question was open
+				// (e.g. 'nova k8srun create' under the same name): remove only the
+				// clusters that were checked
+				if r, err = loadRegistry(); err != nil {
+					return err
+				}
+				var still []string
+				for _, name := range gone {
+					if i, ok := r.Get(name); ok && i.ID == checkedID[name] {
+						still = append(still, name)
+					} else {
+						fmt.Fprintf(errOut, "keeping %q: it was changed meanwhile\n", name)
+					}
+				}
+				gone = still
 			}
 			// entries without id are reported as unchecked, but (as before) don't fail the command
 			if err := removeGoneEntries(cmd, r, gone, k8srunPruneDryRun, pruneOutput, unchecked); err != nil {

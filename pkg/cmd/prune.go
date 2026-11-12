@@ -51,6 +51,7 @@ $ nova instance prune`,
 		errOut := cmd.ErrOrStderr()
 		var gone []string
 		var unchecked []pruneEntryJSON
+		skipped := 0
 
 		// cloud entries: one portal listing per environment, in that environment
 		byEnv := map[oauth.AuthEnvironment][]instances.Instance{}
@@ -113,6 +114,8 @@ $ nova instance prune`,
 			if why := kubeconfigShared(i); why != "" {
 				fmt.Fprintf(errOut, "keeping %q: %s; remove it explicitly with 'nova instance remove %s' (deletes that kubeconfig)\n", i.Name, why, i.Name)
 				unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: why})
+				// a rule, not a failed check: it doesn't fail the command (as in 'k8srun prune')
+				skipped++
 				continue
 			}
 			isGone, reason, err := clusterGone(i, false)
@@ -130,8 +133,8 @@ $ nova instance prune`,
 		if err := removeGoneEntries(cmd, r, gone, instancePruneDryRun, instancePruneOutput, unchecked); err != nil {
 			return err
 		}
-		if len(unchecked) > 0 {
-			return fmt.Errorf("%d instance(s) could not be checked and were kept", len(unchecked))
+		if n := len(unchecked) - skipped; n > 0 {
+			return fmt.Errorf("%d instance(s) could not be checked and were kept", n)
 		}
 		return nil
 	},
