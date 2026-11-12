@@ -267,7 +267,9 @@ An entry counts as gone only on a definite answer:
   - it does, but the cluster's Kubernetes API rejects the stored kubeconfig (a released
     VM keeps its IP but gets new credentials, so the address now serves another cluster).
 Entries that can't be checked (network error, any other answer) are kept, and a cluster
-that doesn't answer at all is kept too.
+that doesn't answer at all is kept too. An entry whose kubeconfig holds more than the
+cluster's one context (e.g. kubectl or kind added theirs after 'nova instance env') is
+never pruned: remove it explicitly with 'nova instance remove <name>'.
 
 The entries found are listed with the reason, and the command asks before removing them;
 -y removes them without asking (required without a terminal, e.g. for agents and scripts).`,
@@ -290,6 +292,11 @@ $ nova k8srun prune -y`,
 				if i.ID == "" {
 					fmt.Fprintf(errOut, "skipping %q: no cluster id (use 'nova instance remove %s' to forget it)\n", i.Name, i.Name)
 					unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: "no cluster id"})
+					continue
+				}
+				if why := kubeconfigShared(i); why != "" {
+					fmt.Fprintf(errOut, "skipping %q: %s; remove it explicitly with 'nova instance remove %s' (deletes that kubeconfig)\n", i.Name, why, i.Name)
+					unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: why})
 					continue
 				}
 				isGone, reason, err := clusterGone(i, true)

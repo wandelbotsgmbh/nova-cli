@@ -68,6 +68,27 @@ func clusterGone(inst instances.Instance, probe bool) (gone bool, reason string,
 	return false, "", nil
 }
 
+// kubeconfigShared returns why prune must leave a k8srun entry alone: its stored
+// kubeconfig has more than the one context 'nova k8srun create' wrote. Someone added
+// other clusters (it is KUBECONFIG after 'nova instance env'), and removing the entry
+// would delete their credentials, so only an explicit 'nova instance remove' may.
+func kubeconfigShared(inst instances.Instance) string {
+	if inst.Kubeconfig == "" {
+		return ""
+	}
+	content, err := os.ReadFile(inst.Kubeconfig)
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		Contexts []yaml.Node `yaml:"contexts"`
+	}
+	if yaml.Unmarshal(content, &doc) != nil || len(doc.Contexts) <= 1 {
+		return ""
+	}
+	return fmt.Sprintf("its kubeconfig %s has %d contexts, not only the cluster's", inst.Kubeconfig, len(doc.Contexts))
+}
+
 // decodeServiceKubeconfig returns the kubeconfig of a cluster service answer, which may
 // be the YAML itself, base64 of it, or either as a JSON string.
 func decodeServiceKubeconfig(body []byte) []byte {

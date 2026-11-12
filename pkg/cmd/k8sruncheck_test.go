@@ -288,13 +288,29 @@ users:
 		t.Fatal(err)
 	}
 
-	for _, args := range [][]string{{"instance", "prune"}, {"k8srun", "prune", "-y"}} {
-		out, errOut, err := runWithConfig(t, args...)
-		if err != nil || out != "" {
-			t.Errorf("%v must keep the entry: out=%q err=%v\n%s", args, out, err, errOut)
+	// alive or gone: an entry whose kubeconfig holds other clusters is only removed
+	// explicitly, removing it would delete their credentials
+	for _, gone := range []bool{false, true} {
+		fake.gone[inst.ID] = gone
+		for _, args := range [][]string{{"instance", "prune"}, {"k8srun", "prune", "-y"}} {
+			out, errOut, _ := runWithConfig(t, args...)
+			if out != "" || !strings.Contains(errOut, "has 2 contexts") || !strings.Contains(errOut, "nova instance remove ours") {
+				t.Errorf("gone=%v %v must keep the entry: out=%q errOut=%q", gone, args, out, errOut)
+			}
 		}
 	}
 	if _, err := os.Stat(inst.Kubeconfig); err != nil {
 		t.Errorf("the kubeconfig must survive: %v", err)
+	}
+
+	// with only our context left, the current-context switch alone changes nothing:
+	// the context with the service's server is judged
+	fake.gone[inst.ID] = false
+	single := strings.Replace(merged, "- name: kind-other\n  context: {cluster: kind-other, user: default}\n", "", 1)
+	if err := os.WriteFile(inst.Kubeconfig, []byte(strings.Replace(single, "current-context: kind-other", "current-context: default", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, errOut, err := runWithConfig(t, "k8srun", "prune", "-y"); err != nil || out != "" {
+		t.Errorf("single context must be kept: out=%q err=%v\n%s", out, err, errOut)
 	}
 }
