@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
@@ -83,7 +84,7 @@ func flowMCPEndpoint(host, cell string) string {
 	if cell == "" {
 		cell = "cell"
 	}
-	return nova.HostWithProtocol(host) + "/" + url.PathEscape(cell) + "/" + novaflow.ControlPlaneApp + "/api/v1/mcp"
+	return strings.TrimSuffix(nova.HostWithProtocol(host), "/") + "/" + url.PathEscape(cell) + "/" + novaflow.ControlPlaneApp + "/api/v1/mcp"
 }
 
 func init() {

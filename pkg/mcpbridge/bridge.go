@@ -63,7 +63,8 @@ type pending struct {
 }
 
 // maxMessage bounds a single message read from stdin (a saved flow can be large).
-const maxMessage = 64 << 20
+// A larger one is answered with an error and skipped; the bridge keeps serving.
+var maxMessage = 64 << 20
 
 // JSON-RPC error codes used for answers the bridge makes up itself.
 const (
@@ -91,8 +92,12 @@ func (b *Bridge) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for {
-		line, err := readLine(r)
-		if t := bytes.TrimSpace(line); len(t) > 0 {
+		line, tooLarge, err := readLine(r)
+		if tooLarge {
+			// its id is unknown without reading it whole
+			b.writeError(json.RawMessage("null"), codeInvalidRequest,
+				fmt.Sprintf("invalid request: message larger than %d MiB, skipped", maxMessage>>20))
+		} else if t := bytes.TrimSpace(line); len(t) > 0 {
 			for _, msg := range split(t) {
 				b.dispatch(ctx, &wg, msg)
 			}
@@ -106,16 +111,19 @@ func (b *Bridge) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	}
 }
 
-func readLine(r *bufio.Reader) ([]byte, error) {
-	var line []byte
+// readLine reads one line. A line longer than maxMessage is read to its end
+// and dropped (tooLarge), so the next line starts clean.
+func readLine(r *bufio.Reader) (line []byte, tooLarge bool, err error) {
 	for {
 		chunk, err := r.ReadSlice('\n')
-		line = append(line, chunk...)
-		if len(line) > maxMessage {
-			return nil, fmt.Errorf("message on stdin is larger than %d MiB", maxMessage>>20)
+		if !tooLarge {
+			line = append(line, chunk...)
+			if len(line) > maxMessage {
+				line, tooLarge = nil, true
+			}
 		}
 		if !errors.Is(err, bufio.ErrBufferFull) {
-			return line, err
+			return line, tooLarge, err
 		}
 	}
 }
@@ -306,7 +314,7 @@ func (b *Bridge) post(ctx context.Context, msg []byte, isInitialize bool, key st
 	if ok && strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 		return b.copyEvents(resp.Body, isInitialize, key)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMessage))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxMessage)))
 	if err != nil {
 		return false, fmt.Errorf("%s: reading the answer: %w", b.Endpoint, err)
 	}

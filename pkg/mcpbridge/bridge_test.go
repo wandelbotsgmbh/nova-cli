@@ -274,6 +274,35 @@ func TestBridgeLargeMessage(t *testing.T) {
 	}
 }
 
+// A message over the limit is answered with an error and skipped; the bridge
+// keeps serving the next one.
+func TestBridgeTooLargeMessage(t *testing.T) {
+	old := maxMessage
+	maxMessage = 1 << 10
+	defer func() { maxMessage = old }()
+	big := strings.Repeat("x", 1<<17) // larger than bufio's buffer too
+	in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"v":"` + big + `"}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+`
+	msgs, _, _ := run(t, in, nil)
+	if len(msgs) != 2 {
+		t.Fatalf("messages %d: %v", len(msgs), msgs)
+	}
+	got := byID(msgs)
+	if got["2"]["result"] == nil {
+		t.Errorf("2: %v", got["2"])
+	}
+	var skipped bool
+	for _, m := range msgs {
+		if m["id"] == nil && strings.Contains(errMessage(m), "larger than") {
+			skipped = true
+		}
+	}
+	if !skipped {
+		t.Errorf("no error for the large message: %v", msgs)
+	}
+}
+
 // A request the server doesn't answer still gets an answer: an MCP client would
 // otherwise wait forever.
 func TestBridgeAnswersEveryRequest(t *testing.T) {

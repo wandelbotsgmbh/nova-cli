@@ -70,3 +70,10 @@ instances:
 		t.Errorf("path %q", gotPath)
 	}
 }
+
+// A host stored with a trailing slash gives no "//" in the path.
+func TestFlowMCPEndpointTrimsSlash(t *testing.T) {
+	if got, want := flowMCPEndpoint("https://x.wandelbots.io/", "cell"), "https://x.wandelbots.io/cell/controlplane/api/v1/mcp"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
