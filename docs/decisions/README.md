@@ -43,6 +43,7 @@ distributes it.**
 | [0017](0017-instance-keep-alive.md) | `nova instance keep-alive` keeps an instance from expiring | proposed |
 | [0018](0018-nucleus-servers.md) | Nucleus servers are their own target (`--nucleus`, `NOVA_NUCLEUS`) | proposed |
 | [0019](0019-local-instance-mcp-tools.md) | `nova mcp` serves the instance MCP toolsets locally until the service ships | proposed |
+| [0020](0020-novaflow-mcp-bridge.md) | `nova flow mcp` bridges NovaFlow's MCP endpoint to stdio | proposed |
 
 ## Glossary
 
