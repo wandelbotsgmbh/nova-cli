@@ -41,13 +41,23 @@ func clusterGone(inst instances.Instance, probe bool) (gone bool, reason string,
 	if !exists {
 		return true, "the cluster service doesn't know the cluster", nil
 	}
-	stored, err := readKubeconfig(inst.Kubeconfig)
+	// The stored file may hold more clusters than ours: after 'nova instance env' it is
+	// KUBECONFIG, and kubectl, kind etc. add contexts and switch current-context. So
+	// compare and probe the context whose server is the one the service names, never
+	// the current one; without exactly one such context there is nothing definite.
+	svc, err := parseKubeconfig(decodeServiceKubeconfig(current), "")
 	if err != nil {
-		// nothing to compare or probe with
 		return false, "", nil
 	}
-	if svc, err := parseKubeconfig(decodeServiceKubeconfig(current)); err == nil &&
-		len(svc.ca) > 0 && len(stored.ca) > 0 && !bytes.Equal(svc.ca, stored.ca) {
+	content, err := os.ReadFile(inst.Kubeconfig)
+	if inst.Kubeconfig == "" || err != nil {
+		return false, "", nil
+	}
+	stored, err := parseKubeconfig(content, svc.server)
+	if err != nil {
+		return false, "", nil
+	}
+	if len(svc.ca) > 0 && len(stored.ca) > 0 && !bytes.Equal(svc.ca, stored.ca) {
 		return true, "the cluster service has another kubeconfig for the cluster id (the stored one is stale)", nil
 	}
 	if probe {
@@ -70,17 +80,6 @@ func decodeServiceKubeconfig(body []byte) []byte {
 		return b
 	}
 	return body
-}
-
-func readKubeconfig(path string) (kubeAccess, error) {
-	if path == "" {
-		return kubeAccess{}, errors.New("no kubeconfig")
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return kubeAccess{}, err
-	}
-	return parseKubeconfig(content)
 }
 
 // kubeconfigRejected calls the Kubernetes API of a kubeconfig and returns why it rejects
@@ -137,7 +136,7 @@ func certificateRejected(err error) bool {
 		strings.Contains(msg, "tls: certificate required")
 }
 
-// kubeAccess is what a request to the current context's API server needs.
+// kubeAccess is what a request to one context's API server needs.
 type kubeAccess struct {
 	server   string
 	ca       []byte
@@ -149,7 +148,10 @@ type kubeAccess struct {
 	probeable bool
 }
 
-func parseKubeconfig(content []byte) (kubeAccess, error) {
+// parseKubeconfig returns the access of the context whose cluster has server, or of the
+// current context (the only one, if none is set) when server is "". It fails unless
+// exactly one context matches.
+func parseKubeconfig(content []byte, server string) (kubeAccess, error) {
 	var doc struct {
 		CurrentContext string `yaml:"current-context"`
 		Contexts       []struct {
@@ -188,11 +190,25 @@ func parseKubeconfig(content []byte) (kubeAccess, error) {
 	if err := yaml.Unmarshal(content, &doc); err != nil {
 		return kubeAccess{}, err
 	}
-	clusterName, userName := "", ""
+	servers := map[string]string{}
+	for _, c := range doc.Clusters {
+		servers[c.Name] = c.Cluster.Server
+	}
+	clusterName, userName, matches := "", "", 0
 	for _, c := range doc.Contexts {
-		if c.Name == doc.CurrentContext || (doc.CurrentContext == "" && len(doc.Contexts) == 1) {
-			clusterName, userName = c.Context.Cluster, c.Context.User
+		var match bool
+		if server == "" {
+			match = c.Name == doc.CurrentContext || (doc.CurrentContext == "" && len(doc.Contexts) == 1)
+		} else {
+			match = servers[c.Context.Cluster] != "" && strings.TrimSuffix(servers[c.Context.Cluster], "/") == strings.TrimSuffix(server, "/")
 		}
+		if match {
+			clusterName, userName = c.Context.Cluster, c.Context.User
+			matches++
+		}
+	}
+	if matches != 1 {
+		return kubeAccess{}, fmt.Errorf("kubeconfig: %d contexts match", matches)
 	}
 	a := kubeAccess{probeable: true}
 	var err error
@@ -208,7 +224,7 @@ func parseKubeconfig(content []byte) (kubeAccess, error) {
 		}
 	}
 	if a.server == "" {
-		return kubeAccess{}, errors.New("kubeconfig: no server for the current context")
+		return kubeAccess{}, errors.New("kubeconfig: no server for the context")
 	}
 	for _, u := range doc.Users {
 		if u.Name == userName {

@@ -106,7 +106,7 @@ func TestKubeconfigRejected(t *testing.T) {
 		{"not answering", kubeconfigFor(t, closedURL, ok), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			kc, err := readKubeconfig(tc.path)
+			kc, err := parseKubeconfig([]byte(mustReadFile(t, tc.path)), "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,7 +136,7 @@ func TestKubeconfigNotProbeable(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			kc, err := parseKubeconfig([]byte(edit(base)))
+			kc, err := parseKubeconfig([]byte(edit(base)), "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -172,7 +172,7 @@ func TestKubeconfigRejectedSendsToken(t *testing.T) {
 		auth = r.Header.Get("Authorization")
 	}))
 	defer srv.Close()
-	kc, err := readKubeconfig(kubeconfigFor(t, srv.URL, srv))
+	kc, err := parseKubeconfig([]byte(mustReadFile(t, kubeconfigFor(t, srv.URL, srv))), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestKubeconfigRejectedSendsToken(t *testing.T) {
 
 func TestK8sRunPruneDropsRejectedKubeconfig(t *testing.T) {
 	withConfig(t, "")
-	newFakeK8sRunService(t)
+	fake := newFakeK8sRunService(t)
 	mustRun(t, "k8srun", "create", "--name", "ours")   // id-1
 	mustRun(t, "k8srun", "create", "--name", "reused") // id-2
 	r, _ := instances.Load(viper.GetViper())
@@ -200,6 +200,8 @@ func TestK8sRunPruneDropsRejectedKubeconfig(t *testing.T) {
 		if err := os.WriteFile(inst.Kubeconfig, content, 0o600); err != nil {
 			t.Fatal(err)
 		}
+		// the service still hands out the stored kubeconfig (its database drifted)
+		fake.kubeconfigs[inst.ID] = string(content)
 	}
 
 	// 'nova instance prune' removes without asking, so it doesn't probe
@@ -248,5 +250,51 @@ func TestPruneDropsStaleKubeconfig(t *testing.T) {
 	}
 	if out != "removed stale\n" || !strings.Contains(errOut, "the stored one is stale") {
 		t.Errorf("out=%q errOut=%q", out, errOut)
+	}
+}
+
+// After 'nova instance env', the stored file is KUBECONFIG: kubectl or kind add other
+// clusters and switch current-context. Neither prune may judge by those.
+func TestPruneIgnoresOtherContexts(t *testing.T) {
+	withConfig(t, "")
+	fake := newFakeK8sRunService(t)
+	mustRun(t, "k8srun", "create", "--name", "ours") // id-1
+	r, _ := instances.Load(viper.GetViper())
+	inst, _ := r.Get("ours")
+	ours := fakeKubeAPI(t, http.StatusOK)
+	other := fakeKubeAPI(t, http.StatusUnauthorized) // rejects our token
+	fake.kubeconfigs[inst.ID] = mustReadFile(t, kubeconfigFor(t, ours.URL, ours))
+
+	ca := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ours.Certificate().Raw}))
+	otherCA := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: otherCA(t)}))
+	merged := fmt.Sprintf(`apiVersion: v1
+kind: Config
+current-context: kind-other
+clusters:
+- name: default
+  cluster: {server: %s, certificate-authority-data: %s}
+- name: kind-other
+  cluster: {server: %s, certificate-authority-data: %s}
+contexts:
+- name: default
+  context: {cluster: default, user: default}
+- name: kind-other
+  context: {cluster: kind-other, user: default}
+users:
+- name: default
+  user: {token: t0k3n}
+`, ours.URL, ca, other.URL, otherCA)
+	if err := os.WriteFile(inst.Kubeconfig, []byte(merged), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{{"instance", "prune"}, {"k8srun", "prune", "-y"}} {
+		out, errOut, err := runWithConfig(t, args...)
+		if err != nil || out != "" {
+			t.Errorf("%v must keep the entry: out=%q err=%v\n%s", args, out, err, errOut)
+		}
+	}
+	if _, err := os.Stat(inst.Kubeconfig); err != nil {
+		t.Errorf("the kubeconfig must survive: %v", err)
 	}
 }
