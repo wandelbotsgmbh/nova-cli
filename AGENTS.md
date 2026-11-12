@@ -88,7 +88,7 @@
 
 * Manages GPU streaming sessions (Isaac Sim, Blender) on the streaming session broker (dev: `https://broker.omni.dev.wandelbots.io`, viewer: `https://viewer.omni.dev.wandelbots.io/omniverse-stream`).
 * The broker only accepts tokens of the viewer's **Microsoft Entra ID** app, not portal/Auth0 tokens from `nova login` (even though its spec says "NOVA access token"). `nova simulation login` runs the Entra device flow (public client, no secret) and stores the token under `simulation-token`, separate from the portal `token`.
-* The same token authorizes the APIs inside a session: `https://<route host>:<kit port, default 8080>/wandelbots-stream/api/v1` and `/omniservice/api/v2`, each with an `openapi.json` (no hosted docs page; the viewer renders them itself).
+* The same token authorizes the APIs inside a session: `https://<route host>:<kit port, default 8080>/wandelbots-stream/api/v1` and `/omniservice/api/v2`, each with an `openapi.json` (no hosted docs page; the viewer renders them itself). `nova simulation session api <session> <api> <path>` sends requests to them like `nova api` (shared code: `prepareRequest`/`sendAPIRequest` in `pkg/cmd/api.go`, `novaapi.NewBearerClient`); the path is relative to the api's base URL.
 * Code: `pkg/simulation` (client generated from the broker's `openapi.json`; `overlay.yaml` adds `type: string` to `LeaseStatus`, which the broker emits as `oneOf` + `const` without a type), commands in `pkg/cmd/simulation.go`. Only dev is configured in `environments`.
 
 ## Repository

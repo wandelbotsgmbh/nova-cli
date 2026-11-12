@@ -25,7 +25,9 @@ import (
 	"golang.org/x/term"
 )
 
-var apiFlags struct {
+// requestFlags are the flags of an API request (nova api, nova simulation
+// session api).
+type requestFlags struct {
 	method  string
 	fields  []fieldArg
 	headers []string
@@ -35,7 +37,11 @@ var apiFlags struct {
 	output  string
 	dryRun  bool
 	timeout time.Duration
-	limit   int
+}
+
+var apiFlags struct {
+	requestFlags
+	limit int
 }
 
 var apiCmd = &cobra.Command{
@@ -122,24 +128,30 @@ the answers.`,
 }
 
 func init() {
-	f := apiCmd.Flags()
-	f.StringVarP(&apiFlags.method, "method", "X", "", "HTTP method (default: GET, or POST with fields or --input)")
-	f.VarP(&fieldFlag{list: &apiFlags.fields}, "raw-field", "f", "Add a string field key=value")
-	f.VarP(&fieldFlag{list: &apiFlags.fields, typed: true}, "field", "F", "Add a typed field key=value (true, false, null, numbers, @file)")
-	f.StringArrayVarP(&apiFlags.headers, "header", "H", nil, "Add a request header 'Key: value'")
-	f.StringVar(&apiFlags.input, "input", "", "Read the request body from a file (- for stdin)")
-	f.BoolVarP(&apiFlags.include, "include", "i", false, "Print the status line and response headers before the body")
-	f.BoolVar(&apiFlags.silent, "silent", false, "Don't print the response body")
-	f.StringVarP(&apiFlags.output, "output", "o", "", "Write the response body to a file (needed for binary answers)")
-	f.BoolVar(&apiFlags.dryRun, "dry-run", false, "Check and print the request as JSON without sending it")
+	addRequestFlags(apiCmd, &apiFlags.requestFlags, "Write the response body to a file (needed for binary answers)",
+		"Check and print the request as JSON without sending it")
 	// persistent: search and schema bound their spec lookup with it too
 	apiCmd.PersistentFlags().DurationVar(&apiFlags.timeout, "timeout", time.Minute, "How long to wait for the answer's headers and for the API spec (0: no limit for the answer)")
-	_ = apiCmd.RegisterFlagCompletionFunc("method", cobra.FixedCompletions(
-		[]string{"GET", "POST", "PUT", "PATCH", "DELETE"}, cobra.ShellCompDirectiveNoFileComp))
 
 	apiSearchCmd.Flags().IntVar(&apiFlags.limit, "limit", 10, "Maximum number of results (0: all)")
 	apiCmd.AddCommand(apiSearchCmd, apiSchemaCmd)
 	rootCmd.AddCommand(apiCmd)
+}
+
+// addRequestFlags adds the request flags except --timeout to cmd.
+func addRequestFlags(cmd *cobra.Command, r *requestFlags, outputUsage, dryRunUsage string) {
+	f := cmd.Flags()
+	f.StringVarP(&r.method, "method", "X", "", "HTTP method (default: GET, or POST with fields or --input)")
+	f.VarP(&fieldFlag{list: &r.fields}, "raw-field", "f", "Add a string field key=value")
+	f.VarP(&fieldFlag{list: &r.fields, typed: true}, "field", "F", "Add a typed field key=value (true, false, null, numbers, @file)")
+	f.StringArrayVarP(&r.headers, "header", "H", nil, "Add a request header 'Key: value'")
+	f.StringVar(&r.input, "input", "", "Read the request body from a file (- for stdin)")
+	f.BoolVarP(&r.include, "include", "i", false, "Print the status line and response headers before the body")
+	f.BoolVar(&r.silent, "silent", false, "Don't print the response body")
+	f.StringVarP(&r.output, "output", "o", "", outputUsage)
+	f.BoolVar(&r.dryRun, "dry-run", false, dryRunUsage)
+	_ = cmd.RegisterFlagCompletionFunc("method", cobra.FixedCompletions(
+		[]string{"GET", "POST", "PUT", "PATCH", "DELETE"}, cobra.ShellCompDirectiveNoFileComp))
 }
 
 // fieldArg is one -f or -F argument.
@@ -294,37 +306,78 @@ func runAPI(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	p, err := prepareRequest(&apiFlags.requestFlags, path)
+	if err != nil {
+		return err
+	}
+
+	client, err := novaapi.NewClient(t.Host)
+	if err != nil {
+		return err
+	}
+	op := apiOperation(ctx, client, p.method, p.path)
+	if novaapi.IsStream(op) {
+		return &typedError{
+			Code:    "STREAM_NOT_SUPPORTED",
+			Message: fmt.Sprintf("%s is a WebSocket stream, which 'nova api' doesn't run", op.ID),
+			Hint:    "WebSocket streams are not supported by nova api: use the NOVA SDK or an app",
+			exit:    exitRefused,
+		}
+	}
+	return p.send(cmd, client, op, &apiFlags.requestFlags, apiLogin{hint: "run 'nova login'"})
+}
+
+// apiLogin tells how to fix a rejected login.
+type apiLogin struct {
+	// hint of the UNAUTHORIZED error (ingress 401 page or login redirect)
+	hint string
+	// on401 is added to the error of an HTTP 401 answer, if set
+	on401 string
+}
+
+// preparedRequest is a request built from the request flags.
+type preparedRequest struct {
+	method  string
+	path    string
+	body    []byte
+	headers http.Header
+}
+
+// prepareRequest builds method, path (with query fields), body and headers from
+// the request flags.
+func prepareRequest(f *requestFlags, path string) (*preparedRequest, error) {
 	// in command-line order: a[][b] fields group by order, and the last of two
 	// equal keys wins
 	var fields []novaapi.Field
-	for _, a := range apiFlags.fields {
-		var f novaapi.Field
+	for _, a := range f.fields {
+		var fl novaapi.Field
 		var err error
 		if a.typed {
-			f, err = novaapi.ParseTypedField(a.value, readInput)
+			fl, err = novaapi.ParseTypedField(a.value, readInput)
 		} else {
-			f, err = novaapi.ParseRawField(a.value)
+			fl, err = novaapi.ParseRawField(a.value)
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
-		fields = append(fields, f)
+		fields = append(fields, fl)
 	}
 
-	method := strings.ToUpper(apiFlags.method)
+	method := strings.ToUpper(f.method)
 	if method == "" {
 		method = http.MethodGet
-		if len(fields) > 0 || apiFlags.input != "" {
+		if len(fields) > 0 || f.input != "" {
 			method = http.MethodPost
 		}
 	}
 
 	var body []byte
+	var err error
 	contentType := ""
 	switch {
-	case apiFlags.input != "":
-		if body, err = readInput(apiFlags.input); err != nil {
-			return fmt.Errorf("reading --input: %w", err)
+	case f.input != "":
+		if body, err = readInput(f.input); err != nil {
+			return nil, fmt.Errorf("reading --input: %w", err)
 		}
 		contentType = "application/json"
 		path = novaapi.AddQuery(path, fields)
@@ -333,19 +386,19 @@ func runAPI(cmd *cobra.Command, args []string) error {
 	case len(fields) > 0:
 		obj, err := novaapi.BuildBody(fields)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if body, err = json.Marshal(obj); err != nil {
-			return err
+			return nil, err
 		}
 		contentType = "application/json"
 	}
 
 	headers := http.Header{}
-	for _, h := range apiFlags.headers {
+	for _, h := range f.headers {
 		k, v, ok := strings.Cut(h, ":")
 		if !ok || strings.TrimSpace(k) == "" {
-			return fmt.Errorf("header %q: expected 'Key: value'", h)
+			return nil, fmt.Errorf("header %q: expected 'Key: value'", h)
 		}
 		headers.Add(strings.TrimSpace(k), strings.TrimSpace(v))
 	}
@@ -355,39 +408,34 @@ func runAPI(cmd *cobra.Command, args []string) error {
 	if headers.Get("Accept") == "" {
 		headers.Set("Accept", "application/json, */*;q=0.8")
 	}
+	return &preparedRequest{method: method, path: path, body: body, headers: headers}, nil
+}
 
-	client, err := novaapi.NewClient(t.Host)
+// send sends the request with client's credentials and prints the answer, or
+// with --dry-run only the request.
+func (p *preparedRequest) send(cmd *cobra.Command, client *novaapi.Client, op *novaapi.Operation, f *requestFlags, login apiLogin) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := client.NewRequest(ctx, p.method, p.path, bytes.NewReader(p.body))
 	if err != nil {
 		return err
 	}
-	op := apiOperation(ctx, client, method, path)
-	if novaapi.IsStream(op) {
-		return &typedError{
-			Code:    "STREAM_NOT_SUPPORTED",
-			Message: fmt.Sprintf("%s is a WebSocket stream, which 'nova api' doesn't run", op.ID),
-			Hint:    "WebSocket streams are not supported by nova api: use the NOVA SDK or an app",
-			exit:    exitRefused,
-		}
-	}
-
-	req, err := client.NewRequest(ctx, method, path, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	if body == nil {
+	if p.body == nil {
 		req.Body, req.ContentLength = http.NoBody, 0
 	}
-	for k, vs := range headers {
+	for k, vs := range p.headers {
 		req.Header[k] = vs
 	}
 
-	if apiFlags.dryRun {
-		return writeJSON(cmd, dryRunRequest(req, op, body))
+	if f.dryRun {
+		return writeJSON(cmd, dryRunRequest(req, op, p.body))
 	}
 	if req.URL.Scheme == "http" && req.Header.Get("Authorization") != "" {
 		fmt.Fprintf(os.Stderr, "Warning: sending credentials to %s over plain HTTP\n", req.URL.Host)
 	}
-	return sendAPIRequest(cmd, client, req)
+	return sendAPIRequest(cmd, client, req, f, login)
 }
 
 // apiOperation looks up the v2 operation of a request in the instance's spec, to
@@ -436,27 +484,27 @@ func dryRunRequest(req *http.Request, op *novaapi.Operation, body []byte) apiReq
 	return r
 }
 
-func sendAPIRequest(cmd *cobra.Command, client *novaapi.Client, req *http.Request) error {
+func sendAPIRequest(cmd *cobra.Command, client *novaapi.Client, req *http.Request, f *requestFlags, login apiLogin) error {
 	// The timeout covers the wait for the headers, not the body: the timer stops
 	// as soon as the headers are there. 0 waits as long as the instance takes.
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 	var timer *time.Timer
-	if apiFlags.timeout > 0 {
-		timer = time.AfterFunc(apiFlags.timeout, cancel)
+	if f.timeout > 0 {
+		timer = time.AfterFunc(f.timeout, cancel)
 	}
 	resp, err := client.RoundTrip(req.WithContext(ctx))
 	if timer != nil && !timer.Stop() {
 		if err == nil {
 			resp.Body.Close()
 		}
-		return fmt.Errorf("%s %s: no answer within %s (--timeout)", req.Method, req.URL, apiFlags.timeout)
+		return fmt.Errorf("%s %s: no answer within %s (--timeout)", req.Method, req.URL, f.timeout)
 	}
 	if err == nil {
 		resp, err = novaapi.CheckAnswer(resp)
 	}
 	if errors.Is(err, novaapi.ErrUnauthorized) {
-		return &typedError{Code: "UNAUTHORIZED", Message: err.Error(), Hint: "run 'nova login'", exit: 1}
+		return &typedError{Code: "UNAUTHORIZED", Message: client.UnauthorizedMessage(), Hint: login.hint, exit: 1}
 	}
 	if err != nil {
 		return err
@@ -472,18 +520,21 @@ func sendAPIRequest(cmd *cobra.Command, client *novaapi.Client, req *http.Reques
 	failed := status < 200 || status >= 300
 
 	out := cmd.OutOrStdout()
-	if apiFlags.include {
+	if f.include {
 		writeResponseHead(out, resp)
 	}
 
 	if failed {
 		b, _ := io.ReadAll(br)
-		if !apiFlags.silent {
+		if !f.silent {
 			writeBody(out, b)
 		}
 		msg := fmt.Sprintf("%s %s: HTTP %d", req.Method, req.URL, status)
 		if d := ingress.ErrorDetail(b); d != "" && len(b) > 0 {
 			msg += ": " + d
+		}
+		if status == http.StatusUnauthorized && login.on401 != "" {
+			msg += " (" + login.on401 + ")"
 		}
 		if loc := resp.Header.Get("Location"); status >= 300 && status < 400 && loc != "" {
 			msg += " (redirect to " + loc + ", not followed: another host or more than 10 redirects)"
@@ -492,21 +543,21 @@ func sendAPIRequest(cmd *cobra.Command, client *novaapi.Client, req *http.Reques
 	}
 
 	switch {
-	case apiFlags.output != "":
-		f, err := os.Create(apiFlags.output)
+	case f.output != "":
+		file, err := os.Create(f.output)
 		if err != nil {
 			return err
 		}
-		n, err := io.Copy(f, br)
-		if cerr := f.Close(); err == nil {
+		n, err := io.Copy(file, br)
+		if cerr := file.Close(); err == nil {
 			err = cerr
 		}
 		if err != nil {
-			return fmt.Errorf("writing %s: %w", apiFlags.output, err)
+			return fmt.Errorf("writing %s: %w", f.output, err)
 		}
-		cmd.PrintErrf("Wrote %d bytes to %s\n", n, apiFlags.output)
+		cmd.PrintErrf("Wrote %d bytes to %s\n", n, f.output)
 		return nil
-	case apiFlags.silent:
+	case f.silent:
 		_, err := io.Copy(io.Discard, br)
 		return err
 	case len(head) > 0 && !isTextual(resp.Header.Get("Content-Type"), head):
