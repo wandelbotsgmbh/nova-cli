@@ -26,6 +26,11 @@ var ErrUnauthorized = errors.New("the instance rejected the request as unauthent
 type Client struct {
 	base *url.URL // instance url with protocol, no trailing slash
 	http *http.Client
+	// auth sets the credentials of a request; nil: the instance's login
+	// (oauth.SetAuthForRequest)
+	auth func(*http.Request) error
+	// unauthorized replaces ErrUnauthorized's message for a bearer client
+	unauthorized string
 }
 
 // NewClient refreshes the login for cloud instances and returns a client for host.
@@ -62,6 +67,30 @@ func newClient(base string, hc *http.Client) (*Client, error) {
 	return &Client{base: u, http: &h}, nil
 }
 
+// NewBearerClient returns a client for the API at base (a url that may end in a
+// path, e.g. https://host:8080/omniservice/api/v2) that sends token as bearer
+// token. Request paths are appended to base.
+func NewBearerClient(base, token string) (*Client, error) {
+	c, err := newClient(base, httpx.Client())
+	if err != nil {
+		return nil, err
+	}
+	c.auth = func(req *http.Request) error {
+		req.Header.Set("Authorization", "Bearer "+token)
+		return nil
+	}
+	c.unauthorized = "the API rejected the request as unauthenticated: the token is missing or expired"
+	return c, nil
+}
+
+// UnauthorizedMessage describes ErrUnauthorized for this client's credentials.
+func (c *Client) UnauthorizedMessage() string {
+	if c.unauthorized != "" {
+		return c.unauthorized
+	}
+	return ErrUnauthorized.Error()
+}
+
 // Host returns the instance's host (with port, if any).
 func (c *Client) Host() string { return c.base.Host }
 
@@ -91,7 +120,11 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 	if err != nil {
 		return nil, err
 	}
-	if err := oauth.SetAuthForRequest(req); err != nil {
+	auth := c.auth
+	if auth == nil {
+		auth = oauth.SetAuthForRequest
+	}
+	if err := auth(req); err != nil {
 		return nil, err
 	}
 	if err := version.SetUserAgent(ctx, req); err != nil {

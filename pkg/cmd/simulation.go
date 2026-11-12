@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/novaapi"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/simulation"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/version"
 	"gopkg.in/yaml.v3"
@@ -42,7 +44,7 @@ nova simulation session suspend my-session
 nova simulation session delete my-session
 
 # call the Isaac Sim extension API inside the session
-curl -H "Authorization: Bearer $(nova simulation token)" "$(nova simulation session api my-session omniservice)/status"`,
+nova simulation session api my-session omniservice /status`,
 	Short: "EXPERIMENTAL, Wandelbots internal: Manage simulation streaming sessions",
 	Long: `EXPERIMENTAL: Manage simulation streaming sessions (Isaac Sim, Blender, ...) on the streaming session broker.
 
@@ -389,27 +391,74 @@ nova simulation session open my-session --print`,
 }
 
 var simulationSessionAPIFlags struct {
-	spec   bool
-	output string
+	requestFlags
+	spec bool
 }
 
 var simulationSessionAPICmd = &cobra.Command{
-	Use:   "api <session> [api]",
-	Short: "List the APIs running inside a session, or download one's OpenAPI spec",
+	Use:   "api <session> [api [path]]",
+	Short: "List the APIs inside a session, download their OpenAPI spec or send a request",
 	Long: `List the HTTP APIs running inside a session: the Kit stream API ("stream") and the
-Isaac Sim extension API ("omniservice"). They take the same token as the broker,
-see "nova simulation token". The stream page in the viewer has an API explorer for them.`,
+Isaac Sim extension API ("omniservice"). With an api name, print its base URL, or with
+--spec its OpenAPI spec. The stream page in the viewer has an API explorer for them.
+
+With a path, send an authenticated request to the api and print the answer, like
+'nova api': the path is relative to the api's base URL (/status goes to
+<base-url>/status) and the request carries the simulation login ('nova simulation
+login'), which only goes to the session's host.
+
+Fields:
+  -f key=value     string field
+  -F key=value     typed field: true, false, null and numbers become JSON literals,
+                   @file (or @- for stdin) reads the value from a file
+  Nested keys like gh: pose[position][]=1 or items[][name]=a. Fields make the request a
+  POST unless -X is given; with GET (or together with --input) they go to the query.
+  --input file     the request body from a file (- for stdin)
+
+The answer goes to stdout as it arrives; with an HTTP error status the body is still
+printed and nova exits with 1. Binary answers need --output. WebSocket endpoints are
+not supported: this sends plain HTTP requests.`,
 	Example: `# list the APIs of a session
 nova simulation session api my-session
 
 # save the OpenAPI spec of the Isaac Sim extension API
 nova simulation session api my-session omniservice --spec -o omniservice.json
 
-# call an API directly
-curl -H "Authorization: Bearer $(nova simulation token)" <base-url>/status`,
-	Args:              cobra.RangeArgs(1, 2),
+# call an API
+nova simulation session api my-session omniservice /status
+nova simulation session api my-session stream /some/endpoint -X POST -F enabled=true
+
+# print a request without sending it
+nova simulation session api my-session omniservice /some/endpoint -f name=x --dry-run`,
+	Args:              cobra.RangeArgs(1, 3),
 	ValidArgsFunction: completeSimulationSessionAPI,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		f := &simulationSessionAPIFlags
+		if len(args) == 3 {
+			if f.spec {
+				return errors.New("--spec and a path don't go together")
+			}
+			if !strings.HasPrefix(args[2], "/") || strings.HasPrefix(args[2], "//") {
+				return fmt.Errorf("the path must start with a single '/', relative to the api's base URL, e.g. /status")
+			}
+			if strings.Contains(args[2], "#") {
+				return fmt.Errorf("the path %q has a fragment (#), which is never sent: escape it as %%23", args[2])
+			}
+			if leavesBase(args[2]) {
+				return fmt.Errorf("the path %q leaves the api's base URL: '.' and '..' segments are not allowed", args[2])
+			}
+		} else if name := changedRequestFlag(cmd); name != "" {
+			return fmt.Errorf("--%s needs a path: nova simulation session api <session> <api> <path>", name)
+		}
+		var prepared *preparedRequest
+		if len(args) == 3 {
+			// before the broker lookups: bad fields fail without network
+			var err error
+			if prepared, err = prepareRequest(&f.requestFlags, args[2]); err != nil {
+				return err
+			}
+		}
+
 		c, id, err := brokerAndSession(cmd.Context(), args[0])
 		if err != nil {
 			return err
@@ -424,7 +473,7 @@ curl -H "Authorization: Bearer $(nova simulation token)" <base-url>/status`,
 		}
 
 		if len(args) == 1 {
-			if simulationSessionAPIFlags.spec {
+			if f.spec {
 				return errors.New("--spec needs an api name: stream or omniservice")
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
@@ -439,14 +488,49 @@ curl -H "Authorization: Bearer $(nova simulation token)" <base-url>/status`,
 			if a.Name != args[1] {
 				continue
 			}
-			if !simulationSessionAPIFlags.spec {
+			switch {
+			case prepared != nil:
+				client, err := novaapi.NewBearerClient(a.BaseURL, c.Token)
+				if err != nil {
+					return err
+				}
+				hint := "run 'nova simulation login'"
+				return prepared.send(cmd, client, nil, &f.requestFlags, apiLogin{hint: hint, on401: hint})
+			case f.spec:
+				return downloadSpec(cmd, a.SpecURL(), c.Token, f.output)
+			default:
 				fmt.Fprintln(cmd.OutOrStdout(), a.BaseURL)
 				return nil
 			}
-			return downloadSpec(cmd, a.SpecURL(), c.Token, simulationSessionAPIFlags.output)
 		}
 		return fmt.Errorf("unknown api %q, expected stream or omniservice", args[1])
 	},
+}
+
+// leavesBase reports whether a path (without query) has '.' or '..' segments,
+// which a server may resolve to a path outside the api's base URL.
+func leavesBase(path string) bool {
+	p, _, _ := strings.Cut(path, "?")
+	for _, seg := range strings.Split(p, "/") {
+		if u, err := url.PathUnescape(seg); err == nil {
+			seg = u
+		}
+		if seg == "." || seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// changedRequestFlag returns the name of a flag given on the command line that
+// only applies to a request (all request flags but --output, which --spec uses).
+func changedRequestFlag(cmd *cobra.Command) string {
+	for _, name := range []string{"method", "raw-field", "field", "header", "input", "include", "silent", "dry-run", "timeout"} {
+		if cmd.Flags().Changed(name) {
+			return name
+		}
+	}
+	return ""
 }
 
 var simulationAPIFlags struct {
@@ -641,8 +725,10 @@ func init() {
 	_ = simulationSessionExtendCmd.MarkFlagRequired("minutes")
 
 	simulationSessionOpenCmd.Flags().BoolVar(&simulationSessionOpenPrint, "print", false, "Only print the URL")
+	addRequestFlags(simulationSessionAPICmd, &simulationSessionAPIFlags.requestFlags, "File to write the spec (--spec) or the response body to (default: stdout)",
+		"Print the request as JSON without sending it")
 	simulationSessionAPICmd.Flags().BoolVar(&simulationSessionAPIFlags.spec, "spec", false, "Download the OpenAPI spec of the api")
-	simulationSessionAPICmd.Flags().StringVarP(&simulationSessionAPIFlags.output, "output", "o", "", "File to write the spec to (default: stdout)")
+	simulationSessionAPICmd.Flags().DurationVar(&simulationSessionAPIFlags.timeout, "timeout", time.Minute, "How long to wait for the answer's headers (0: no limit)")
 
 	simulationAPICmd.Flags().BoolVar(&simulationAPIFlags.open, "open", false, "Open the interactive API docs in the browser")
 	simulationAPICmd.Flags().BoolVar(&simulationAPIFlags.spec, "spec", false, "Download the OpenAPI spec")
@@ -831,10 +917,13 @@ func printYAML(cmd *cobra.Command, v any) error {
 }
 
 func completeSimulationSessionAPI(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if len(args) == 1 {
+	switch len(args) {
+	case 0:
+		return completeSimulationSession(cmd, args, toComplete)
+	case 1:
 		return []string{"stream\tKit stream API", "omniservice\tIsaac Sim extension API"}, cobra.ShellCompDirectiveNoFileComp
 	}
-	return completeSimulationSession(cmd, args, toComplete)
+	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
 func completeSimulationSession(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

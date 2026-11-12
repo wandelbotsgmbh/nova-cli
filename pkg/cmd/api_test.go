@@ -122,6 +122,9 @@ func withAPIInstance(t *testing.T) *apiInstance {
 		case "/api/v2/slow":
 			time.Sleep(300 * time.Millisecond)
 			_, _ = io.WriteString(w, "late")
+		case "/api/v2/real-401":
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, "denied")
 		case "/expired":
 			_, _ = io.WriteString(w, "Error 401: Unauthorized")
 		default:
@@ -394,5 +397,15 @@ func TestAPISearchTakesTimeout(t *testing.T) {
 	withAPIInstance(t)
 	if _, stderr, err := runAsProcess(t, "api", "search", "controller", "--timeout", "5s"); err != nil {
 		t.Fatalf("%v\n%s", err, stderr)
+	}
+}
+
+// A real HTTP 401 from an instance gets no login hint: host and k8srun
+// instances don't use the portal login.
+func TestAPIHTTP401HasNoLoginSuffix(t *testing.T) {
+	withAPIInstance(t)
+	_, stderr, err := runAsProcess(t, "api", "/api/v2/real-401")
+	if err == nil || !strings.Contains(stderr, "HTTP 401") || strings.Contains(stderr, "nova login") {
+		t.Errorf("err %v, stderr %q", err, stderr)
 	}
 }
