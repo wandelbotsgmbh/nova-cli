@@ -323,7 +323,12 @@ func (a kubeAccess) client() (*http.Client, error) {
 	if a.token != "" {
 		rt = bearerTransport{token: a.token, next: rt}
 	}
-	return &http.Client{Transport: httpx.WithUserAgent(rt)}, nil
+	return &http.Client{
+		Transport: httpx.WithUserAgent(rt),
+		// an API server doesn't redirect; following one would send the token to another
+		// host and judge by that host's answer
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}, nil
 }
 
 type bearerTransport struct {

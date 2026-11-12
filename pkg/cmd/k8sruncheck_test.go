@@ -429,3 +429,70 @@ contexts:
 		t.Errorf("the kubeconfig must survive: %v", err)
 	}
 }
+
+// 'nova instance prune' re-reads the list before removing, like 'k8srun prune': an entry
+// recreated meanwhile is kept, reported under unchecked, and doesn't fail the command.
+func TestInstancePruneKeepsEntryReplacedMeanwhile(t *testing.T) {
+	withConfig(t, "")
+	fake := newFakeK8sRunService(t)
+	mustRun(t, "k8srun", "create", "--name", "a") // id-1
+	mustRun(t, "k8srun", "create", "--name", "b") // id-2
+	fake.gone["id-1"], fake.gone["id-2"] = true, true
+	old := afterPruneConfirm
+	t.Cleanup(func() { afterPruneConfirm = old })
+	afterPruneConfirm = func() {
+		r, err := loadRegistry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for n := range r.Instances {
+			if r.Instances[n].Name == "a" {
+				r.Instances[n].ID = "id-3"
+			}
+		}
+		if err := saveRegistry(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var result pruneJSON
+	_, errOut, err := runJSON(t, &result, "instance", "prune", "-o", "json")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, errOut)
+	}
+	if len(result.Removed) != 1 || result.Removed[0].Name != "b" {
+		t.Errorf("removed = %+v", result.Removed)
+	}
+	if len(result.Unchecked) != 1 || result.Unchecked[0].Name != "a" || result.Unchecked[0].Reason != "it was changed meanwhile" {
+		t.Errorf("unchecked = %+v", result.Unchecked)
+	}
+	r, _ := instances.Load(viper.GetViper())
+	if inst, ok := r.Get("a"); !ok || inst.ID != "id-3" {
+		t.Errorf("the recreated entry must stay: %+v", inst)
+	}
+}
+
+// An API server never redirects: a redirect is no proof, and the token stays home.
+func TestKubeconfigProbeDoesntFollowRedirects(t *testing.T) {
+	var leaked string
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer target.Close()
+	redirect := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/api", http.StatusFound)
+	}))
+	defer redirect.Close()
+
+	kc, err := parseKubeconfig([]byte(mustReadFile(t, kubeconfigFor(t, redirect.URL, redirect))), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if why := kubeconfigRejected(kc); why != "" {
+		t.Errorf("a redirect must be inconclusive, got %q", why)
+	}
+	if leaked != "" {
+		t.Errorf("the token reached the redirect target: %q", leaked)
+	}
+}

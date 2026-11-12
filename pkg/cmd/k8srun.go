@@ -27,8 +27,8 @@ const defaultK8sRunName = "k8srun"
 // k8srunMaxMinutes is the longest lifetime the cluster service grants (12 hours).
 const k8srunMaxMinutes = 720
 
-// afterPruneConfirm runs after the prune question was answered; tests use it to change
-// the list meanwhile.
+// afterPruneConfirm runs right before prune re-reads the list (after the question, if
+// any); tests use it to change the list meanwhile.
 var afterPruneConfirm = func() {}
 
 // clusterServiceURL is a variable so tests can point it to a fake service.
@@ -327,26 +327,9 @@ $ nova k8srun prune -y`,
 			}
 			if len(gone) > 0 && !k8srunPruneDryRun {
 				afterPruneConfirm()
-				// another session may have replaced an entry while the question was open
-				// (e.g. 'nova k8srun create' under the same name): remove only the
-				// clusters that were checked
-				if r, err = loadRegistry(); err != nil {
+				if r, gone, unchecked, err = recheckGone(errOut, gone, checkedID, unchecked); err != nil {
 					return err
 				}
-				var still []string
-				for _, name := range gone {
-					i, ok := r.Get(name)
-					switch {
-					case !ok || i.ID != checkedID[name]:
-						fmt.Fprintf(errOut, "keeping %q: it was changed meanwhile\n", name)
-					case kubeconfigShared(i) != "":
-						// kubectl or kind may have added a context meanwhile
-						fmt.Fprintf(errOut, "keeping %q: %s\n", name, kubeconfigShared(i))
-					default:
-						still = append(still, name)
-					}
-				}
-				gone = still
 			}
 			// entries without id are reported as unchecked, but (as before) don't fail the command
 			if err := removeGoneEntries(cmd, r, gone, k8srunPruneDryRun, pruneOutput, unchecked); err != nil {

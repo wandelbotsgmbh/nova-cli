@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 
@@ -51,6 +52,7 @@ $ nova instance prune`,
 		errOut := cmd.ErrOrStderr()
 		var gone []string
 		var unchecked []pruneEntryJSON
+		checkedID := map[string]string{}
 		skipped := 0
 
 		// cloud entries: one portal listing per environment, in that environment
@@ -97,6 +99,7 @@ $ nova instance prune`,
 			for _, i := range byEnv[env] {
 				if !exists[i.ID] {
 					gone = append(gone, i.Name)
+					checkedID[i.Name] = i.ID
 				}
 			}
 		}
@@ -127,9 +130,17 @@ $ nova instance prune`,
 			if isGone {
 				fmt.Fprintf(errOut, "%q is gone: %s\n", i.Name, reason)
 				gone = append(gone, i.Name)
+				checkedID[i.Name] = i.ID
 			}
 		}
 
+		if len(gone) > 0 && !instancePruneDryRun {
+			n := len(unchecked)
+			if r, gone, unchecked, err = recheckGone(errOut, gone, checkedID, unchecked); err != nil {
+				return err
+			}
+			skipped += len(unchecked) - n
+		}
 		if err := removeGoneEntries(cmd, r, gone, instancePruneDryRun, instancePruneOutput, unchecked); err != nil {
 			return err
 		}
@@ -138,6 +149,36 @@ $ nova instance prune`,
 		}
 		return nil
 	},
+}
+
+// recheckGone reloads the list right before removing and keeps the gone entries that
+// changed since they were checked: another session may have recreated one under the same
+// name (other id), or kubectl/kind may have added a context to a k8srun kubeconfig. Kept
+// entries are reported in unchecked; they are a rule, not a failed check.
+func recheckGone(errOut io.Writer, gone []string, checkedID map[string]string, unchecked []pruneEntryJSON) (*instances.Registry, []string, []pruneEntryJSON, error) {
+	afterPruneConfirm()
+	r, err := loadRegistry()
+	if err != nil {
+		return nil, nil, unchecked, err
+	}
+	var still []string
+	for _, name := range gone {
+		i, ok := r.Get(name)
+		why := ""
+		switch {
+		case !ok || i.ID != checkedID[name]:
+			why = "it was changed meanwhile"
+		case i.Kind == instances.KindK8sRun:
+			why = kubeconfigShared(i)
+		}
+		if why == "" {
+			still = append(still, name)
+			continue
+		}
+		fmt.Fprintf(errOut, "keeping %q: %s\n", name, why)
+		unchecked = append(unchecked, pruneEntryJSON{Name: name, Kind: string(i.Kind), Reason: why})
+	}
+	return r, still, unchecked, nil
 }
 
 // removeGoneEntries prints and (unless dryRun) removes the named entries with their
