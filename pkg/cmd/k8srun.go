@@ -13,10 +13,12 @@ import (
 	"os"
 	"os/user"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
+	"golang.org/x/term"
 )
 
 // name used by 'nova k8srun create' without --name
@@ -24,6 +26,10 @@ const defaultK8sRunName = "k8srun"
 
 // k8srunMaxMinutes is the longest lifetime the cluster service grants (12 hours).
 const k8srunMaxMinutes = 720
+
+// afterPruneConfirm runs right before prune re-reads the list (after the question, if
+// any); tests use it to change the list meanwhile.
+var afterPruneConfirm = func() {}
 
 // clusterServiceURL is a variable so tests can point it to a fake service.
 var clusterServiceURL = "http://k8s.wabo.run/instance"
@@ -34,6 +40,7 @@ var (
 	k8srunReplace      bool
 	k8srunNoSelect     bool
 	k8srunPruneDryRun  bool
+	k8srunPruneYes     bool
 )
 
 type virtualInstance struct {
@@ -259,11 +266,20 @@ Without a name, the targeted instance is destroyed; it must be a cluster.`,
 		Long: `Remove clusters that no longer exist (expired after 12 hours, or destroyed elsewhere)
 from the local instance list, together with their stored kubeconfig.
 
-Each cluster is looked up on the cluster service; an entry is only removed if the service
-answers that the cluster id is unknown. Entries that can't be checked (network error, any
-other answer) are kept.`,
+An entry counts as gone only on a definite answer:
+  - the cluster service doesn't know the cluster id, or
+  - it does, but the cluster's Kubernetes API rejects the stored kubeconfig (a released
+    VM keeps its IP but gets new credentials, so the address now serves another cluster).
+Entries that can't be checked (network error, any other answer) are kept, and a cluster
+that doesn't answer at all is kept too. An entry whose kubeconfig holds more than the
+cluster's one context (e.g. kubectl or kind added theirs after 'nova instance env') is
+never pruned: remove it explicitly with 'nova instance remove <name>'.
+
+The entries found are listed with the reason, and the command asks before removing them;
+-y removes them without asking (required without a terminal, e.g. for agents and scripts).`,
 		Example: `$ nova k8srun prune --dry-run
-$ nova k8srun prune`,
+$ nova k8srun prune
+$ nova k8srun prune -y`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := loadRegistry()
 			if err != nil {
@@ -271,6 +287,7 @@ $ nova k8srun prune`,
 			}
 			errOut := cmd.ErrOrStderr()
 			var gone []string
+			checkedID := map[string]string{}
 			var unchecked []pruneEntryJSON
 			failed := 0
 			for _, i := range r.Instances {
@@ -282,18 +299,38 @@ $ nova k8srun prune`,
 					unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: "no cluster id"})
 					continue
 				}
-				exists, err := clusterExists(i.ID)
+				if why := kubeconfigShared(i); why != "" {
+					fmt.Fprintf(errOut, "keeping %q: %s\n", i.Name, why)
+					unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: why})
+					continue
+				}
+				isGone, reason, err := clusterGone(i, true)
 				if err != nil {
 					fmt.Fprintf(errOut, "keeping %q: %v\n", i.Name, err)
 					unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: err.Error()})
 					failed++
 					continue
 				}
-				if !exists {
+				if isGone {
+					fmt.Fprintf(errOut, "%q is gone: %s\n", i.Name, reason)
 					gone = append(gone, i.Name)
+					checkedID[i.Name] = i.ID
 				}
 			}
 
+			if len(gone) > 0 && !k8srunPruneDryRun &&
+				!confirmWith(cmd, k8srunPruneYes, fmt.Sprintf("Remove %s from the local instance list?", strings.Join(gone, ", ")), false) {
+				if !term.IsTerminal(int(os.Stdin.Fd())) {
+					return errors.New("nothing removed: without a terminal, confirm with -y")
+				}
+				return errors.New("nothing removed")
+			}
+			if len(gone) > 0 && !k8srunPruneDryRun {
+				afterPruneConfirm()
+				if r, gone, unchecked, err = recheckGone(errOut, gone, checkedID, unchecked); err != nil {
+					return err
+				}
+			}
 			// entries without id are reported as unchecked, but (as before) don't fail the command
 			if err := removeGoneEntries(cmd, r, gone, k8srunPruneDryRun, pruneOutput, unchecked); err != nil {
 				return err
@@ -313,6 +350,7 @@ $ nova k8srun prune`,
 	listOutput = addOutputFlag(list)
 	pruneOutput = addOutputFlag(prune)
 	prune.Flags().BoolVar(&k8srunPruneDryRun, "dry-run", false, "Only print the entries that would be removed")
+	prune.Flags().BoolVarP(&k8srunPruneYes, "yes", "y", false, "Remove the entries without asking")
 
 	group.AddCommand(create, destroy, list, prune)
 	return group
@@ -389,21 +427,34 @@ func requestCluster(version string) (virtualInstance, error) {
 
 // clusterExists asks the cluster service whether the cluster id is still assigned. Only
 // a 404 counts as gone; any other answer is an error, so callers never drop an entry
-// they couldn't verify. The kubeconfig in the answer is discarded.
+// they couldn't verify.
 func clusterExists(id string) (bool, error) {
+	exists, _, err := clusterKubeconfig(id)
+	return exists, err
+}
+
+// clusterKubeconfig asks the cluster service for the kubeconfig of a cluster id, which
+// also tells whether the id is still assigned (see clusterExists). The kubeconfig is
+// returned as the service sends it (possibly base64, see decodeServiceKubeconfig).
+func clusterKubeconfig(id string) (bool, []byte, error) {
 	resp, err := httpx.Client().Get(clusterServiceURL + "/" + url.PathEscape(id) + "/kubeconfig")
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
 	switch resp.StatusCode {
 	case http.StatusOK:
-		return true, nil
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			return false, nil, err
+		}
+		return true, body, nil
 	case http.StatusNotFound:
-		return false, nil
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return false, nil, nil
 	}
-	return false, fmt.Errorf("cluster service answered with status code %d", resp.StatusCode)
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return false, nil, fmt.Errorf("cluster service answered with status code %d", resp.StatusCode)
 }
 
 func destroyVirtual(instanceId string) error {

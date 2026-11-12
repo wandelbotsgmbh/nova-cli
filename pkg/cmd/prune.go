@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 
@@ -33,7 +34,10 @@ var pruneInstancesCmd = &cobra.Command{
 Only a definite answer removes an entry:
   cloud   the portal doesn't list the instance for the account logged in to the
           entry's environment (an instance of another account counts as gone)
-  k8srun  the cluster service doesn't know the cluster id (as 'nova k8srun prune')
+  k8srun  the cluster service doesn't know the cluster id, or has a kubeconfig with
+          another CA for it than the stored one ('nova k8srun prune' also asks the
+          cluster); never if the stored kubeconfig has more than one context (remove
+          it explicitly)
   host    never removed: an unreachable host can't be told apart from one that is off
 
 Entries that can't be checked (no login for their environment, network error, any other
@@ -48,6 +52,8 @@ $ nova instance prune`,
 		errOut := cmd.ErrOrStderr()
 		var gone []string
 		var unchecked []pruneEntryJSON
+		checkedID := map[string]string{}
+		skipped := 0
 
 		// cloud entries: one portal listing per environment, in that environment
 		byEnv := map[oauth.AuthEnvironment][]instances.Instance{}
@@ -93,6 +99,7 @@ $ nova instance prune`,
 			for _, i := range byEnv[env] {
 				if !exists[i.ID] {
 					gone = append(gone, i.Name)
+					checkedID[i.Name] = i.ID
 				}
 			}
 		}
@@ -107,25 +114,71 @@ $ nova instance prune`,
 				unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: "no cluster id"})
 				continue
 			}
-			ok, err := clusterExists(i.ID)
+			if why := kubeconfigShared(i); why != "" {
+				fmt.Fprintf(errOut, "keeping %q: %s\n", i.Name, why)
+				unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: why})
+				// a rule, not a failed check: it doesn't fail the command (as in 'k8srun prune')
+				skipped++
+				continue
+			}
+			isGone, reason, err := clusterGone(i, false)
 			if err != nil {
 				fmt.Fprintf(errOut, "keeping %q: %v\n", i.Name, err)
 				unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: err.Error()})
 				continue
 			}
-			if !ok {
+			if isGone {
+				fmt.Fprintf(errOut, "%q is gone: %s\n", i.Name, reason)
 				gone = append(gone, i.Name)
+				checkedID[i.Name] = i.ID
 			}
 		}
 
+		if len(gone) > 0 && !instancePruneDryRun {
+			n := len(unchecked)
+			if r, gone, unchecked, err = recheckGone(errOut, gone, checkedID, unchecked); err != nil {
+				return err
+			}
+			skipped += len(unchecked) - n
+		}
 		if err := removeGoneEntries(cmd, r, gone, instancePruneDryRun, instancePruneOutput, unchecked); err != nil {
 			return err
 		}
-		if len(unchecked) > 0 {
-			return fmt.Errorf("%d instance(s) could not be checked and were kept", len(unchecked))
+		if n := len(unchecked) - skipped; n > 0 {
+			return fmt.Errorf("%d instance(s) could not be checked and were kept", n)
 		}
 		return nil
 	},
+}
+
+// recheckGone reloads the list right before removing and keeps the gone entries that
+// changed since they were checked: another session may have recreated one under the same
+// name (other id), or kubectl/kind may have added a context to a k8srun kubeconfig. Kept
+// entries are reported in unchecked; they are a rule, not a failed check.
+func recheckGone(errOut io.Writer, gone []string, checkedID map[string]string, unchecked []pruneEntryJSON) (*instances.Registry, []string, []pruneEntryJSON, error) {
+	afterPruneConfirm()
+	r, err := loadRegistry()
+	if err != nil {
+		return nil, nil, unchecked, err
+	}
+	var still []string
+	for _, name := range gone {
+		i, ok := r.Get(name)
+		why := ""
+		switch {
+		case !ok || i.ID != checkedID[name]:
+			why = "it was changed meanwhile"
+		case i.Kind == instances.KindK8sRun:
+			why = kubeconfigShared(i)
+		}
+		if why == "" {
+			still = append(still, name)
+			continue
+		}
+		fmt.Fprintf(errOut, "keeping %q: %s\n", name, why)
+		unchecked = append(unchecked, pruneEntryJSON{Name: name, Kind: string(i.Kind), Reason: why})
+	}
+	return r, still, unchecked, nil
 }
 
 // removeGoneEntries prints and (unless dryRun) removes the named entries with their

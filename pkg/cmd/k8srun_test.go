@@ -24,11 +24,13 @@ type fakeK8sRunService struct {
 	comments  []string
 	gone      map[string]bool
 	broken    map[string]bool
+	// kubeconfigs answered per id (base64 in a JSON string); default "kubeconfig"
+	kubeconfigs map[string]string
 }
 
 func newFakeK8sRunService(t *testing.T) *fakeK8sRunService {
 	t.Helper()
-	f := &fakeK8sRunService{gone: map[string]bool{}, broken: map[string]bool{}}
+	f := &fakeK8sRunService{gone: map[string]bool{}, broken: map[string]bool{}, kubeconfigs: map[string]string{}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -41,6 +43,8 @@ func newFakeK8sRunService(t *testing.T) *fakeK8sRunService {
 			case f.gone[id]:
 				w.WriteHeader(http.StatusNotFound)
 				_, _ = w.Write([]byte(`{"msg":"The provided id is not assigned."}`))
+			case f.kubeconfigs[id] != "":
+				_ = json.NewEncoder(w).Encode(base64.StdEncoding.EncodeToString([]byte(f.kubeconfigs[id])))
 			default:
 				_, _ = w.Write([]byte(`"a2ViZWNvbmZpZw=="`))
 			}
@@ -207,6 +211,14 @@ func TestK8sRunPrune(t *testing.T) {
 	}
 
 	out, errOut, err := runWithConfig(t, "k8srun", "prune")
+	if err == nil || !strings.Contains(err.Error(), "without a terminal, confirm with -y") || strings.Contains(out, "removed") {
+		t.Fatalf("without a terminal and -y nothing may be removed: out=%q err=%v", out, err)
+	}
+	if r, _ := instances.Load(viper.GetViper()); len(r.Instances) != 4 {
+		t.Fatalf("an unconfirmed prune must not change the list: %+v", r.Instances)
+	}
+
+	out, errOut, err = runWithConfig(t, "k8srun", "prune", "-y")
 	if err == nil || !strings.Contains(err.Error(), "could not be checked") {
 		t.Errorf("an unchecked cluster must fail the command, err = %v", err)
 	}
