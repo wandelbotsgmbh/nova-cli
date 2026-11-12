@@ -86,7 +86,8 @@ func kubeconfigShared(inst instances.Instance) string {
 	if yaml.Unmarshal(content, &doc) != nil || len(doc.Contexts) <= 1 {
 		return ""
 	}
-	return fmt.Sprintf("its kubeconfig %s has %d contexts, not only the cluster's", inst.Kubeconfig, len(doc.Contexts))
+	return fmt.Sprintf("its kubeconfig %s has %d contexts, not only the cluster's; remove it explicitly with 'nova instance remove %s' (deletes that kubeconfig)",
+		inst.Kubeconfig, len(doc.Contexts), inst.Name)
 }
 
 // decodeServiceKubeconfig returns the kubeconfig of a cluster service answer, which may

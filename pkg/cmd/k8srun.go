@@ -300,7 +300,7 @@ $ nova k8srun prune -y`,
 					continue
 				}
 				if why := kubeconfigShared(i); why != "" {
-					fmt.Fprintf(errOut, "skipping %q: %s; remove it explicitly with 'nova instance remove %s' (deletes that kubeconfig)\n", i.Name, why, i.Name)
+					fmt.Fprintf(errOut, "keeping %q: %s\n", i.Name, why)
 					unchecked = append(unchecked, pruneEntryJSON{Name: i.Name, Kind: string(i.Kind), Reason: why})
 					continue
 				}
