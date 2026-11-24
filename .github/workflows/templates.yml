@@ -1,20 +1,20 @@
 name: Templates
 
-# Generates an app from every template with the CLI of this commit and runs the
-# checks a developer of that app would run, then builds its image like
-# 'nova app install' does. The e2e test only covers the default (python) app,
-# and the templates' dependencies move on their own (version ranges, no Python
-# lockfile), so this also runs weekly.
+# Generates an app from every template with the CLI of this commit, runs the
+# checks a developer of that app would run, and builds its image (the same
+# 'docker buildx build' of the app as 'nova app install', not nova's build
+# code). The e2e test only covers the default (python) app, and the templates'
+# dependencies move on their own (version ranges, no Python lockfile), so this
+# also runs weekly, without any build cache.
 on:
   pull_request:
     paths:
       - pkg/generator/**
+      - pkg/appenv/**
+      - pkg/cmd/app.go
       - .github/workflows/templates.yml
   push:
     branches: [main]
-    paths:
-      - pkg/generator/**
-      - .github/workflows/templates.yml
   schedule:
     - cron: "17 4 * * 1"
   workflow_dispatch:
@@ -22,8 +22,9 @@ on:
 permissions:
   contents: read
 
+# like ci.yml: PRs cancel their older run, main and scheduled runs get one group per commit
 concurrency:
-  group: templates-${{ github.ref }}
+  group: templates-${{ github.event_name == 'pull_request' && github.ref || format('{0}-{1}', github.event_name, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -70,14 +71,20 @@ jobs:
       - if: matrix.generator == 'python_app'
         working-directory: ${{ env.APP }}
         run: |
-          uv sync
+          # the Python of the template's image, not the runner's
+          python=$(sed -n 's#^FROM python:\([0-9.]*\).*#\1#p' Dockerfile | head -1)
+          [ -n "$python" ] || { echo "::error::no 'FROM python:<version>' in the Dockerfile"; exit 1; }
+          uv sync --python "$python"
           uv run ruff check
           uv run ruff format --check
+          # ruff doesn't see API changes of the NOVA SDK (a version range): import the app
+          uv run python -c "import app.register_programs"
 
       - if: matrix.generator == 'golang_app'
         uses: actions/setup-go@v7
         with:
           go-version-file: _generated/app/go.mod
+          cache-dependency-path: _generated/app/go.sum
       - if: matrix.generator == 'golang_app'
         working-directory: ${{ env.APP }}
         run: |
@@ -90,18 +97,21 @@ jobs:
       - if: matrix.generator == 'rust_app'
         working-directory: ${{ env.APP }}
         run: |
-          toolchain=$(sed -n 's#^FROM .*rust:\([0-9.]*\).*#\1#p' Dockerfile | head -1)
+          toolchain=$(sed -n 's#^FROM .*rust:\([0-9][0-9.]*\)-.*#\1#p' Dockerfile | head -1)
+          [ -n "$toolchain" ] || { echo "::error::no 'rust:<version>-' image in the Dockerfile"; exit 1; }
           rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt
           rustup override set "$toolchain"
           cargo build --locked
+          cargo test --locked
           cargo clippy --locked -- -D warnings
           cargo fmt --check
 
+      # No build cache: it would cost ~1.5 GB of the repo's Actions cache per
+      # PR, its export took longer than it saved, and the weekly run must
+      # resolve dependencies anew.
       - uses: docker/setup-buildx-action@v4
       - name: Build the image
         uses: docker/build-push-action@v7
         with:
           context: ${{ env.APP }}
           push: false
-          cache-from: type=gha,scope=template-${{ matrix.generator }}
-          cache-to: type=gha,mode=max,scope=template-${{ matrix.generator }}
