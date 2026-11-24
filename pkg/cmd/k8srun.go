@@ -14,10 +14,12 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
+	"github.com/wandelbotsgmbh/nova-cli/pkg/nova"
 	"golang.org/x/term"
 )
 
@@ -26,6 +28,14 @@ const defaultK8sRunName = "k8srun"
 
 // k8srunMaxMinutes is the longest lifetime the cluster service grants (12 hours).
 const k8srunMaxMinutes = 720
+
+// k8srunDefaultWait is how long 'k8srun create' waits for NOVA by default (seconds).
+const k8srunDefaultWait = 900
+
+// waitForK8sRunNOVA waits until all NOVA services on the cluster run; tests replace it.
+var waitForK8sRunNOVA = func(host string, timeout time.Duration) error {
+	return nova.WaitForAllRunning(host, time.Now(), timeout, checkInstanceStatusInterval)
+}
 
 // afterPruneConfirm runs right before prune re-reads the list (after the question, if
 // any); tests use it to change the list meanwhile.
@@ -39,6 +49,8 @@ var (
 	k8srunName         string
 	k8srunReplace      bool
 	k8srunNoSelect     bool
+	k8srunNoWait       bool
+	k8srunWaitSeconds  int
 	k8srunPruneDryRun  bool
 	k8srunPruneYes     bool
 )
@@ -94,14 +106,27 @@ fails unless --replace is given, which destroys the existing cluster of that nam
 
 Without --name, the cluster is named "k8srun" and replaces the previous unnamed cluster
 (previous behaviour; named clusters are never touched). The kubeconfig is then also
-written to ./kubeconfig.`,
+written to ./kubeconfig.
+
+The cluster and its Kubernetes API are there within seconds, but NOVA needs a few minutes
+to start on it; until then its API answers 404 or 503 (not a network problem). By default,
+create waits until all NOVA services run (at most --timeout). With --no-wait it returns at
+once: the kubeconfig already works, e.g. for helm or skaffold, and NOVA comes up meanwhile.
+
+The cluster expires after 12 hours. Keep it alive while you or an agent work with it:
+'nova instance keep-alive <name> -- <command>' keeps it alive while the command runs;
+without a command, keep-alive runs until stopped (start it in the background).
+'nova instance extend <name>' extends it once.`,
 		Example: `# several clusters side by side
 $ nova k8srun create --name sim-a
 $ nova k8srun create --name sim-b
 $ nova --instance sim-a app list
 
 # replace the unnamed cluster
-$ nova k8srun create`,
+$ nova k8srun create
+
+# return right away, NOVA keeps starting on the cluster
+$ nova k8srun create --name dev --no-wait`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, replace := k8srunName, k8srunReplace
 			if name == "" {
@@ -109,6 +134,9 @@ $ nova k8srun create`,
 			}
 			if err := instances.ValidateName(name); err != nil {
 				return err
+			}
+			if !k8srunNoWait && k8srunWaitSeconds <= 0 {
+				return errors.New("--timeout must be greater than 0 (use --no-wait to return right away)")
 			}
 
 			r, err := loadRegistry()
@@ -166,15 +194,35 @@ $ nova k8srun create`,
 				}
 			}
 
-			fmt.Fprintf(cmd.ErrOrStderr(), "created cluster %q:\n ID: %s\n IP %s\n kubeconfig: %s\n", name, instance.Id, instance.Ip, kubeconfig)
-			if *createOutput != outputJSON {
+			expires := time.Now().Add(k8srunMaxMinutes * time.Minute)
+			stderr := cmd.ErrOrStderr()
+			fmt.Fprintf(stderr, "created cluster %q:\n ID: %s\n IP %s\n kubeconfig: %s\n", name, instance.Id, instance.Ip, kubeconfig)
+			fmt.Fprintf(stderr, " expires: %s (12 h)\n", expires.Local().Format(time.DateTime))
+			fmt.Fprint(stderr, keepAliveHint(name))
+
+			// printed before waiting, like 'instance create': the cluster exists even if waiting fails
+			if *createOutput == outputJSON {
+				created := k8srunCreatedJSON{instanceJSON: newInstanceJSON(entry, r.Current), ExpiresAt: expires.UTC().Format(time.RFC3339)}
+				if k8srunName == "" {
+					created.KubeconfigCopy = absPath("kubeconfig")
+				}
+				if err := writeJSON(cmd, created); err != nil {
+					return err
+				}
+			}
+			if k8srunNoWait {
+				fmt.Fprintf(stderr, "NOVA is still starting on the cluster (a few minutes); its API answers 404 or 503 until then\n")
 				return nil
 			}
-			created := k8srunCreatedJSON{instanceJSON: newInstanceJSON(entry, r.Current)}
-			if k8srunName == "" {
-				created.KubeconfigCopy = absPath("kubeconfig")
+
+			timeout := time.Duration(k8srunWaitSeconds) * time.Second
+			fmt.Fprintf(stderr, "waiting for NOVA to start on the cluster, this takes a few minutes (at most %s; --no-wait skips this, the kubeconfig already works)...\n", timeout)
+			started := time.Now()
+			if err := waitForK8sRunNOVA(instance.Ip, timeout); err != nil {
+				return fmt.Errorf("cluster %q was created and added to the instance list, but NOVA didn't start: %w; check the pods: eval \"$(nova instance env %s)\"; kubectl get pods -A", name, err, name)
 			}
-			return writeJSON(cmd, created)
+			fmt.Fprintf(stderr, "NOVA is running on cluster %q (after %s)\n", name, time.Since(started).Round(time.Second))
+			return nil
 		},
 	}
 
@@ -346,6 +394,8 @@ $ nova k8srun prune -y`,
 	create.Flags().StringVarP(&k8srunName, "name", "n", "", "Name of the cluster in the local instance list (default \"k8srun\", replacing the previous unnamed one)")
 	create.Flags().BoolVar(&k8srunReplace, "replace", false, "Destroy an existing cluster with the same name first")
 	create.Flags().BoolVar(&k8srunNoSelect, "no-select", false, "Add the cluster to the local list without selecting it (target it with --instance)")
+	create.Flags().BoolVarP(&k8srunNoWait, "no-wait", "w", false, "Return right away instead of waiting until NOVA runs on the cluster (the kubeconfig works at once)")
+	create.Flags().IntVarP(&k8srunWaitSeconds, "timeout", "t", k8srunDefaultWait, "Timeout in seconds for NOVA to run on the cluster")
 	createOutput = addOutputFlag(create)
 	listOutput = addOutputFlag(list)
 	pruneOutput = addOutputFlag(prune)

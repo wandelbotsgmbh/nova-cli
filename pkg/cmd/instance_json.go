@@ -144,6 +144,8 @@ type k8srunCreatedJSON struct {
 	instanceJSON
 	// absolute path of the copy written to ./kubeconfig (only without --name)
 	KubeconfigCopy string `json:"kubeconfig_copy,omitempty"`
+	// when the cluster expires (RFC 3339, UTC) unless it is extended
+	ExpiresAt string `json:"expires_at"`
 }
 
 // pruneJSON is the result of 'instance prune' and 'k8srun prune'.

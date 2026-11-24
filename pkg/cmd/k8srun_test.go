@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/instances"
@@ -26,6 +28,10 @@ type fakeK8sRunService struct {
 	broken    map[string]bool
 	// kubeconfigs answered per id (base64 in a JSON string); default "kubeconfig"
 	kubeconfigs map[string]string
+	// hosts create waited for (waitForK8sRunNOVA), and what the wait returns
+	waited  []string
+	timeout time.Duration
+	waitErr error
 }
 
 func newFakeK8sRunService(t *testing.T) *fakeK8sRunService {
@@ -64,6 +70,15 @@ func newFakeK8sRunService(t *testing.T) *fakeK8sRunService {
 	old := clusterServiceURL
 	clusterServiceURL = srv.URL
 	t.Cleanup(func() { clusterServiceURL = old })
+	oldWait := waitForK8sRunNOVA
+	waitForK8sRunNOVA = func(host string, timeout time.Duration) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.waited = append(f.waited, host)
+		f.timeout = timeout
+		return f.waitErr
+	}
+	t.Cleanup(func() { waitForK8sRunNOVA = oldWait })
 	return f
 }
 
@@ -243,4 +258,85 @@ func TestK8sRunPrune(t *testing.T) {
 	if len(fake.destroyed) != 0 {
 		t.Errorf("prune must not destroy clusters, destroyed %v", fake.destroyed)
 	}
+}
+
+func TestK8sRunCreateWaitsForNOVA(t *testing.T) {
+	withConfig(t, "")
+	fake := newFakeK8sRunService(t)
+
+	out, errOut, err := runWithConfig(t, "k8srun", "create", "--name", "sim-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "" {
+		t.Errorf("text mode must keep stdout empty, got %q", out)
+	}
+	if strings.Join(fake.waited, ",") != "10.0.0.1" || fake.timeout != k8srunDefaultWait*time.Second {
+		t.Errorf("waited for %v with timeout %s, want 10.0.0.1 with the default", fake.waited, fake.timeout)
+	}
+	for _, want := range []string{"keep-alive sim-a -- <command>", "extend sim-a", "takes a few minutes", "--no-wait", "NOVA is running"} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, errOut)
+		}
+	}
+
+	mustRun(t, "k8srun", "create", "--name", "sim-b", "--timeout", "60")
+	if fake.timeout != time.Minute {
+		t.Errorf("--timeout 60: waited %s", fake.timeout)
+	}
+}
+
+func TestK8sRunCreateNoWait(t *testing.T) {
+	withConfig(t, "")
+	fake := newFakeK8sRunService(t)
+
+	out, errOut, err := runWithConfig(t, "k8srun", "create", "--name", "sim-a", "--no-wait", "-o", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.waited) != 0 {
+		t.Errorf("--no-wait waited for %v", fake.waited)
+	}
+	var created k8srunCreatedJSON
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatalf("stdout is no JSON: %v\n%s", err, out)
+	}
+	if created.Kubeconfig == "" {
+		t.Error("--no-wait must still return the kubeconfig path")
+	}
+	if exp, err := time.Parse(time.RFC3339, created.ExpiresAt); err != nil || time.Until(exp) < 11*time.Hour {
+		t.Errorf("expires = %q, want about 12 h from now", created.ExpiresAt)
+	}
+	if !strings.Contains(errOut, "still starting") || !strings.Contains(errOut, "keep-alive sim-a") {
+		t.Errorf("stderr lacks the startup and keep-alive notes:\n%s", errOut)
+	}
+}
+
+func TestK8sRunCreateWaitTimeoutKeepsCluster(t *testing.T) {
+	withConfig(t, "")
+	fake := newFakeK8sRunService(t)
+	fake.waitErr = errors.New("timeout reached")
+
+	out, _, err := runWithConfig(t, "k8srun", "create", "--name", "sim-a", "-o", "json")
+	if err == nil || !strings.Contains(err.Error(), "was created and added") || !strings.Contains(err.Error(), "kubectl get pods") {
+		t.Fatalf("err = %v, want a hint that the cluster exists", err)
+	}
+	// the result is printed before waiting, so callers learn the cluster even on a timeout
+	if !strings.Contains(out, `"name": "sim-a"`) {
+		t.Errorf("JSON missing on timeout:\n%s", out)
+	}
+	r, _ := instances.Load(viper.GetViper())
+	if _, ok := r.Get("sim-a"); !ok || len(fake.destroyed) != 0 {
+		t.Errorf("a timeout must keep the cluster: %+v, destroyed %v", r, fake.destroyed)
+	}
+}
+
+func TestK8sRunCreateRejectsNonPositiveTimeout(t *testing.T) {
+	withConfig(t, "")
+	fake := newFakeK8sRunService(t)
+	_, _, err := runWithConfig(t, "k8srun", "create", "--name", "sim-a", "--timeout", "0")
+	if err == nil || !strings.Contains(err.Error(), "--no-wait") || fake.next != 0 {
+		t.Fatalf("--timeout 0 must fail before creating a cluster: err = %v, created %d", err, fake.next)
+	}
+	mustRun(t, "k8srun", "create", "--name", "sim-a", "--timeout", "0", "--no-wait")
 }

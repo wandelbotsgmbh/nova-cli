@@ -405,6 +405,9 @@ $ nova instance create --name my-instance --no-select
 		} else {
 			fmt.Fprintln(cmd.OutOrStdout(), "InstanceId:", instance.InstanceId, "\nHost:", instance.Host)
 		}
+		if err == nil {
+			fmt.Fprint(cmd.ErrOrStderr(), keepAliveHint(entry.Name))
+		}
 
 		if !createNoWaitInstance {
 			fmt.Fprintln(os.Stderr, "Waiting for instance to be in running state...")
