@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"strings"
@@ -44,8 +45,10 @@ func retryWhileCreationInProgress(create func() (int, error)) error {
 		if status != http.StatusConflict || time.Now().After(deadline) {
 			return err
 		}
-		fmt.Fprintf(createRetryLog, "another instance creation of this account is in progress (another terminal, agent, CI job or the portal); retrying in %s\n", createRetryInterval)
-		time.Sleep(createRetryInterval)
+		// jitter, so callers that got their 409 together don't retry in lockstep
+		wait := createRetryInterval/2 + rand.N(createRetryInterval)
+		fmt.Fprintf(createRetryLog, "another instance creation of this account is in progress (another terminal, agent, CI job or the portal); retrying in %s\n", wait.Round(time.Second))
+		time.Sleep(wait)
 	}
 }
 
