@@ -388,6 +388,9 @@ $ nova instance create --name my-instance --no-select
 		if err != nil {
 			return err
 		}
+		// --timeout counts from here: retries while another creation was in progress
+		// (pkg/portal) are not part of it
+		started = time.Now()
 
 		entry, err := registerCloudInstanceEntry(cmd.ErrOrStderr(), instance.InstanceId, instance.Host, !createNoSelect)
 

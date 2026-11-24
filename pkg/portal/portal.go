@@ -4,7 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"math/rand/v2"
+	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/wandelbotsgmbh/nova-cli/pkg/httpx"
 	"github.com/wandelbotsgmbh/nova-cli/pkg/oauth"
@@ -19,6 +24,32 @@ const (
 
 type Portal struct {
 	client *ClientWithResponses
+}
+
+// The portal handles one creation per account at a time and answers a second one with
+// 409 ("already in progress"); its lock only lasts while the first request is processed
+// (about a second). The 409 creates nothing, so the request is sent again.
+var (
+	createRetryInterval = 5 * time.Second
+	createRetryTimeout  = 3 * time.Minute
+	// createRetryLog receives the retry notes (stderr; tests replace it)
+	createRetryLog io.Writer = os.Stderr
+)
+
+// retryWhileCreationInProgress sends a create request again while the portal answers
+// 409, up to createRetryTimeout.
+func retryWhileCreationInProgress(create func() (int, error)) error {
+	deadline := time.Now().Add(createRetryTimeout)
+	for {
+		status, err := create()
+		if status != http.StatusConflict || time.Now().After(deadline) {
+			return err
+		}
+		// jitter, so callers that got their 409 together don't retry in lockstep
+		wait := createRetryInterval/2 + rand.N(createRetryInterval)
+		fmt.Fprintf(createRetryLog, "another instance creation of this account is in progress (another terminal, agent, CI job or the portal); retrying in %s\n", wait.Round(time.Second))
+		time.Sleep(wait)
+	}
 }
 
 type Instance struct {
@@ -108,7 +139,15 @@ func (p *Portal) CreateInstance(name string) (Instance, error) {
 	body := CreateInstanceJSONRequestBody{
 		SandboxName: name,
 	}
-	resp, err := p.client.CreateInstanceWithResponse(context.Background(), body)
+	var resp *CreateInstanceResponse
+	err := retryWhileCreationInProgress(func() (int, error) {
+		var err error
+		resp, err = p.client.CreateInstanceWithResponse(context.Background(), body)
+		if err != nil {
+			return 0, err
+		}
+		return resp.StatusCode(), nil
+	})
 	if err != nil {
 		return Instance{}, err
 	}
@@ -135,7 +174,15 @@ func (p *Portal) CreateInstanceDev(name string, chart, version *string, ttlMinut
 		body.Chart = &c
 	}
 
-	resp, err := p.client.CreateCustomInstanceWithResponse(context.Background(), body)
+	var resp *CreateCustomInstanceResponse
+	err := retryWhileCreationInProgress(func() (int, error) {
+		var err error
+		resp, err = p.client.CreateCustomInstanceWithResponse(context.Background(), body)
+		if err != nil {
+			return 0, err
+		}
+		return resp.StatusCode(), nil
+	})
 	if err != nil {
 		return Instance{}, err
 	}
