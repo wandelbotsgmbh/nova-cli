@@ -67,6 +67,17 @@ nova api /api/v2/cells/{cell}/controllers
 | **Cells** | `nova cell save/edit/install`: the cell setup as YAML in your editor |
 | **NovaFlow** | `nova flow`: install NovaFlow, open the editor, read, edit, back up and restore flows |
 | **Diagnosis** | `nova diagnosis`, `nova backup`: diagnosis packages and backups |
+| **On-premise** | `nova bootstrap`: set up NOVA on an IPC; `nova license get/activate`; `nova instance kubeconfig/env` for kubectl and helm |
+
+Experimental, feedback welcome:
+
+| | |
+|---|---|
+| **MCP server** | `nova mcp`: curated tools for coding agents, see [above](#use-it-with-your-coding-agent) |
+| **Omniverse Nucleus** | `nova nucleus ls/cp/mv/rm/mkdir`: move files (USD scenes, assets) to and from a Nucleus server, with parallel, verified transfers |
+| **Models** | `nova model init/build`: download a model (e.g. from Hugging Face) and build and push it as a container image |
+
+Wandelbots-internal services also have commands (`nova simulation` for Isaac Sim streaming sessions, `nova k8srun` for throwaway Kubernetes clusters); they need a Wandelbots account.
 
 All commands: [CLI reference](https://wandelbotsgmbh.github.io/nova-cli/) or `nova <command> --help`.
 
