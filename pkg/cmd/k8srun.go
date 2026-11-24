@@ -133,6 +133,9 @@ $ nova k8srun create --name dev --no-wait`,
 			if err := instances.ValidateName(name); err != nil {
 				return err
 			}
+			if !k8srunNoWait && k8srunWaitSeconds <= 0 {
+				return errors.New("--timeout must be greater than 0 (use --no-wait to return right away)")
+			}
 
 			r, err := loadRegistry()
 			if err != nil {
@@ -213,7 +216,7 @@ $ nova k8srun create --name dev --no-wait`,
 			fmt.Fprintf(stderr, "waiting for NOVA to start on the cluster, this takes a few minutes (at most %s; --no-wait skips this, the kubeconfig already works)...\n", timeout)
 			started := time.Now()
 			if err := waitForK8sRunNOVA(instance.Ip, timeout); err != nil {
-				return fmt.Errorf("cluster %q was created and added to the instance list, but NOVA didn't start within %s: %w (check the pods: eval \"$(nova instance env %s)\"; kubectl get pods -A)", name, timeout, err, name)
+				return fmt.Errorf("cluster %q was created and added to the instance list, but NOVA didn't start: %w; check the pods: eval \"$(nova instance env %s)\"; kubectl get pods -A", name, err, name)
 			}
 			fmt.Fprintf(stderr, "NOVA is running on cluster %q (after %s)\n", name, time.Since(started).Round(time.Second))
 			return nil

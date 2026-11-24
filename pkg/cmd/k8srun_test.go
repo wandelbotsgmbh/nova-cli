@@ -327,3 +327,13 @@ func TestK8sRunCreateWaitTimeoutKeepsCluster(t *testing.T) {
 		t.Errorf("a timeout must keep the cluster: %+v, destroyed %v", r, fake.destroyed)
 	}
 }
+
+func TestK8sRunCreateRejectsNonPositiveTimeout(t *testing.T) {
+	withConfig(t, "")
+	fake := newFakeK8sRunService(t)
+	_, _, err := runWithConfig(t, "k8srun", "create", "--name", "sim-a", "--timeout", "0")
+	if err == nil || !strings.Contains(err.Error(), "--no-wait") || fake.next != 0 {
+		t.Fatalf("--timeout 0 must fail before creating a cluster: err = %v, created %d", err, fake.next)
+	}
+	mustRun(t, "k8srun", "create", "--name", "sim-a", "--timeout", "0", "--no-wait")
+}

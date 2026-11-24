@@ -381,3 +381,21 @@ func TestWaitForAllRunningNeedsServices(t *testing.T) {
 		t.Fatalf("an empty status list must not count as running, err = %v", err)
 	}
 }
+
+func TestWaitForAllRunningNamesWaitingServices(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "version") {
+			_, _ = w.Write([]byte(`"26.8.0"`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"service":"ApiGateway","status":{"code":"Running","severity":"INFO"}},
+			{"service":"Backup","status":{"code":"Pending","severity":"WARNING"}}]`))
+	}))
+	defer ts.Close()
+
+	err := WaitForAllRunning(ts.URL, time.Now(), 50*time.Millisecond, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "not running yet: Backup") {
+		t.Fatalf("the timeout must name the waiting services, err = %v", err)
+	}
+}
