@@ -3,7 +3,7 @@
 import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeProvider } from "@mui/material/styles";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createNovaMuiTheme } from "@wandelbots/wandelbots-js-react-components/core";
+import { createNovaMuiTheme } from "@wandelbots/mui";
 import { useEffect, useState } from "react";
 import { env as runtimeEnv } from "@/runtimeEnv.ts";
 

@@ -18,18 +18,19 @@
     "@emotion/styled": "^11.14.1",
     "@mui/material": "^7.3.6",
     "@mui/material-nextjs": "^9.5.0",
-    "@tanstack/react-query": "^5.90.12",
-    "@wandelbots/nova-js": "4.12.0",
-    "@wandelbots/wandelbots-js-react-components": "^6.3.0",
-    "next": "^16.4.3",
+    "@tanstack/react-query": "^5.108.2",
+    "@wandelbots/mui": "^2.0.2",
+    "@wandelbots/nova-js": "4.13.0",
+    "@wandelbots/wandelbots-js-react-components": "^6.4.0",
+    "next": "^16.4.6",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.3.9",
+    "@biomejs/biome": "^2.6.8",
     "@types/node": "^26",
     "@types/react": "^19.2.7",
-    "knip": "^6.43.0",
+    "knip": "^6.47.0",
     "typescript": "6.0.3"
   }
 }
