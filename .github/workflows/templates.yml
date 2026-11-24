@@ -65,7 +65,8 @@ jobs:
           pnpm build
 
       - if: matrix.generator == 'python_app'
-        uses: astral-sh/setup-uv@v10
+        # setup-uv publishes no moving major tag; Dependabot updates the version
+        uses: astral-sh/setup-uv@v10.4.0
       - if: matrix.generator == 'python_app'
         working-directory: ${{ env.APP }}
         run: |
