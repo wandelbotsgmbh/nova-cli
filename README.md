@@ -1,17 +1,13 @@
 # Nova CLI
 
-![](media/hero.png)
+![NOVA CLI: agentic physical AI by Wandelbots](media/hero.webp)
 
 [![Release](https://img.shields.io/github/v/release/wandelbotsgmbh/nova-cli?sort=semver&display_name=tag)](https://github.com/wandelbotsgmbh/nova-cli/releases/latest)
 [![CI](https://github.com/wandelbotsgmbh/nova-cli/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wandelbotsgmbh/nova-cli/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/wandelbotsgmbh/nova-cli)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-CLI%20reference-7057ff)](https://wandelbotsgmbh.github.io/nova-cli/)
 
-The Swiss Army knife for interacting with [Wandelbots NOVA](https://www.wandelbots.com/).
-
-The CLI helps you build, deploy and manage applications on the NOVA platform, administer instances and cells, browse the app catalog, and pull diagnostics. Your application is built as an OCI image, pushed to the specified registry, and then deployed on the specified instance.
-
-It's built for agentic workflows as much as for people at a terminal: a clean stdout/stderr contract that's easy to parse, `--debug` for troubleshooting, direct access to the full instance API via [`nova api`](docs/decisions/0013-nova-api.md) (with `nova api search`/`nova api schema` for discovery, so an agent can find and call an operation it's never seen before), and an experimental MCP server (`nova mcp`) so Cursor, Claude Code and other MCP-capable agents can drive an instance directly. See [docs/decisions](docs/decisions/README.md) for how the pieces fit together.
+`nova` is the command line for [Wandelbots NOVA](https://www.wandelbots.com/), the platform for programming industrial robots of any brand. Create a robot app, deploy it to a NOVA instance in the cloud or on the shop floor, install apps from the catalog, edit NovaFlow flows, and pull diagnostics — from your terminal, from scripts and CI, or from a coding agent like Claude Code or Cursor.
 
 From the terminal to the cell:
 
@@ -20,6 +16,59 @@ From the terminal to the cell:
 ...and the app shows up right on the instance's homescreen:
 
 ![](asciinema/homescreen.png)
+
+## Quickstart
+
+You need a Wandelbots account on [portal.wandelbots.io](https://portal.wandelbots.io) for a cloud instance, or a NOVA instance on your network.
+
+```bash
+brew install wandelbotsgmbh/wandelbots/nova   # other platforms: see Install below
+
+nova login                                    # log in to portal.wandelbots.io
+nova instance create --name my-instance       # a cloud instance with NOVA, selected for all further commands
+                                              # (on-premise: nova instance add lab --host 192.168.1.10)
+nova catalog install jupyter                  # install a ready-made app from the catalog
+nova homescreen                               # open the instance in your browser
+```
+
+Then build your own app ([needs a container registry](#container-registry)):
+
+```bash
+nova app create my-app                        # Python app (also: -g nextjs_app, golang_app, rust_app)
+nova app install my-app                       # build, push and deploy it to the instance
+```
+
+## Use it with your coding agent
+
+The CLI is built for agents as much as for people: data goes to stdout, messages to stderr, and data commands take `-o json`. On top of that:
+
+```bash
+# MCP server with curated tools for your instance: cells, controllers, apps, diagnosis, kinematics, …
+claude mcp add nova -- nova mcp --read-only
+claude mcp add nova -- nova mcp --toolsets default,planning,motion   # motion runs on virtual controllers only
+
+# author NovaFlow flows from the agent
+claude mcp add novaflow -- nova flow mcp
+
+# any endpoint of the instance API, authenticated, discoverable by the agent itself
+nova api search controllers
+nova api /api/v2/cells/{cell}/controllers
+```
+
+`nova mcp` works with any MCP client (Cursor, VS Code, …): the command is `nova mcp`, over stdio. `--debug` shows HTTP traffic and external commands when something goes wrong. Design decisions behind this: [docs/decisions](docs/decisions/README.md).
+
+## What else it does
+
+| | |
+|---|---|
+| **Apps** | `nova app create/install`, templates for Python ([NovaX](https://github.com/wandelbotsgmbh/wandelbots-nova?tab=readme-ov-file#novax)), TypeScript/Next.js ([React components](https://github.com/wandelbotsgmbh/wandelbots-js-react-components)), Go and Rust; [registry-less installs](#installing-without-a-registry---copy-image) for air-gapped networks |
+| **Catalog** | `nova catalog list/info/install`: ready-made apps, drivers and cameras from the [catalog](https://github.com/wandelbotsgmbh/catalog) |
+| **Instances** | `nova instance create/list/select/add`: cloud and on-premise instances side by side, `--instance <name>` per command |
+| **Cells** | `nova cell save/edit/install`: the cell setup as YAML in your editor |
+| **NovaFlow** | `nova flow`: install NovaFlow, open the editor, read, edit, back up and restore flows |
+| **Diagnosis** | `nova diagnosis`, `nova backup`: diagnosis packages and backups |
+
+All commands: [CLI reference](https://wandelbotsgmbh.github.io/nova-cli/) or `nova <command> --help`.
 
 ## Install
 
@@ -33,10 +82,10 @@ The recommended way on both macOS and Linux ([Homebrew on Linux](https://docs.br
 brew install wandelbotsgmbh/wandelbots/nova
 ```
 
-**Note:** Our binaries are not signed yet, so macOS will block the first execution.
-To fix this, go to `Settings` → `Privacy & Security` and click `Open Anyway`
-
-![](settings.jpeg)
+> [!NOTE]
+> Our binaries are not signed yet, so macOS may block the first execution. To allow it, go to `Settings` → `Privacy & Security` and click `Open Anyway`.
+>
+> ![](media/settings.jpeg)
 
 ### macOS / Linux: install script
 
@@ -49,7 +98,7 @@ curl -fsSL https://raw.githubusercontent.com/wandelbotsgmbh/nova-cli/main/instal
 Pin a version or install into a user directory without `sudo`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wandelbotsgmbh/nova-cli/main/install_nova.sh | NOVA_VERSION=0.2.0 INSTALL_DIR=~/.local/bin bash
+curl -fsSL https://raw.githubusercontent.com/wandelbotsgmbh/nova-cli/main/install_nova.sh | NOVA_VERSION=0.5.0 INSTALL_DIR=~/.local/bin bash
 ```
 
 ### Windows
@@ -57,7 +106,7 @@ curl -fsSL https://raw.githubusercontent.com/wandelbotsgmbh/nova-cli/main/instal
 Download `novacli_win64-<version>.zip` from the [releases page](https://github.com/wandelbotsgmbh/nova-cli/releases), extract `nova.exe` and put it on your `PATH`, e.g. in PowerShell:
 
 ```powershell
-$v = "0.2.1"
+$v = "0.5.0"
 Invoke-WebRequest -Uri "https://github.com/wandelbotsgmbh/nova-cli/releases/download/$v/novacli_win64-$v.zip" -OutFile "$env:TEMP\nova.zip"
 Expand-Archive "$env:TEMP\nova.zip" -DestinationPath "$env:LOCALAPPDATA\nova"
 [Environment]::SetEnvironmentVariable("Path", "$env:LOCALAPPDATA\nova;" + [Environment]::GetEnvironmentVariable("Path", "User"), "User")
@@ -70,20 +119,12 @@ Open a new terminal afterwards so the updated `PATH` is picked up.
 Every [release](https://github.com/wandelbotsgmbh/nova-cli/releases) ships archives for `linux_amd64`, `linux_arm64`, `macos_amd64`, `macos_arm64` and `win64`, each containing just the `nova` binary.
 `x.y.z-rc.N` prereleases are release candidates for testing, see [RELEASING.md](RELEASING.md).
 
-Linux example (adjust version and architecture):
-
 ```bash
-VERSION=0.2.0 ARCH=amd64   # or arm64
+VERSION=0.5.0 ARCH=amd64   # or arm64
 curl -fLO https://github.com/wandelbotsgmbh/nova-cli/releases/download/$VERSION/novacli_linux_$ARCH-$VERSION.tar.gz
 mkdir -p ~/.local/bin
-tar -xzf novacli_linux_$ARCH-$VERSION.tar.gz -C ~/.local/bin nova
-
-# add ~/.local/bin to your PATH if it isn't already (bash; use ~/.zshrc for zsh)
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
-nova version
+tar -xzf novacli_linux_$ARCH-$VERSION.tar.gz -C ~/.local/bin nova   # add ~/.local/bin to your PATH if needed
 ```
-
-The binary in the archive is already executable; on macOS, allow it once under `Settings` → `Privacy & Security` as described above.
 
 ### Docker
 
@@ -92,229 +133,66 @@ docker run --rm ghcr.io/wandelbotsgmbh/nova-cli:latest version
 ```
 
 Images are published for `linux/amd64` and `linux/arm64`, tagged `latest` (stable) and `<version>` (including `x.y.z-rc.N` prereleases).
-Mount a config to keep the host/token between runs, e.g. `-v ~/.nova:/root/.nova`.
+Mount a config to keep instances and login between runs, e.g. `-v ~/.nova:/root/.nova`.
 
 ### Shell completion
 
 ```bash
-# zsh (has to be done only once)
-echo 'source <(nova completion zsh)' >> ~/.zshrc
+# zsh: add this line to ~/.zshrc (plain `nova completion zsh > …` setups often don't load on macOS)
+source <(nova completion zsh)
 # bash, fish, powershell
 nova completion --help
 ```
 
-See the [completion reference](https://wandelbotsgmbh.github.io/nova-cli/nova_completion.html) for details.
+## Instances
 
-## Setup
+`nova login` logs in to [portal.wandelbots.io](https://portal.wandelbots.io). The CLI keeps a list of instances and works against the selected one:
 
-### Setup OCI Registry
+```bash
+nova instance create --name my-instance        # new cloud instance, selected
+nova instance list
+nova instance select <name>                    # a cloud instance id works too
+nova instance add lab --host 192.168.1.10      # an on-premise instance (IPC) on your network
+nova --instance lab cell save                  # one command against another instance
+```
 
-To deploy applications, you need a container registry that NOVA can pull your apps from. We recommend the official public Docker registry for getting started quickly.
+## Building apps
 
-1. Create a Docker Hub account at https://hub.docker.com/signup
-2. Install Docker Desktop from https://www.docker.com/products/docker-desktop/
-3. Sign in to your account:
-   ```bash
-   docker login --username MY-DOCKER-USERNAME registry-1.docker.io
-   ```
-4. Configure the registry in the Nova CLI:
-   ```bash
-   nova config set image-registry registry-1.docker.io/MY-DOCKER-USERNAME
-   ```
+```bash
+nova app create my-app -g python_app           # default; also nextjs_app, golang_app, rust_app
+nova app install my-app                        # build the image, push it, deploy it to the cell
+```
+
+The project gets a gitignored env file with the instance, cell and access token, so it runs locally against the instance right away; `nova app update-env` refreshes the token. App names start with a letter and contain only letters, digits and hyphens.
+
+- **Python** ([NovaX](https://github.com/wandelbotsgmbh/wandelbots-nova?tab=readme-ov-file#novax)): uv + FastAPI with the NOVA Python SDK, robot programs included, plus Copilot prompts to develop it with an agent.
+- **TypeScript** (`nextjs_app`): Next.js with the [Wandelbots React components](https://github.com/wandelbotsgmbh/wandelbots-js-react-components).
+- **Go** (`golang_app`) and **Rust** (`rust_app`): a small web server with an OpenAPI spec and a minimal NOVA API client.
+
+### Container registry
+
+`nova app install` builds an OCI image (docker or podman, auto-detected) and pushes it to your registry, from where the instance pulls it. To get started quickly, use Docker Hub:
+
+```bash
+docker login registry-1.docker.io
+nova config set image-registry registry-1.docker.io/<your-docker-user>
+```
 
 > [!WARNING]
-> **Making Your Docker Registry Private**
-> 
-> If you are using Docker Hub and do not want to make your image available to the public, you can switch your Docker Hub repository to private:
-> 
-> 1. Go to your repository settings on Docker Hub
-> 2. Switch the repository to "Make private"
-> 
-> ![Private Docker Registry](private_docker.png)
+> Images on Docker Hub are public unless you make the repository private in its settings:
+>
+> ![Private Docker Registry](media/private_docker.png)
 
-#### Obtaining Registry Credentials (building and installing projects with `nova app install`)
+**Registry credentials.** By default the CLI takes the pull credentials from your local docker config and stores them in the cell, so the instance can pull from private registries. To keep your own credentials out of the instance:
 
-By default developing/installing apps with `nova app install path/to/project` will try to obtain registry credentials from your local docker config.
-This means, credentials might be leaked into a Nova instance/cell configuration.
-The credentials are needed by kubernetes in order to pull images from private registries. Even public registries might need some authentication in order to prevent being rate limited.
+* use scoped access tokens for `docker login`
+* put a pull-only username and token in the project's `.nova` file
+* create a Kubernetes secret in the cell yourself and reference it in `.nova` or with `--registry-secret <name>`
+* use the Wandelbots default pull secrets with `--omit-credentials` (`-o`)
 
-In order to prevent your credentials from being leaked you have multiple options:
+**Azure Container Registry:** after `az login` and `az acr login -n <registry>` (valid for 3 hours), the CLI turns the docker config's identity token into a pull token limited to that image and time.
 
-* use specific scoped access tokens when calling `docker login`
-* specify pull only username and token in `.nova` file in your project
-* install kubernetes secrets manually and reference them in `.nova` or provide the name via flag `nova app install yourapp -r custom-secret-name`
-* omit your credentials and use Wandelbots defaults `nova app install yourapp -o`
-
-##### Azure ACR
-
-The Azure Container Registry normally has the following login flow:
-
-```bash
-# login to azure (only needed once)
-az login
-
-# login to acr (needed every 3 hours)
-az acr login -n registryname
-```
-
-With that, docker configs will get an `IdentityToken` which is used by the Nova CLI to create a pull token,
-which is only valid for a specific registry/image for a limited period of time.
-
-### Login to Your Instance
-
-Once you have configured your CLI, authenticate with your Nova instance:
-
-```bash
-# Login to production environment (default)
-nova login
-
-# Login to a specific environment (e.g., dev)
-nova login -e dev
-```
-
-### Configure Nova CLI
-
-Configure your Nova CLI host. For physical instances, use the IP address (e.g., `192.168.1.100`). For virtual/cloud instances, use the URL (e.g., `my.instance.wandelbots.io`).
-
-for cloud instances:
-```bash
-# create instance if not exists yet
-nova instance create --name my-instance
-
-# listing instances
-nova instance list
-
-# selecting an instance
-nova instance select instanceid
-```
-
-manually setting the instance:
-```bash
-# For cloud instances
-nova config set host your_instance_id.instance.wandelbots.io
-
-# For physical instances  
-nova config set host 192.168.1.100
-```
-
-## Usage
-
-For an overview and description of all available commands have a look at the [CLI reference](https://wandelbotsgmbh.github.io/nova-cli/) (latest release), or run `nova <command> --help`.
-
-### Autocompletion on macOS zsh
-
-We observed some strange behavior on mac using zsh, that autocompletion will not work out of the box. 
-One needs to call the following and autocompletion will start to work.
-```bash
-# could be placed into ~/.zshrc
-source <(nova completion zsh)
-```
-[kubectl](https://github.com/kubernetes/kubernetes/blob/bf8c918e0be340637e63520eb3b58df493a230f9/staging/src/k8s.io/kubectl/pkg/cmd/completion/completion.go#L174-L175) seems to have a hack to solve this
-
-## App Store
-
-We have a catalog of applications ready for you to install! We publish pre-built applications in our [catalog](https://github.com/wandelbotsgmbh/catalog), which you can install directly to your Nova instance.
-
-```bash
-# list available entries
-$ nova catalog list
-jupyter
-rerun
-zivid-intel
-
-# show information about an entry
-$ nova catalog info jupyter
-Jupyter is a free, open-source, ...
-
-# install an entry to your instance
-$ nova catalog install jupyter
-```
-
-## App Templates
-
-Nova CLI provides several application templates to help you get started quickly with different types of applications.
-
-### Creating and Installing Apps
-
-**Creating Applications:**
-
-To create a new application, run:
-```bash
-nova app create my-app
-```
-
-> **💡 Tip:** If you're already logged in when you create an app, the `.env` file will automatically contain your authentication token and NOVA_API configuration, so you can start working with it immediately!
-
-**Available App Templates:**
-
-Nova CLI supports different application generators using the `-g` flag:
-
-- `novax_app` - NovaX application template (default)
-- `nextjs_app` - Next.js with TypeScript support
-
-**Example Usage:**
-
-```bash
-# Create a TypeScript/Next.js app
-nova app create 'my-typescript-app' -g "nextjs_app"
-
-# Create a NovaX app (default)
-nova app create 'my-novax-app' -g "novax_app"
-
-# or simply (uses novax_app as default)
-nova app create 'my-novax-app'
-```
-
-**Valid App Names:**
-Your app name must follow these rules:
-- Must start with a letter (a-z or A-Z)
-- Can contain letters, numbers, and hyphens (-)
-- Cannot be empty
-- Examples: `my-app`, `RobotController`, `sensor-data-processor`
-
-**Installing Your Application:**
-
-Once created and logged in, install your application with:
-```bash
-nova app install my-app
-```
-
-### NovaX Applications
-
-NovaX Applications are Python projects built with uv and FastAPI. It comes with default FastAPI routes but gives you full control over the FastAPI application. This is the fastest way to create custom applications with your robotics programs, powered by our Python SDK.
-
-The NovaX application comes with default GitHub Copilot prompts so you can develop a robotics application and deploy it to your Nova instance with the help of Copilot, without writing a single line of code.
-
-Learn more about NovaX Applications: https://github.com/wandelbotsgmbh/wandelbots-nova?tab=readme-ov-file#novax
-
-### TypeScript Application
-
-The TypeScript Application is a Next.js application that comes with ready-to-use React components specifically designed for robotics applications. This template provides a solid foundation for building modern web interfaces for your Nova applications.
-
-The Next.js template (`nextjs_app`) includes TypeScript configuration (`tsconfig.json`) and provides a full TypeScript development environment with Next.js framework support.
-
-Learn more about the React components: https://github.com/wandelbotsgmbh/wandelbots-js-react-components
-
-### Open Homescreen
-
-```bash
-$ nova homescreen
-```
-
-### Manage Your Cell
-
-```bash
-# save the current default cell to a file
-$ nova cell save
-
-# edit the cell YAML in your favorite editor
-$ nova cell edit
-
-# install a cell from a file
-$ nova cell install path/to/your/cell.yaml
-```
-
-## Installing without a registry (`--copy-image`)
+### Installing without a registry (`--copy-image`)
 
 For instances that can't pull from your registry (air-gapped, shop-floor networks), `--copy-image` skips the registry entirely: it builds the image, copies it to the instance over ssh/scp, and imports it straight into k3s' containerd.
 
@@ -322,19 +200,15 @@ For instances that can't pull from your registry (air-gapped, shop-floor network
 nova app install path/to/app --copy-image --ssh-user <user>
 ```
 
-* Uses the configured `host` as the ssh target; works with both docker and podman.
+* Uses the instance's host as the ssh target; works with both docker and podman.
 * Only the image layers the instance is missing are transferred, so repeated installs are fast.
-* First time per instance, add `--setup-ssh-key` to install your ssh key and a passwordless-sudo rule for k3s on the target. It prompts once for the ssh and sudo password (the sudo prompt is unavoidable — sudo is needed once to grant passwordless sudo); every install after that runs prompt-free:
-
-```bash
-nova app install path/to/app --copy-image --ssh-user <user> --setup-ssh-key
-```
+* First time per instance, add `--setup-ssh-key` to install your ssh key and a passwordless-sudo rule for k3s on the target. It prompts once for the ssh and sudo password (sudo is needed once to grant passwordless sudo); every install after that runs prompt-free.
 
 Other flags: `--ssh-port`, `--no-sudo` (root login, skips sudo entirely), `--import-command` (default `k3s ctr images import`), `--remote-dir` (default `/tmp`).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see [SECURITY.md](SECURITY.md).
+Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see [SECURITY.md](SECURITY.md).
 
 ## License
 
