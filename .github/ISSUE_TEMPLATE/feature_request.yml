@@ -1,0 +1,22 @@
+name: Feature request
+description: Suggest a new command, flag or improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The task or workflow, and what makes it hard today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help?
+      description: A command, flag or behaviour you have in mind (optional).
+      placeholder: nova …
+  - type: dropdown
+    id: who
+    attributes:
+      label: Who runs it?
+      options: [A person at a terminal, A coding agent (MCP / CLI), CI / scripts, All of them]

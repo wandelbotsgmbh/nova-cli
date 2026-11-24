@@ -1,0 +1,53 @@
+name: Bug report
+description: Something in the nova CLI doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please check that the bug still happens with the [latest release](https://github.com/wandelbotsgmbh/nova-cli/releases/latest).
+        Security issues: please report them privately, see [SECURITY.md](https://github.com/wandelbotsgmbh/nova-cli/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, what did you expect, and what happened instead?
+      placeholder: |
+        $ nova app install my-app
+        Error: …
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. nova app create my-app
+        2. nova app install my-app
+  - type: input
+    id: version
+    attributes:
+      label: nova version
+      description: Output of `nova version`
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Linux, Windows, Docker image]
+    validations:
+      required: true
+  - type: dropdown
+    id: instance
+    attributes:
+      label: Instance kind
+      description: What does `nova instance list` show for the target?
+      options: [cloud (portal), host (IPC / on-premise), k8srun, not instance related]
+  - type: textarea
+    id: debug
+    attributes:
+      label: Debug output
+      description: |
+        Re-run with `--debug` and paste the relevant part. Secrets are redacted on a best-effort basis only: **review the output before posting** (app env and kubeconfigs can carry secrets).
+      render: shell
