@@ -40,8 +40,9 @@ The CLI is built for agents as much as for people: data goes to stdout, messages
 
 ```bash
 # MCP server with curated tools for your instance: cells, controllers, apps, diagnosis, kinematics, …
-claude mcp add nova -- nova mcp --read-only
-claude mcp add nova -- nova mcp --toolsets default,planning,motion   # motion runs on virtual controllers only
+claude mcp add nova -- nova mcp
+claude mcp add nova -- nova mcp --toolsets all   # + planning, motion, programs, stores, maintenance
+                                                 # (motion runs on virtual controllers only)
 
 # author NovaFlow flows from the agent
 claude mcp add novaflow -- nova flow mcp
@@ -51,7 +52,7 @@ nova api search controllers
 nova api /api/v2/cells/{cell}/controllers
 ```
 
-`nova mcp` works with any MCP client (Cursor, VS Code, …): the command is `nova mcp`, over stdio. `--debug` shows HTTP traffic and external commands when something goes wrong. Design decisions behind this: [docs/decisions](docs/decisions/README.md).
+`nova mcp` works with any MCP client (Cursor, VS Code, …): the command is `nova mcp`, over stdio. `--read-only` drops every tool that changes anything. `--debug` shows HTTP traffic and external commands when something goes wrong. Design decisions behind this: [docs/decisions](docs/decisions/README.md).
 
 ## What else it does
 
