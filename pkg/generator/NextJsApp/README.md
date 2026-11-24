@@ -1,6 +1,6 @@
 # Next.js NOVA app template 
 
-This template provides the skeleton of a [Next.js](https://nextjs.org/) robot application built to run on [Wandelbots NOVA](https://docs.wandelbots.io/). 
+This template provides the skeleton of a [Next.js](https://nextjs.org/) robot application built to run on [Wandelbots NOVA](https://docs.wandelbots.io/).
 
 You can generate a new project with the [NOVA CLI](https://portal.wandelbots.io/en/download) by running `nova app create myapp -g "nextjs_app"`.
 
@@ -12,7 +12,7 @@ You can generate a new project with the [NOVA CLI](https://portal.wandelbots.io/
 
 ## Development setup
 
-First install [pnpm](https://pnpm.io/), which is used to manage the node version as well as the packages. 
+First install [pnpm](https://pnpm.io/), which is used to manage the node version as well as the packages.
 
 ## Installing dependencies
 
