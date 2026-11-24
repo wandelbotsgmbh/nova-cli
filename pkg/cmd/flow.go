@@ -132,9 +132,16 @@ var flowUninstallCmd = &cobra.Command{
 		if !confirm(cmd, fmt.Sprintf("Remove NovaFlow from cell %q? Its flows stay on the cell.", c.Cell()), false) {
 			return errors.New("aborted, use --yes to remove it without asking")
 		}
+		var removed []string
 		if viaInstaller {
-			if _, err := c.InstallerUninstall(cmd.Context()); err != nil {
+			results, err := c.InstallerUninstall(cmd.Context())
+			if err != nil {
 				return err
+			}
+			for _, r := range results {
+				if r.App != novaflow.InstallerApp { // the installer app stays
+					removed = append(removed, r.App)
+				}
 			}
 		} else if _, err := c.SetNovaflow(cmd.Context(), false, ""); err != nil {
 			return err
@@ -147,6 +154,11 @@ var flowUninstallCmd = &cobra.Command{
 		defer cancel()
 		if viaInstaller {
 			err = c.WaitForRemoval(ctx, 0, waitProgress(cmd))
+			if err == nil {
+				// the cell still lists apps that are being deleted; an install now
+				// would try to update them
+				err = c.WaitForAppsRemoved(ctx, removed, 0, waitProgress(cmd))
+			}
 		} else {
 			err = c.WaitForDeployment(ctx, novaflow.WaitOptions{Enabled: false, Progress: waitProgress(cmd)})
 		}

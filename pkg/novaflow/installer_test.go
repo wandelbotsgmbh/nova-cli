@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeInstaller answers like the novaflow-installer app; the apps it deploys
@@ -17,6 +18,12 @@ type fakeInstaller struct {
 	polls      int
 	readyAfter int
 	failApp    string
+	// notFound install-all calls fail with "not found" first (apps still being deleted)
+	notFound int
+	installs int
+	// lingering app-list polls still list the removed apps
+	lingering int
+	listPolls int
 }
 
 func (f *fakeInstaller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +36,14 @@ func (f *fakeInstaller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(map[string]string{"status": "ok"})
 	case p == "/api/status":
 		reply(map[string]any{"installed_version": nullable(f.installed), "recommended_version": "2026.10.81"})
+	case p == "/api/install-all" && r.Method == http.MethodPost && f.installs < f.notFound:
+		f.installs++
+		reply([]map[string]any{
+			{"app": "forest", "success": true, "message": "ok"},
+			{"app": "io-service", "success": false, "message": `Failed to updating io-service: 404 - {"message":"app 'io-service' not found"}`},
+		})
 	case p == "/api/install-all" && r.Method == http.MethodPost:
+		f.installs++
 		var body struct{ Version string }
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.installed = body.Version
@@ -47,6 +61,13 @@ func (f *fakeInstaller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case p == "/api/uninstall-all" && r.Method == http.MethodDelete:
 		f.installed = ""
 		reply([]map[string]any{{"app": "forest", "success": true, "message": "ok"}})
+	case r.URL.Path == "/api/v2/cells/cell/apps":
+		f.listPolls++
+		if f.listPolls <= f.lingering {
+			reply([]string{"novaflow-installer", "forest"})
+			return
+		}
+		reply([]string{"novaflow-installer"})
 	case strings.HasPrefix(r.URL.Path, "/cell/forest/trees") && f.installed != "" && f.polls >= f.readyAfter:
 		reply(map[string]any{"items": []any{}, "total": 0, "has_more": false})
 	default:
@@ -105,5 +126,45 @@ func TestInstallerUninstallWaitsForRemoval(t *testing.T) {
 	}
 	if err := c.WaitForRemoval(context.Background(), 1, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestInstallerInstallRetriesAppsNotFound(t *testing.T) {
+	old := installerRetryDelay
+	installerRetryDelay = time.Millisecond
+	t.Cleanup(func() { installerRetryDelay = old })
+
+	fake := &fakeInstaller{notFound: 2}
+	c := newTestClient(t, fake)
+	if _, err := c.InstallerInstall(context.Background(), "2026.11.66"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.installs != 3 || fake.installed != "2026.11.66" {
+		t.Errorf("%d install calls, installed %q; want 3 and the version", fake.installs, fake.installed)
+	}
+
+	// other failures and persistent "not found" end with the error
+	fake = &fakeInstaller{failApp: "controlplane"}
+	c = newTestClient(t, fake)
+	if _, err := c.InstallerInstall(context.Background(), "v"); err == nil || fake.installs != 1 {
+		t.Errorf("other failure: err %v after %d calls, want an error after 1", err, fake.installs)
+	}
+	fake = &fakeInstaller{notFound: 100}
+	c = newTestClient(t, fake)
+	if _, err := c.InstallerInstall(context.Background(), "v"); err == nil || !strings.Contains(err.Error(), "not found") || fake.installs != installerAttempts {
+		t.Errorf("persistent not found: err %v after %d calls", err, fake.installs)
+	}
+}
+
+func TestWaitForAppsRemoved(t *testing.T) {
+	fake := &fakeInstaller{lingering: 2}
+	c := newTestClient(t, fake)
+	var states []string
+	err := c.WaitForAppsRemoved(context.Background(), []string{"forest", "controlplane"}, time.Millisecond, func(s string) { states = append(states, s) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.listPolls != 3 || strings.Join(states, "|") != "removing forest" {
+		t.Errorf("%d polls, states %q", fake.listPolls, states)
 	}
 }

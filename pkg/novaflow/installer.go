@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -57,12 +58,71 @@ func (c *Client) InstallerStatus(ctx context.Context) (*InstallerStatus, error) 
 
 // InstallerInstall installs or updates all NovaFlow apps with version.
 func (c *Client) InstallerInstall(ctx context.Context, version string) ([]InstallerResult, error) {
-	var results []InstallerResult
 	body := map[string]string{"version": version}
-	if _, err := c.do(ctx, request{method: http.MethodPost, path: c.installerPath("/api/install-all"), jsonBody: body}, &results); err != nil {
-		return nil, err
+	for attempt := 1; ; attempt++ {
+		var results []InstallerResult
+		if _, err := c.do(ctx, request{method: http.MethodPost, path: c.installerPath("/api/install-all"), jsonBody: body}, &results); err != nil {
+			return nil, err
+		}
+		// Right after an uninstall the installer can still see apps that are being
+		// deleted and try to update them; the update then fails with "not found".
+		// Sent again, it creates them.
+		if attempt >= installerAttempts || !onlyNotFound(results) {
+			return results, failedResults("installing", results)
+		}
+		select {
+		case <-ctx.Done():
+			return results, failedResults("installing", results)
+		case <-time.After(installerRetryDelay):
+		}
 	}
-	return results, failedResults("installing", results)
+}
+
+// installerAttempts and installerRetryDelay bound the retries of InstallerInstall.
+var (
+	installerAttempts   = 4
+	installerRetryDelay = 10 * time.Second
+)
+
+// onlyNotFound reports whether some apps failed and all of them because they were
+// not found.
+func onlyNotFound(results []InstallerResult) bool {
+	failed := false
+	for _, r := range results {
+		if r.Success {
+			continue
+		}
+		if !strings.Contains(r.Message, "404") || !strings.Contains(r.Message, "not found") {
+			return false
+		}
+		failed = true
+	}
+	return failed
+}
+
+// WaitForAppsRemoved polls the cell's app list until none of apps is listed. ctx
+// bounds the wait.
+func (c *Client) WaitForAppsRemoved(ctx context.Context, apps []string, interval time.Duration, progress func(string)) error {
+	return poll(ctx, interval, progress, func() (bool, string, error) {
+		var listed []string
+		if _, err := c.do(ctx, request{method: http.MethodGet, path: "/api/v2/cells/" + url.PathEscape(c.cell) + "/apps"}, &listed); err != nil {
+			if errors.Is(err, ErrUnauthorized) {
+				return false, "", err
+			}
+			// a passing gateway error while the apps go away: ask again
+			return false, "being removed", nil
+		}
+		var left []string
+		for _, a := range apps {
+			if slices.Contains(listed, a) {
+				left = append(left, a)
+			}
+		}
+		if len(left) == 0 {
+			return true, "", nil
+		}
+		return false, "removing " + strings.Join(left, ", "), nil
+	})
 }
 
 // InstallerUninstall removes all NovaFlow apps; the installer app stays.
