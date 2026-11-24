@@ -1,0 +1,106 @@
+name: Templates
+
+# Generates an app from every template with the CLI of this commit and runs the
+# checks a developer of that app would run, then builds its image like
+# 'nova app install' does. The e2e test only covers the default (python) app,
+# and the templates' dependencies move on their own (version ranges, no Python
+# lockfile), so this also runs weekly.
+on:
+  pull_request:
+    paths:
+      - pkg/generator/**
+      - .github/workflows/templates.yml
+  push:
+    branches: [main]
+    paths:
+      - pkg/generator/**
+      - .github/workflows/templates.yml
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: templates-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  template:
+    name: ${{ matrix.generator }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        generator: [nextjs_app, python_app, golang_app, rust_app]
+    env:
+      APP: ${{ github.workspace }}/_generated/app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Generate the app
+        run: |
+          go build -o "$RUNNER_TEMP/nova" .
+          mkdir -p _generated && cd _generated
+          # a throwaway HOME: no instance configured, the env file gets placeholders
+          HOME=$(mktemp -d) "$RUNNER_TEMP/nova" app create app -g ${{ matrix.generator }}
+          ls -la app
+
+      # Next.js: pnpm (the template's Dockerfile version) fetches the Node
+      # version from pnpm-workspace.yaml itself.
+      - if: matrix.generator == 'nextjs_app'
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.24.0
+      - if: matrix.generator == 'nextjs_app'
+        working-directory: ${{ env.APP }}
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm tsc
+          pnpm exec knip
+          pnpm build
+
+      - if: matrix.generator == 'python_app'
+        uses: astral-sh/setup-uv@v10
+      - if: matrix.generator == 'python_app'
+        working-directory: ${{ env.APP }}
+        run: |
+          uv sync
+          uv run ruff check
+          uv run ruff format --check
+
+      - if: matrix.generator == 'golang_app'
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: _generated/app/go.mod
+      - if: matrix.generator == 'golang_app'
+        working-directory: ${{ env.APP }}
+        run: |
+          go build ./...
+          go vet ./...
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "not gofmt-formatted: $unformatted"; exit 1; fi
+
+      # the toolchain of the template's Dockerfile
+      - if: matrix.generator == 'rust_app'
+        working-directory: ${{ env.APP }}
+        run: |
+          toolchain=$(sed -n 's#^FROM .*rust:\([0-9.]*\).*#\1#p' Dockerfile | head -1)
+          rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt
+          rustup override set "$toolchain"
+          cargo build --locked
+          cargo clippy --locked -- -D warnings
+          cargo fmt --check
+
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ env.APP }}
+          push: false
+          cache-from: type=gha,scope=template-${{ matrix.generator }}
+          cache-to: type=gha,mode=max,scope=template-${{ matrix.generator }}
