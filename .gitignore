@@ -10,3 +10,4 @@ dist/
 .next-version
 _site/
 _docs/
+_generated/

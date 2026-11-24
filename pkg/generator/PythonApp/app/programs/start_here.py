@@ -79,7 +79,8 @@ async def start(ctx: nova.ProgramContext):
             target_pose @ Pose([offset, 0, 0, 0, 0, 0])
         ),  # Move 200mm in target pose's local x-axis
         joint_ptp(home_joints),
-        linear(target_pose @ Pose([offset, offset, 0, 0, 0, 0])),  # Move 200mm in local x and y axes
+        # Move 200mm in local x and y axes
+        linear(target_pose @ Pose([offset, offset, 0, 0, 0, 0])),
         joint_ptp(home_joints, settings=slow),
         cartesian_ptp(target_pose @ Pose((0, offset, 0, 0, 0, 0))),
         joint_ptp(home_joints),
