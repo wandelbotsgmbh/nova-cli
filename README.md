@@ -13,10 +13,6 @@ From the terminal to the cell:
 
 ![](asciinema/demo.svg)
 
-...and the app shows up right on the instance's homescreen:
-
-![](asciinema/homescreen.png)
-
 ## Quickstart
 
 You need a Wandelbots account on [portal.wandelbots.io](https://portal.wandelbots.io) for a cloud instance, or a NOVA instance on your network.
@@ -173,6 +169,10 @@ nova --instance lab cell save                  # one command against another ins
 nova app create my-app -g python_app           # default; also nextjs_app, golang_app, rust_app
 nova app install my-app                        # build the image, push it, deploy it to the cell
 ```
+
+...and the app shows up on the instance's homescreen (`nova homescreen`):
+
+<img src="media/homescreen.webp" alt="NOVA homescreen with the installed my-example-app" width="600">
 
 The project gets a gitignored env file with the instance, cell and access token, so it runs locally against the instance right away; `nova app update-env` refreshes the token. App names start with a letter and contain only letters, digits and hyphens.
 
