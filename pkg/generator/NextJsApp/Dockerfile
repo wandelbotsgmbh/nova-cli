@@ -1,7 +1,8 @@
-FROM node:24.12.0-alpine AS base
+FROM node:26.13.1-alpine AS base
 # Used in entrypoint base path injection for startup speed (~500x faster)
 RUN apk add ripgrep
-RUN corepack enable && corepack prepare pnpm@10.24.0 --activate
+# Node 25+ no longer ships corepack
+RUN npm install -g pnpm@10.24.0
 WORKDIR /app
 
 ENV NODE_ENV=production \

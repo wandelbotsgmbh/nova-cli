@@ -127,7 +127,7 @@ jobs:
           go-version-file: go.mod
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc
       - run: hack/docsite/build.sh "ci-${GITHUB_SHA::7}"
       - uses: actions/upload-artifact@v7
         with:
