@@ -197,7 +197,10 @@ func WaitForAllRunning(host string, started time.Time, timeout time.Duration, in
 	var lastError error
 	for {
 		allRunning := true
-		if s, err := GetSystemStatus(host); err == nil {
+		if s, err := GetSystemStatus(host); err == nil && len(s) == 0 {
+			// the service manager answers before it lists any service
+			lastError = errors.New("no services reported yet")
+		} else if err == nil {
 			for _, service := range s {
 				if !service.Running {
 					allRunning = false
@@ -213,9 +216,9 @@ func WaitForAllRunning(host string, started time.Time, timeout time.Duration, in
 
 		if time.Since(started) > timeout {
 			if lastError != nil {
-				return fmt.Errorf("timeout reached while waiting for nova version of the instance. Last seen error %w", lastError)
+				return fmt.Errorf("timeout reached while waiting for the NOVA services to run, last error: %w", lastError)
 			}
-			return errors.New("timeout reached while waiting for nova version of the instance")
+			return errors.New("timeout reached while waiting for the NOVA services to run")
 		}
 
 		time.Sleep(interval)

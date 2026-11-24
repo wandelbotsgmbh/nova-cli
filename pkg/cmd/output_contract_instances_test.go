@@ -193,7 +193,10 @@ func TestK8sRunJSON(t *testing.T) {
 		t.Fatalf("error: %v\nstderr: %s", err, stderr)
 	}
 	want := `{"name":"sim-a","kind":"k8srun","host":"10.0.0.1","cell":"cell","id":"id-1","kubeconfig":"` +
-		filepath.Join(home, ".nova", "instances", "sim-a", "kubeconfig") + `","selected":false,"local":true}`
+		filepath.Join(home, ".nova", "instances", "sim-a", "kubeconfig") + `","selected":false,"local":true,"expires":"` + created.Expires + `"}`
+	if exp, err := time.Parse(time.RFC3339, created.Expires); err != nil || time.Until(exp) < 11*time.Hour {
+		t.Errorf("expires = %q, want about 12 h from now", created.Expires)
+	}
 	if c := compactJSON(t, stdout); c != want {
 		t.Errorf("stdout = %s\nwant      %s", c, want)
 	}
