@@ -264,14 +264,17 @@ func TestK8sRunCreateWaitsForNOVA(t *testing.T) {
 	withConfig(t, "")
 	fake := newFakeK8sRunService(t)
 
-	_, errOut, err := runWithConfig(t, "k8srun", "create", "--name", "sim-a")
+	out, errOut, err := runWithConfig(t, "k8srun", "create", "--name", "sim-a")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if out != "" {
+		t.Errorf("text mode must keep stdout empty, got %q", out)
 	}
 	if strings.Join(fake.waited, ",") != "10.0.0.1" || fake.timeout != k8srunDefaultWait*time.Second {
 		t.Errorf("waited for %v with timeout %s, want 10.0.0.1 with the default", fake.waited, fake.timeout)
 	}
-	for _, want := range []string{"keep-alive sim-a", "takes a few minutes", "--no-wait", "NOVA is running"} {
+	for _, want := range []string{"keep-alive sim-a -- <command>", "extend sim-a", "takes a few minutes", "--no-wait", "NOVA is running"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, errOut)
 		}
@@ -301,8 +304,8 @@ func TestK8sRunCreateNoWait(t *testing.T) {
 	if created.Kubeconfig == "" {
 		t.Error("--no-wait must still return the kubeconfig path")
 	}
-	if exp, err := time.Parse(time.RFC3339, created.Expires); err != nil || time.Until(exp) < 11*time.Hour {
-		t.Errorf("expires = %q, want about 12 h from now", created.Expires)
+	if exp, err := time.Parse(time.RFC3339, created.ExpiresAt); err != nil || time.Until(exp) < 11*time.Hour {
+		t.Errorf("expires = %q, want about 12 h from now", created.ExpiresAt)
 	}
 	if !strings.Contains(errOut, "still starting") || !strings.Contains(errOut, "keep-alive sim-a") {
 		t.Errorf("stderr lacks the startup and keep-alive notes:\n%s", errOut)

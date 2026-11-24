@@ -403,7 +403,7 @@ $ nova instance create --name my-instance --no-select
 			fmt.Fprintln(cmd.OutOrStdout(), "InstanceId:", instance.InstanceId, "\nHost:", instance.Host)
 		}
 		if err == nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "The instance expires after a while; keep it alive while you work: nova instance keep-alive %s\n", entry.Name)
+			fmt.Fprint(cmd.ErrOrStderr(), keepAliveHint(entry.Name))
 		}
 
 		if !createNoWaitInstance {

@@ -114,7 +114,9 @@ create waits until all NOVA services run (at most --timeout). With --no-wait it 
 once: the kubeconfig already works, e.g. for helm or skaffold, and NOVA comes up meanwhile.
 
 The cluster expires after 12 hours. Keep it alive while you or an agent work with it:
-'nova instance keep-alive <name>' (see 'nova instance keep-alive --help').`,
+'nova instance keep-alive <name> -- <command>' keeps it alive while the command runs;
+without a command, keep-alive runs until stopped (start it in the background).
+'nova instance extend <name>' extends it once.`,
 		Example: `# several clusters side by side
 $ nova k8srun create --name sim-a
 $ nova k8srun create --name sim-b
@@ -195,11 +197,12 @@ $ nova k8srun create --name dev --no-wait`,
 			expires := time.Now().Add(k8srunMaxMinutes * time.Minute)
 			stderr := cmd.ErrOrStderr()
 			fmt.Fprintf(stderr, "created cluster %q:\n ID: %s\n IP %s\n kubeconfig: %s\n", name, instance.Id, instance.Ip, kubeconfig)
-			fmt.Fprintf(stderr, " expires: %s (12 h); keep it alive while you work: nova instance keep-alive %s\n", expires.Local().Format(time.DateTime), name)
+			fmt.Fprintf(stderr, " expires: %s (12 h)\n", expires.Local().Format(time.DateTime))
+			fmt.Fprint(stderr, keepAliveHint(name))
 
 			// printed before waiting, like 'instance create': the cluster exists even if waiting fails
 			if *createOutput == outputJSON {
-				created := k8srunCreatedJSON{instanceJSON: newInstanceJSON(entry, r.Current), Expires: expires.UTC().Format(time.RFC3339)}
+				created := k8srunCreatedJSON{instanceJSON: newInstanceJSON(entry, r.Current), ExpiresAt: expires.UTC().Format(time.RFC3339)}
 				if k8srunName == "" {
 					created.KubeconfigCopy = absPath("kubeconfig")
 				}

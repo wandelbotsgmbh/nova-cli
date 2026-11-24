@@ -71,6 +71,12 @@ $ nova instance extend my-instance`,
 	},
 }
 
+// keepAliveHint tells how to keep a new instance from expiring. keep-alive without a
+// command never returns, so the hint names forms an agent can run without blocking.
+func keepAliveHint(name string) string {
+	return fmt.Sprintf("keep it alive while you work: nova instance keep-alive %[1]s -- <command> (or in the background: nova instance keep-alive %[1]s &); extend once: nova instance extend %[1]s\n", name)
+}
+
 var keepAliveInstanceCmd = &cobra.Command{
 	Use:               "keep-alive [name] [-- command [args...]]",
 	Args:              keepAliveArgs,
