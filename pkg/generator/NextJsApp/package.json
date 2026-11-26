@@ -17,7 +17,7 @@
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/material": "^7.3.6",
-    "@mui/material-nextjs": "^9.5.0",
+    "@mui/material-nextjs": "^9.6.0",
     "@tanstack/react-query": "^5.108.2",
     "@wandelbots/mui": "^2.0.2",
     "@wandelbots/nova-js": "4.13.0",
