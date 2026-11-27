@@ -2,7 +2,7 @@
 
 ![NOVA CLI: agentic physical AI by Wandelbots](media/hero.webp)
 
-[![Release](https://img.shields.io/github/v/release/wandelbotsgmbh/nova-cli?sort=semver&display_name=tag)](https://github.com/wandelbotsgmbh/nova-cli/releases/latest)
+[![Release](https://img.shields.io/github/v/release/wandelbotsgmbh/nova-cli?display_name=tag)](https://github.com/wandelbotsgmbh/nova-cli/releases/latest)
 [![CI](https://github.com/wandelbotsgmbh/nova-cli/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wandelbotsgmbh/nova-cli/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/wandelbotsgmbh/nova-cli)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-CLI%20reference-7057ff)](https://wandelbotsgmbh.github.io/nova-cli/)
